@@ -1,25 +1,25 @@
-# 凭证管理
+# Credential management
 
 ## GitHub
 
-GitHub 操作优先复用 GitHub CLI 已登录的账号。查看登录状态。
+Reuse the account already signed in through GitHub CLI. Check authentication status with this command.
 
 ```sh
 gh auth status
 ```
 
-新机器尚未登录时，运行 `gh auth login`。让 GitHub CLI 和系统钥匙串管理认证，不把 token 写进仓库、Git remote URL 或 mod 源码。
+Run `gh auth login` on a machine that is not signed in yet. Let GitHub CLI and the system keychain manage authentication. Keep tokens out of the repository, Git remote URLs and mod source files.
 
-## Mod 凭证
+## Mod credentials
 
-当前没有 mod，也没有需要配置的业务密钥。后续接入外部服务时，在对应 mod 的 `RECIPE.md` 中写清凭证名称、最小权限和读取方式。优先复用服务 CLI 或系统钥匙串中的认证。
+There are no mods or service credentials to configure yet. When adding an external service, document credential names, minimum permissions and how the mod reads them in its `RECIPE.md`. Prefer authentication managed by the service's CLI or the system keychain.
 
-需要本地配置文件时，提交只含空值或占位值的示例。实际值放在 Git 忽略的文件中。`.env` 的加载方式由使用它的工具明确实现，不假定 Herdr 会自动加载。
+For local configuration, commit examples containing only empty values or placeholders. Store actual values in files ignored by Git. Tools that use `.env` must load it explicitly. Do not assume Herdr loads it automatically.
 
-不要把凭证存入 Herdr 的 `shared.json`、`data/` 或其他普通运行状态文件。提交日志、截图和示例响应前，移除其中的敏感信息。
+Keep credentials out of Herdr's `shared.json`, `data/` and other runtime state files. Remove sensitive information from logs, screenshots and example responses before committing them.
 
-## 本地配置
+## Local configuration
 
-[.env.example](../.env.example)只预留开发环境路径，不包含密钥。需要覆盖默认路径时，可以复制为 `.env`，再由使用它的本地工具显式加载。
+[.env.example](../.env.example) contains only a development path placeholder. It has no secrets. To override the default path, copy it to `.env` and load it explicitly in the local tool that uses it.
 
-`.gitignore` 已排除 `.env`、本地配置、凭证目录和常见私钥文件。忽略规则不会移除已经被 Git 跟踪的文件，提交前仍需检查暂存内容。
+`.gitignore` excludes `.env`, local configuration, credential directories and common private key files. Ignore rules do not remove files already tracked by Git. Review staged changes before committing.

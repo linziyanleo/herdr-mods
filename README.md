@@ -1,17 +1,17 @@
 # herdr-mods
 
-为 [Herdr](https://github.com/herdrdev/herdr-app) 编写的 mods 汇总仓库。
+A collection of mods for [Herdr](https://github.com/herdrdev/herdr-app).
 
-每个 mod 放在独立的根目录中，包含说明、预览图和安装所需文件。目录组织参考 [obrunogonzaga/herdr-mods](https://github.com/obrunogonzaga/herdr-mods)。
+Each mod has its own top-level directory with documentation, a preview image and installation files. The directory structure follows [obrunogonzaga/herdr-mods](https://github.com/obrunogonzaga/herdr-mods).
 
-## 当前状态
+## Status
 
-仓库已初始化文档和凭证配置约定，暂无可安装的 mod。后续开发时，在这里添加各 mod 的入口和用途。
+The repository currently contains documentation and credential configuration guidelines. No mods are available to install yet. Add each mod's purpose and links here when it is ready.
 
-## 开发
+## Development
 
-- [开发约定](CONTRIBUTING.md)说明目录结构、本机 API 资料和验证方式。
-- [凭证管理](docs/credentials.md)说明 GitHub 认证和本地配置的存放方式。
-- [AGENTS.md](AGENTS.md)供在仓库中工作的 coding agent 读取。
+- [Development guide](CONTRIBUTING.md) covers directory structure, local API references and verification.
+- [Credential management](docs/credentials.md) covers GitHub authentication and local configuration storage.
+- [AGENTS.md](AGENTS.md) provides instructions for coding agents working in this repository.
 
-本机 Herdr 文档位于 `~/.config/herdr-app/AGENTS.md`。开发时以已安装版本的文档和类型定义为准。
+Local Herdr documentation is at `~/.config/herdr-app/AGENTS.md`. Use the documentation and type definitions provided by the installed version.
