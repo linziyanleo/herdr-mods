@@ -2,6 +2,13 @@
 
 This repository is for multiple Herdr mods. Keep each mod in a separate top-level directory, as described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Open-source contributions
+
+- Write every commit subject and body in English. Use `type(scope): description`, for example `docs(repo): clarify contribution requirements`.
+- Write public issue reports, PR titles, and PR descriptions in English.
+- Follow [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, PR evidence, reproducible setup, and third-party attribution requirements.
+- Do not choose or change the repository's license without explicit maintainer approval.
+
 ## Before development
 
 - Read `~/.config/herdr-app/AGENTS.md`, then consult `herdr.d.ts` and `gpui-kit.d.ts` in the same directory as needed. If `HERDR_APP_HOME` is set, read the files in that directory instead.
