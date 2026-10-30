@@ -303,7 +303,7 @@ Run each spike in a throwaway mod or with `herdr-app do`. Record the results in 
 - S3: a terminal opened through `link-a -> a` reported the physical `a` path; `pwd -P` and `git rev-parse --show-toplevel` agreed. Keep physical root paths in each copy's derived data, preserving the declared paths in shared state and config files.
 - S4: two concurrent watch loops in one throwaway mod each received two file-change notifications. Use one loop per root plus the config-directory loop; retain the upstream 10-second refresh.
 
-Implementation and local loading are authorized by the user request and Installation below. No source-repository commit, push, or PR is authorized. The user separately approved one disposable-repository acceptance commit. No extra test suite is added.
+Implementation and local loading were authorized for the initial acceptance stage. The user separately approved one disposable-repository acceptance commit, then authorized source commits and public distribution as recorded below. No extra test suite is added.
 
 ### Implementation evidence (2026-10-31)
 
@@ -321,6 +321,12 @@ The user subsequently authorized source commits and pushes, a public GitHub repo
 The recipe follows the installed guide's six-section brief and includes the file format, shared-state shapes, runtime roles, commands, inherited behavior, constraints, installation and observable checks without relying on this plan. The package has no `layouts/` directory. The public screenshot keeps its original 3456 × 2168 resolution; only five regions containing paths, a workspace name and personal status data changed. Pixel comparison confirmed every pixel outside those regions is identical to the captured window. A built-in image edit supplied the mosaic texture; only the mosaic regions were copied onto the original screenshot. Prompt: privacy redaction only; mosaic directory paths, workspace name and personal status; preserve every other part of the real interface.
 
 The official catalog says repository/topic discovery occurs within an hour. Community images are separately screened with a minimum 24-hour wait. GitHub publication, catalog discovery and image approval must be reported separately.
+
+- Source commit `b13cac957629771cfe1fdbdc5c1f02f5f925d7e5` was fast-forwarded to `main`, pushed to `origin/main` and read back from the remote ref.
+- [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) is public with the `herdr-mod` topic. GitHub topic search finds it. The package at `multi-root/` contains `mods/`, `keys.json`, `RECIPE.md`, `preview.png` and upstream notices, without `layouts/`.
+- Anonymous requests return HTTP 200 for the recipe and screenshot. The public screenshot SHA-256 is `dfa05cbfdae48fa90f774b4debe96cc77a3996043e480435e32b270c30827f38`.
+- The [official catalog index](https://assets.herdr.dev/mods/index.json), generated at `2026-10-30T19:00:16.466Z`, contains `linziyanleo/herdr-mods`, path `multi-root`, title `Multi-Roots` and the recipe's introductory paragraph as its description. It identifies all three runtime mods, `hasKeys: true` and `hasPreview: true`.
+- The catalog entry does not yet have an approved `previewUrl`. The real, mosaiced image is public in GitHub; its display in the [Herdr catalog](https://herdr.dev/mods/) remains pending the site's image screening, which requires at least 24 hours. No image-approval claim is made.
 
 Run `herdr-app check <installed mod folder>` after every change. For UI changes, run `herdr-app status` (no mod errors, no `layout.error`) and inspect a `herdr-app shot` screenshot.
 
