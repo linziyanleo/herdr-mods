@@ -12,7 +12,7 @@ Run `gh auth login` on a machine that is not signed in yet. Let GitHub CLI and t
 
 ## Mod credentials
 
-There are no mods or service credentials to configure yet. When adding an external service, document credential names, minimum permissions and how the mod reads them in its `RECIPE.md`. Prefer authentication managed by the service's CLI or the system keychain.
+Multi-Roots needs no service credentials. Started agents use their existing CLI authentication. When adding an external service, document credential names, minimum permissions and how the mod reads them in its `RECIPE.md`. Prefer authentication managed by the service's CLI or the system keychain.
 
 For local configuration, commit examples containing only empty values or placeholders. Store actual values in files ignored by Git. Tools that use `.env` must load it explicitly. Do not assume Herdr loads it automatically.
 

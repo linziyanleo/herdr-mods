@@ -4,9 +4,13 @@ A collection of mods for [Herdr](https://github.com/herdrdev/herdr-app).
 
 Each mod has its own top-level directory with documentation, a preview image and installation files. The directory structure follows [obrunogonzaga/herdr-mods](https://github.com/obrunogonzaga/herdr-mods).
 
-## Status
+## Mods
 
-The repository currently contains documentation and credential configuration guidelines. No mods are available to install yet. Add each mod's purpose and links here when it is ready.
+| Mod | Purpose |
+| --- | --- |
+| [Multi-Roots](multi-root/RECIPE.md) | Browse several roots in one space, launch terminals and agents in a chosen root, switch Git repositories, and save or reopen workspaces. |
+
+![Multi-Roots running in Herdr, with personal information mosaiced](multi-root/preview.png)
 
 ## Development
 
