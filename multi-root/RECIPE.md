@@ -108,7 +108,7 @@ The baseline is Herdr 0.1.9 with Git and POSIX `sh`. Local workspace operations 
 4. In a personal layout, set block `files` to mod `multi-root-files` and block `changes` to mod `multi-root-changes`, keeping both block ids. For a shipped layout, first use `layout.clone`, then edit the clone.
 5. Run native checks, inspect `herdr-app status` and any keys/layout errors, then exercise the actual window. To undo, restore the original two mod references and remove only the added shortcut; workspace files remain ordinary JSON.
 
-Publish the complete folder in a public repository with the `herdr-mod` topic. The [Herdr catalog](https://herdr.dev/mods/) indexes community entries within an hour; community preview images are screened and wait at least 24 hours.
+Publish the complete folder in a public repository with the `herdr-mod` topic. The [Herdr catalog](https://herdr.dev/mods/) indexes community entries within an hour; community preview images are screened before they appear. Updated images become visible after the catalog refreshes its preview URL.
 
 ### Attribution
 
