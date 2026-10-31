@@ -4,7 +4,7 @@ Keep several folders in one Herdr space. Browse every root together, choose wher
 
 ![Multi-Roots](preview.png)
 
-The preview is captured from the running mod. Directory paths, the workspace name and personal status information are mosaiced; the interface outside those regions is unchanged.
+The preview is captured from the running mod. Directory paths, the workspace name and personal status information are mosaiced; the interface outside those regions is unchanged. The PNG preserves the capture's sRGB color metadata.
 
 ## What you see
 
