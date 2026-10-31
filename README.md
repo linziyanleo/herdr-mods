@@ -8,7 +8,7 @@ Each mod has its own top-level directory with documentation, a preview image and
 
 | Mod | Purpose |
 | --- | --- |
-| [Multi-Roots](multi-root/RECIPE.md) | Browse several roots in one space, launch terminals and agents in a chosen root, switch Git repositories, and save or reopen workspaces. |
+| [Multi-Roots](multi-root/RECIPE.md) | Create multi-folder workspaces from the Spaces sidebar, browse roots together, choose terminal and agent roots, switch Git repositories, and save or reopen workspaces. |
 
 ![Multi-Roots running in Herdr, with personal information mosaiced](multi-root/preview.png)
 
