@@ -1,6 +1,6 @@
 # Multi-Roots implementation plan
 
-Status: implemented and installed locally on 2026-10-31; acceptance recorded below. Changes CLI checking is limited by a reproduced upstream GPUI panic. Herdr baseline: 0.1.9 on macOS.
+Status: original package implemented and installed locally on 2026-10-31. The sidebar addition is implemented and verified in isolation, with source commit `ae9a10642a58fb622329fc0b7a3cc0c1d4003c09` and live installation pending. All four native checks pass on Herdr 0.1.10; the original 0.1.9 Changes checker panic remains historical evidence below.
 
 This plan is the handoff for the implementer. It records the approved decisions, the contracts between the runtime mods, and the acceptance checks. Write `multi-root/RECIPE.md` from the real files after implementation, as [CONTRIBUTING.md](../../CONTRIBUTING.md) requires; this plan does not replace it.
 
@@ -22,7 +22,7 @@ A Herdr space can hold several root folders, declared in a config file:
 | Folder `name` | Display name only. Without it, show the folder's base name. |
 | Shortcut | Keep `cmd-t` (`tab.new`). Add `cmd-shift-t` to open the Multi-Root menu. |
 | Graph | Out of scope. `git-graph` belongs to another author and is not modified. |
-| Layout | No layout ships. The person's personal layout swaps two panel mods (see [Installation](#installation)). |
+| Layout | No layout ships. The person's personal layout swaps the Files, Changes and Spaces mods (see [Installation](#installation)). |
 | Panels | Replacement panels reuse every feature of Herdr's `files` and `changes`. Outside a workspace they behave exactly like the originals. |
 | Name | Public display name "Multi-Roots", requested for publication on 2026-10-31. Directory, runtime mods and shared keys keep `multi-root`. |
 
@@ -57,6 +57,7 @@ multi-root/
       *.js
     multi-root-files/             clone of files, multi-root tree
     multi-root-changes/           clone of changes, repository switcher
+    multi-root-spaces/            clone of spaces, separate workspace creation button
 docs/plans/multi-root.md          this plan
 ```
 
@@ -117,7 +118,7 @@ Saving:
 
 ## Shared state contract
 
-Only these keys are written. Compare values before calling `setShared`, because every call re-renders every mod.
+Workspace data uses these keys. Compare values before calling `setShared`, because every call re-renders every mod. The Spaces clone additionally preserves upstream `space.colors` and its per-copy `machines.folded` local storage.
 
 ```ts
 // shared("multi-root.spaces")
@@ -358,12 +359,13 @@ Run `herdr-app check <installed mod folder>` after every change. For UI changes,
 
 Installing to this machine is approved for the replacement-panel approach. Follow [CONTRIBUTING.md](../../CONTRIBUTING.md):
 
-1. Check that `~/.config/herdr-app/mods/` has no `multi-root`, `multi-root-files` or `multi-root-changes` folder that is not ours. Copy the three runtime mod folders there.
+1. Check that `~/.config/herdr-app/mods/` has no conflicting `multi-root`, `multi-root-files`, `multi-root-changes` or `multi-root-spaces` folder. Copy the four runtime mod folders there. Updating an existing installation requires only changed runtime files.
 2. Merge `multi-root/keys.json` into `~/.config/herdr-app/keys.json`, adding the one `global` key. Confirm first that `cmd-shift-t` is still unbound.
-3. In the personal layout `~/.config/herdr-app/layouts/main-graph.json`, change only `content.mod` on two blocks. Keep the block ids `files` and `changes`, so the tab bar buttons keep working:
+3. In the personal layout `~/.config/herdr-app/layouts/main-graph.json`, change only `content.mod` on three blocks. Keep their block ids, so existing layout actions keep working:
+   - block `spaces`: `"spaces"` becomes `"multi-root-spaces"`
    - block `files`: `"files"` becomes `"multi-root-files"`
    - block `changes`: `"changes"` becomes `"multi-root-changes"`
-4. Check `layouts/main-graph.error` and `herdr-app status`. To undo, restore the two mod names.
+4. Check `layouts/main-graph.error` and `herdr-app status`. To undo, restore the three mod names. The sidebar addition below has only been installed in the isolated verification window; its change to the person's live layout remains pending.
 
 Shipped layouts such as `main` are read-only. People using one first run `layout.clone` and then edit the clone the same way. `RECIPE.md` must say this.
 
@@ -376,3 +378,13 @@ Shipped layouts such as `main` are read-only. People using one first run `layout
 ## Delivery
 
 Commit messages follow `type(scope): description` in English, for example `feat(multi-root): add multi-root Files panel`. The user authorized commits, pushes and public catalog distribution on 2026-10-31. No PR or repository-license change was requested.
+
+### Spaces entry addition (2026-10-31)
+
+The current request adds a separate sidebar button for a new multi-folder workspace while preserving the existing +. Implementation uses a `mod.clone` of `spaces` 0.1.10 (`9b8249038d8a6a9c`) and a `create` role in the existing menu runtime. This avoids editing Herdr's overwritten bundled mods. The compact rail stacks the buttons. The user selected a stacked-folder icon with a + at the lower right; the custom `folders-plus.svg` follows that request. The dialog collects a nonblank name and at least two distinct normalized folder paths before creating a local space. It reuses deferred attachment, keeps `file: null` until Save workspace, and adds nothing to Recent until a file exists. Existing mappings and shortcuts stay intact. Herdr 0.1.10 is required for the new tooltip/accessibility APIs; Files and Changes keep their previous upstream bases.
+
+Source commit `ae9a10642a58fb622329fc0b7a3cc0c1d4003c09` was created on `agent/multi-root-space-entry`, based on `491294c57cf6c0a56e5577903f59ef93ca97ced8`. The user subsequently authorized committing this addition, merging it into `main` and pushing it on 2026-10-31. This is repository delivery authorization; the person's live layout has not been changed for this addition.
+
+Verification uses `/tmp/herdr-space-entry-20261031/app`, an independent core socket and disposable Web/API folders. Native checks pass for all four runtimes on 0.1.10, including the unchanged Changes runtime that failed on 0.1.9. Actual UI actions verified the expanded/compact entry, native folder picking, duplicate rejection, removal, empty-name and minimum-folder states, cancellation, successful space creation and the unchanged ordinary-space +. Shared-state readback confirmed Product has exactly the Web/API roots, `file: null` and no Recent entry; Files rendered both roots and live `status` had no errors. The unedited native capture is [workspace-preview.png](../../multi-root/workspace-preview.png). Windows/remote interactions and unavailable-core/missing-folder errors were not exercised.
+
+The isolated preview app and core were stopped after verification; fixtures and captures remain under the temporary verification directory. Installation requires syncing the menu and new Spaces runtime, then replacing only the personal layout's `spaces.content.mod`; the existing panel references and shortcut already suffice. Live installation remains separate from the authorized repository delivery.
