@@ -324,9 +324,10 @@ The official catalog says repository/topic discovery occurs within an hour. Comm
 
 - Source commit `b13cac957629771cfe1fdbdc5c1f02f5f925d7e5` was fast-forwarded to `main`, pushed to `origin/main` and read back from the remote ref.
 - [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) is public with the `herdr-mod` topic. GitHub topic search finds it. The package at `multi-root/` contains `mods/`, `keys.json`, `RECIPE.md`, `preview.png` and upstream notices, without `layouts/`.
-- Anonymous requests return HTTP 200 for the recipe and screenshot. The public screenshot SHA-256 is `dfa05cbfdae48fa90f774b4debe96cc77a3996043e480435e32b270c30827f38`.
+- Anonymous requests return HTTP 200 for the recipe and screenshot. After re-capture, the public screenshot SHA-256 is `2c7abd0781f7fbdff9fc7b3716ee58004cf30abc435daf609b46194604ac9119`.
 - The [official catalog index](https://assets.herdr.dev/mods/index.json), generated at `2026-10-30T19:00:16.466Z`, contains `linziyanleo/herdr-mods`, path `multi-root`, title `Multi-Roots` and the recipe's introductory paragraph as its description. It identifies all three runtime mods, `hasKeys: true` and `hasPreview: true`.
 - The catalog entry does not yet have an approved `previewUrl`. The real, mosaiced image is public in GitHub; its display in the [Herdr catalog](https://herdr.dev/mods/) remains pending the site's image screening, which requires at least 24 hours. No image-approval claim is made.
+- Preview re-capture: the first redacted PNG had an incorrect `gAMA` value of `2.19998`, causing a washed-out appearance in color-managed viewers. A fresh `herdr-app shot` of the running Files panel now retains the original `sRGB` chunk and has no `gAMA` override. The existing mosaic texture is reused in five privacy regions. Pixel comparison confirms that all pixels outside those regions match the new native capture exactly; resolution remains 3456 × 2168. The original space, pane and panel visibility were restored afterward.
 
 Run `herdr-app check <installed mod folder>` after every change. For UI changes, run `herdr-app status` (no mod errors, no `layout.error`) and inspect a `herdr-app shot` screenshot.
 
