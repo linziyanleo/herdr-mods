@@ -1,7 +1,7 @@
 // Menu structure adapted from Herdr 0.1.9 new-menu (Apache-2.0).
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { theme, spaces, focused, home, knownAgents, run, openOverlay, closeOverlay, props, window, shared, pickFolder, exec, readTextFile } from "herdr";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { theme, spaces, machines, focused, home, knownAgents, run, openOverlay, closeOverlay, props, window, shared, pickFolder, exec, readTextFile } from "herdr";
 import { SPACES, REPO, RECENT, workspaceOf, setWorkspace, reloadWorkspace, loadConfig, describeRoots, repositories, resolvePath, rootOf, label, basename, shortPath, putShared, remember } from "./roots.js";
 import { saveWorkspace } from "./config.js";
 
@@ -14,8 +14,17 @@ export default class MultiRoot extends View {
     this.agents = []; this.roots = []; this.repos = []; this.recent = []; this.files = [];
     this.handle = cx.focus_handle(); this.handle.focus();
     const space = spaces().find(s => s.id === this.spaceId);
-    if (space?.machine || window()?.platform === "windows") {
+    if ((this.role !== "create" && space?.machine) || window()?.platform === "windows") {
       closeOverlay(props()?.overlay); run("mod.open", { name: "new-menu" }); return;
+    }
+    if (this.role === "create") {
+      this.folders = [];
+      this.name = InputState.new({ value: "Workspace", placeholder: "Workspace name" });
+      this.name.set_selected_range({ start: 0, end: 9 });
+      this.name.on("change", (_event, cx) => { this.error = null; cx.notify(); });
+      this.name.on("submit", (_event, cx) => this.createWorkspace(cx));
+      this.name.focus();
+      return;
     }
     if (this.role === "new" && !keysBound) {
       cx.bind_keys([{ keystroke: "cmd-t", action: "MultiRootTerminal", context: "MultiRootMenu" },
@@ -123,10 +132,43 @@ export default class MultiRoot extends View {
         const existing = spaces().find(s => s.machine === null && shared(SPACES)?.[s.id]?.file === file);
         if (existing) { remember(file); closeOverlay(props()?.overlay); run("space.select", { id: existing.id }); return; }
         const roots = await describeRoots(snapshot.folders), first = roots.find(f => f.exists);
-        const name = `${snapshot.name} (${Date.now()})`;
-        this.opening = { file, snapshot, name, before: spaces().map(s => s.id) };
-        run("space.new", { name, folder: first?.path || home() });
-        cx.notify();
+        this.openSpace(snapshot, file, first?.path || home(), cx);
+      } catch (error) { this.error = error.message || String(error); this.busy = false; cx.notify(); }
+    });
+  }
+
+  openSpace(snapshot, file, folder, cx) {
+    const name = `${snapshot.name} (${Date.now()})`;
+    this.opening = { file, snapshot, name, before: spaces().map(s => s.id) };
+    run("space.new", { name, folder });
+    cx.notify();
+  }
+
+  addCreateFolder(cx) {
+    if (this.busy || this.picking) return;
+    this.picking = true; this.error = null; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        const picked = await pickFolder({ prompt: "Add" });
+        if (picked) {
+          const path = resolvePath(home(), picked);
+          if (!this.folders.some(folder => folder.path === path)) this.folders.push({ name: null, path, source: path });
+        }
+      } catch (error) { this.error = error.message || String(error); }
+      this.picking = false; cx.notify();
+    });
+  }
+
+  createWorkspace(cx) {
+    const name = this.name.value().trim();
+    if (this.busy || this.picking || !name || this.folders.length < 2) return;
+    this.busy = true; this.error = null; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        if (!machines().some(machine => machine.name === null && machine.layout === "ready")) throw new Error("This computer's spaces are not ready. Try again when it is connected.");
+        const roots = await describeRoots(this.folders), first = roots.find(folder => folder.exists);
+        if (!first) throw new Error("The selected folders are no longer available.");
+        this.openSpace({ name, folders: [...this.folders] }, null, first.path, cx);
       } catch (error) { this.error = error.message || String(error); this.busy = false; cx.notify(); }
     });
   }
@@ -215,15 +257,46 @@ export default class MultiRoot extends View {
           .when(Boolean(this.recent.length), list => list.child(div().px(10).py(6).text_color(t.muted).child("Recent")).children(this.recent.map(item => fileRow(item.file, item.name, item.missing))))));
   }
 
+  renderCreate() {
+    const t = theme(), enabled = !this.busy && !this.picking;
+    const button = (id, text, action, active = enabled, primary = false) => h_flex().id(id).h(32).px(12).items_center().justify_center().rounded(6)
+      .disabled(!active).role("button").accessibility_label(text)
+      .bg(primary ? t.solid : t.raised).text_color(primary ? t.solid_foreground : t.foreground)
+      .when(!active, el => el.opacity(0.5)).when(active, el => el.cursor_pointer().hover(s => s.opacity(0.88)))
+      .on_click((_event, cx) => { if (active) action(cx); }).child(text);
+    return v_flex().w_full().h_full().min_h(0).p(16).gap(12).bg(t.popover).text_size(13).text_color(t.foreground)
+      .child(div().font_semibold().child("New multi-folder workspace"))
+      .child(Input.new(this.name).h(34).px(10).rounded(6).border(0.5).border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Workspace name"))
+      .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(4)
+        .when(!this.folders.length, el => el.child(div().py(12).text_color(t.dim).child("Choose at least two folders.")))
+        .children(this.folders.map(folder => h_flex().id(`create-folder-${folder.path}`).px(8).py(6).gap(8).items_center()
+          .child(svg("mods/workspace-chrome/folder.svg").size(14).flex_none().text_color(t.dim))
+          .child(v_flex().flex_1().min_w(0).gap(3).child(div().truncate().child(label(folder)))
+            .child(div().text_size(12).text_color(t.dim).truncate().child(shortPath(folder.path))))
+          .child(div().id(`remove-create-${folder.path}`).size(26).flex_none().flex().items_center().justify_center().rounded(6)
+            .disabled(!enabled).tooltip("Remove folder").role("button").accessibility_label(`Remove ${label(folder)}`)
+            .when(enabled, el => el.cursor_pointer().hover(s => s.bg(t.hover)))
+            .on_click((_event, cx) => { if (enabled) { this.folders = this.folders.filter(item => item.path !== folder.path); cx.notify(); } }).child("−")))))
+      .when(this.folders.length === 1, el => el.child(div().text_size(12).text_color(t.dim).child("Add one more folder.")))
+      .when(Boolean(this.error), el => el.child(div().text_size(12).text_color(t.ansi1).child(this.error)))
+      .child(h_flex().gap(8).items_center()
+        .child(button("create-add-folder", this.picking ? "Choosing folder…" : "Add folder…", cx => this.addCreateFolder(cx)))
+        .child(div().flex_1())
+        .child(button("create-cancel", "Cancel", () => closeOverlay(props()?.overlay), !this.busy))
+        .child(button("create-workspace", this.busy ? "Creating…" : "Create workspace", cx => this.createWorkspace(cx), enabled && this.folders.length >= 2 && Boolean(this.name.value().trim()), true)));
+  }
+
   render() {
     if (this.opening) {
       const pending = this.opening, created = spaces().find(s => !pending.before.includes(s.id) && s.name === pending.name);
       if (created) {
         setWorkspace(created.id, { name: pending.snapshot.name, file: pending.file, folders: pending.snapshot.folders });
-        remember(pending.file); this.opening = null;
+        if (pending.file) remember(pending.file);
+        this.opening = null;
         closeOverlay(props()?.overlay); run("space.rename", { id: created.id, name: pending.snapshot.name });
       }
     }
+    if (this.role === "create") return this.renderCreate();
     if (this.role === "root-menu") return this.renderRootMenu();
     if (this.role === "repo-menu") return this.renderRepoMenu();
     if (this.role === "open") return this.renderOpen();
