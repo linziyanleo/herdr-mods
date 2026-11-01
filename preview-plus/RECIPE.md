@@ -45,6 +45,8 @@ Use GPUI `div`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Edit
 
 The mod manifest is `{ "place": "none" }`. See the [installation instructions](README.md) for the three supported layouts and pane commands. There are no cross-mod code imports and no shortcut changes. Optional command names are `back`, `source`, `preview`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
 
+`on_size_change` reports window points, while builder dimensions receive Herdr's app zoom. Divide measured dimensions by `settings().zoom` before computing fit sizes. Put Markdown images inside an interactive `div`; the 0.1.11 host did not deliver clicks attached directly to `image()`.
+
 ### External programs and files
 
 The mod reads only selected files, referenced local images, displayed directories and Git metadata. It writes only its app-home cache. No service credentials are required. Preview Plus makes no HTTP requests itself; opening an HTTP(S) link uses the system browser.
@@ -70,3 +72,5 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/preview.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
 
 Acceptance requires an expanded standalone tree, Markdown Preview/Source, a followed note/image and correct Back history, a visible native document image, fit/100%/zoom, PNG/SVG display, both PDF pages, external-file updates/deletion/recovery, paired Files Plus handoff and return, a standalone mod pane, and `herdr-app status` with `errors: []`. Capture `preview.png` with `herdr-app shot` from the final runtime. The implementation plan records the actual environment and completed checks.
+
+On 2026-11-01 the installed mod was also tested with real mouse input in Herdr 0.1.11's existing `main-graph` window at 120% app zoom. Files handoff, Preview/Source, relative document/image navigation, 100%/Fit, history return and two-page PDF navigation passed with no reported errors. The focused suite passed 17 tests. See the implementation plan for backup and receipt paths; the live user's window is not included in the public preview.
