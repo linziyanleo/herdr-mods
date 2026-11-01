@@ -1,4 +1,3 @@
-// Workspace format adapted from this repository's Multi-Roots implementation.
 import { home, spaces, machines, window, shared, setShared, exec, readTextFile } from "herdr";
 
 export const SPACES = "multi-root.spaces", RECENT = "multi-root.recent";
@@ -73,10 +72,8 @@ export function workspaceOf(id) {
 export function prune() {
   if (!machines().some(m => m.name === null && m.layout === "ready")) return;
   const ids = new Set(spaces().map(s => s.id));
-  for (const key of [SPACES, "multi-root.repo"]) {
-    const value = shared(key);
-    if (value) putShared(key, Object.fromEntries(Object.entries(value).filter(([id]) => ids.has(id))));
-  }
+  const value = shared(SPACES);
+  if (value) putShared(SPACES, Object.fromEntries(Object.entries(value).filter(([id]) => ids.has(id))));
 }
 export async function loadConfig(file) {
   const text = await readTextFile(file);

@@ -1,6 +1,6 @@
 # Files Plus
 
-Browse a single folder or every folder in a Multi-Roots workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy a path, reveal it, or create, rename and remove files. A persistent + adds a workspace folder. Text and Markdown open as read-only source in the same panel, with a back button.
+Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy a path, reveal it, or create, rename and remove files. A persistent + adds a workspace folder. Text and Markdown open as read-only source in the same panel, with a back button.
 
 ![Files Plus](preview.png)
 
@@ -26,7 +26,7 @@ Right-click captures the entry, owning root, machine and active terminal before 
 - Reveal uses Finder, File Explorer or the local Linux file manager. Remote reveal is disabled.
 - New file and New folder prompt for a name inside the clicked directory or file's parent. Reject blank names, `.`/`..`, separators, control characters and existing entries. Rename is prefilled and stays in the same parent. Workspace roots cannot be renamed or deleted from this menu.
 - Move to Trash asks for confirmation. Local macOS entries move to `~/.Trash` with collision-safe naming. Other platforms and remote machines display an explicit permanent-deletion confirmation. A failure stays in the dialog.
-- A workspace root also offers New terminal or agent here and Remove from workspace. If `multi-root` is installed, open its launch menu with the captured space/root; otherwise start a terminal in that root. Removing a root keeps files on disk and requires at least one root to remain.
+- A workspace root also offers New terminal here and Remove from workspace. Start the terminal in the captured space and root. Removing a root keeps files on disk and requires at least one root to remain.
 
 Add folder works for local POSIX spaces, including ordinary single-folder spaces and preview headers. Capture the original space and displayed folder before opening the system picker. Cancel and duplicate selections leave data unchanged. Adding a different folder converts an ordinary space to an unsaved workspace, preserving its name, tabs and terminals. Existing workspace files use a captured expected-text write: preserve path spelling, string entries, unknown fields and two-space formatting; new folders use relative paths. A conflicting edit reloads instead of overwriting the file. A closed or replaced target cannot be recreated by a late completion.
 
@@ -143,13 +143,13 @@ With both the prop and installed receiver, `.md`, `.markdown`, `.png`, `.jpg`, `
 
 ### Attribution
 
-The Files tree, editor and SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0), via this repository's Multi-Roots implementation. Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
+The Files tree, editor and SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
 
 ## Watch out
 
 Keep the inherited limits: 500 entries per folder, 5,000 loaded entries across all roots, 40 nested tree levels, 400,000 preview characters and Herdr's 1 MiB text-read ceiling. Binary, missing, unreadable and oversized files show explicit source-preview states. Preview Plus owns rich rendering, links, images and PDF conversion.
 
-Multi-Roots management remains local POSIX support, matching the existing package; Windows and remote spaces retain single-folder browsing. Windows/Linux/remote native interactions need verification on those systems. Clipboard operations can restore previous text, but not a previous non-text clipboard. Tests do not install into the person's normal app home, replace their layout or change shortcuts.
+Workspace management supports local POSIX spaces; Windows and remote spaces retain single-folder browsing. Windows/Linux/remote native interactions need verification on those systems. Clipboard operations can restore previous text, but not a previous non-text clipboard. Tests do not install into the person's normal app home, replace their layout or change shortcuts.
 
 ## Done when
 
@@ -162,7 +162,7 @@ Build and exercise these observable behaviors using disposable folders:
 5. Copy and Paste preserve the source and choose available copy names. A directory cannot be pasted into itself or through a symlink into a descendant. Cross-machine paste is disabled. Absolute and relative path copying uses the clicked entry's owning root.
 6. New file, New folder, Rename, Trash confirmation and local reveal act on the clicked target and refresh the tree. Invalid or existing names are refused. Cancelling a dialog writes nothing. Root rename and deletion remain disabled.
 7. The native folder picker can confirm and cancel. Duplicate selections leave the workspace unchanged. A different root extends the captured space even if focus moves elsewhere. Saving preserves custom fields, and a conflicting disk edit is not overwritten.
-8. Root actions retain one root, leave removed roots' files intact, and launch a terminal in the requested root. When Multi-Roots is installed, its agent menu receives the captured root and space.
+8. Root actions retain one root, leave removed roots' files intact, and launch a terminal in the captured root and space.
 9. With a compatible Preview Plus receiver and stack, rich targets switch the panel and Back restores the existing tree. Ordinary text stays in the source editor. Missing receivers fall back to source; stale requests cannot replace a later selection. Rich rendering itself belongs to Preview Plus.
 10. `herdr-app status` reports no mod or layout errors. Capture the running panel with `herdr-app shot preview.png`. Use disposable content and retain the native PNG color metadata. Ship this folder without a `layouts/` directory or unused key bindings.
 

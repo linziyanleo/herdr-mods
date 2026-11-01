@@ -34,7 +34,7 @@ test("single-folder text/Markdown previews are read-only, bounded and handle mis
   panel.close();
 });
 
-test("multi-root focus changes retain expansion and preview; paired mode sends the owning root", async t => {
+test("workspace focus changes retain expansion and preview; paired mode sends the owning root", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
   const web = path.join(r.dir, "web"), api = path.join(r.dir, "api");
   await fs.mkdir(path.join(web, "src"), { recursive: true }); await fs.mkdir(api);
@@ -130,4 +130,22 @@ test("popup navigation skips disabled actions and dialog cancellation does not m
   find(dialog.render(r.cx), "dialog-cancel").handlers.on_click({}, r.cx);
   assert.equal(r.calls.at(-1).command, "closeOverlay");
   assert.deepEqual((await fs.readdir(r.dir)).sort(), ["home"]);
+});
+
+test("workspace root launch uses its captured space and root with an old launcher still installed", async t => {
+  const r = await runtime(t), { default: Files } = await r.load("main.js"), { menuItems } = await r.load("actions.js");
+  await fs.mkdir(path.join(r.dir, "app/mods/multi-root"), { recursive: true });
+  await fs.writeFile(path.join(r.dir, "app/mods/multi-root/mod.json"), "{}");
+  const root = path.join(r.dir, "api"), target = r.target("api", "root", root);
+  r.props = { role: "menu", target, overlay: "menu1" };
+  const menu = new Files(); menu.init({}, r.cx);
+  const index = menuItems(target).findIndex(item => item.id === "new-here");
+  assert.equal(find(menu.render(r.cx), "action-new-here").attributes.accessibility_label[0], "New terminal here");
+  r.spaces.push({ id: "s2", machine: null, active: true }); r.spaces[0].active = false;
+  r.focus = { space: "s2", cwd: "/elsewhere" };
+  menu.choose(index, r.cx); await r.drain();
+  assert.deepEqual(JSON.parse(JSON.stringify(r.calls)), [
+    { command: "tab.new", args: { space: "s1", folder: root } },
+    { command: "closeOverlay", id: "menu1" }
+  ]);
 });

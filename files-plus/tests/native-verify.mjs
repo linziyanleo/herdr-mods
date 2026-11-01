@@ -117,14 +117,14 @@ try {
     await until(shared, value => Boolean(value["files-plus.test"].panel.preview), "native Editor preview");
     await shot("source-preview"); await request({ type: "back" });
   });
-  await check("saved Multi-Roots browsing and preservation across terminal focus", async () => {
+  await check("saved workspace browsing and preservation across terminal focus", async () => {
     await request({ type: "workspace", file: info.workspace });
     await until(shared, value => value["files-plus.test"].panel.entries[api]?.length > 0, "both roots loaded");
     await request({ type: "toggle", path: web + "/src" });
     await command("tab.select", { id: recordings.api.tab });
     const state = await until(shared, value => value["files-plus.test"].panel.folders.includes(web + "/src"), "expanded folder retained");
     assert.equal(state["multi-root.spaces"][info.first.space].file, info.workspace);
-    await shot("multi-root-tree");
+    await shot("workspace-tree");
   });
   await check("native @ insertion uses captured same-root/cross-root terminals without Enter", async () => {
     // Set a known clipboard after the earlier copy-path tests.
@@ -165,7 +165,7 @@ try {
     await fs.rename(trashed, file); // Restore only this test-created entry.
     await request({ type: "menu", choose: "reveal", path: web + "/README.md", root: web }); await overlaysClosed();
   });
-  await check("workspace root launches a terminal without requiring Multi-Roots", async () => {
+  await check("workspace root launches a terminal in the selected root", async () => {
     const count = (await model()).spaces[0].tabs.length;
     await request({ type: "menu", choose: "new-here", path: api, root: api, kind: "root" }); await overlaysClosed();
     await until(model, value => value.spaces[0].tabs.length === count + 1, "new terminal in root");

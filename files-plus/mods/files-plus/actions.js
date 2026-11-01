@@ -153,7 +153,7 @@ export function menuItems(target) {
     { id: "rename", label: "Rename…", enabled: !root },
     { id: "trash", label: "Move to Trash…", enabled: !root, danger: true },
     ...(root ? [
-      { id: "new-here", label: "New terminal or agent here…", enabled: true, group: true },
+      { id: "new-here", label: "New terminal here", enabled: true, group: true },
       { id: "remove-root", label: "Remove from workspace", enabled: (workspaceOf(target.space)?.folders.length || 0) > 1 }
     ] : [])
   ];

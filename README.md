@@ -8,11 +8,8 @@ Each mod has its own top-level directory. Implemented mods include documentation
 
 | Mod | Purpose | Status |
 | --- | --- | --- |
-| [Multi-Roots](multi-root/RECIPE.md) | Create multi-folder workspaces from the Spaces sidebar, browse roots together, choose terminal and agent roots, switch Git repositories, and save or reopen workspaces. | Available |
-| [Files Plus](files-plus/RECIPE.md) | Combine single-folder and Multi-Roots file browsing with right-click file copy/paste, root-aware path copying, `@` agent reference insertion, Finder reveal, and file CRUD. | Available |
+| [Files Plus](files-plus/RECIPE.md) | Combine single-folder and workspace file browsing with right-click file copy/paste, root-aware path copying, `@` agent reference insertion, Finder reveal, and file CRUD. | Available |
 | [Preview Plus](preview-plus/RECIPE.md) | View formatted Markdown, images, and PDF pages with Preview/Source toggle, relative link navigation, fit, zoom, and page controls; works standalone or with Files Plus. | Available |
-
-![Multi-Roots running in Herdr, with personal information mosaiced](multi-root/preview.png)
 
 ## Development
 

@@ -2,19 +2,21 @@
 
 Status: implemented, installed locally and published to GitHub and the official Herdr community catalog on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`; the community recipe and preview were published in `bf9125e4414ae43ab1c43a0ba320e295160f7491`. The official catalog entry and served preview are verified below.
 
-Follow the existing [Multi-Roots plan](multi-root.md) for workspace config format and `shared("multi-root.spaces")` semantics. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
+The workspace launcher update below is verified locally and awaits installation and publication.
+
+The [Files Plus recipe](../../files-plus/RECIPE.md#folder-context-and-saved-workspaces) defines the workspace config format and persisted shared-state contracts. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
 
 ## Goal
 
-Provide one Files panel (`files-plus`) that combines single-folder browsing, Multi-Roots workspace folder browsing and management, read-only source previews, a complete right-click file manager context menu, and optional view handoff to `preview-plus`.
+Provide one Files panel (`files-plus`) that combines single-folder browsing, workspace folder browsing and management, read-only source previews, a complete right-click file manager context menu, and optional view handoff to `preview-plus`.
 
 ## Design
 
-- Build `files-plus/mods/files-plus/` directly on top of the repository's `multi-root-files` implementation (`main.js`, `workspace.js`, `roots.js`, and `config.js`). Retain its lazy loading (500 per folder, 5,000 total), Git status marks, symlink handling, `watchFolder` plus 10-second refresh, and read-only `Editor` text preview.
+- Keep the file tree, workspace helpers and config handling in `files-plus/mods/files-plus/`. Retain lazy loading (500 per folder, 5,000 total), Git status marks, symlink handling, `watchFolder` plus 10-second refresh, and read-only `Editor` text preview.
 - Keep `files-plus` and `preview-plus` independently installable:
-  - **Installed alone**: `files-plus` replaces `files` or `multi-root-files` as a single block (`"mod": "files-plus"`). Clicking any text or Markdown file opens `files-plus`'s built-in read-only `Editor` preview.
+  - **Installed alone**: `files-plus` replaces the Files block (`"mod": "files-plus"`). Clicking any text or Markdown file opens `files-plus`'s built-in read-only `Editor` preview.
   - **Installed with `preview-plus`**: when given `props.previewStack` (for example `{ "previewStack": "files" }` in a 2-child stack `files-plus-tree` + `preview-plus`), clicking `.md`, `.markdown`, supported images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`), or `.pdf` writes `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and calls `run("layout.select", { stack: props().previewStack, child: "preview-plus" })` to replace the panel view. Other text files stay in `files-plus`'s built-in `Editor` preview.
-- Absorb Multi-Roots file tree actions (`+` Add folder in the header, and root right-click actions) directly into `files-plus` while reading and writing the existing `shared("multi-root.spaces")` contract. A person can install `files-plus` alone or alongside the `multi-root` package (`multi-root`, `multi-root-spaces`, `multi-root-changes`).
+- Keep workspace actions (`+` Add folder in the header, and root right-click actions) directly in `files-plus`, using the persisted shared-state contract. No additional runtime mod is required for workspace browsing and root actions.
 - Keep the context menu and action dialogs inside the `files-plus` runtime, selected by `props().role`:
   - default (no `role`): the Files panel (`place: "right"`, `size: 320`)
   - `role: "menu"`: pointer popup context menu with keyboard navigation (`↑`, `↓`, `Enter`, `Esc`)
@@ -48,7 +50,7 @@ Capturing `active` from `focused()` at right-click time ensures actions target t
 
 1. **Add to agent (`@`)**
    - Inserts an `@` file reference with a trailing space into `target.active` without pressing Enter. Disabled when the space has no active terminal pane.
-   - **Path resolution (Multi-Roots compatible)**:
+   - **Workspace path resolution**:
      - When `target.active.cwd` is inside the same root and `target.path` is under `target.active.cwd`, format as `@<relativePath(target.active.cwd, target.path)> `.
      - When `target.active.cwd` is in another root or outside `target.root`, fall back to the absolute path `@<target.path> ` so cross-root references remain unambiguous.
      - Quote paths that contain whitespace.
@@ -63,7 +65,7 @@ Capturing `active` from `focused()` at right-click time ensures actions target t
 
 3. **Copy path and Copy relative path**
    - **Copy path**: writes `target.path` to the system clipboard with `cx.write_to_clipboard`.
-   - **Copy relative path**: writes `relativePath(target.root, target.path)` (`.` for a root row) to the system clipboard with `cx.write_to_clipboard`. Always resolves relative to the entry's owning root in both single-folder and Multi-Roots spaces.
+   - **Copy relative path**: writes `relativePath(target.root, target.path)` (`.` for a root row) to the system clipboard with `cx.write_to_clipboard`. Always resolves relative to the entry's owning root in both single-folder and workspace modes.
 
 4. **Reveal in Finder / File Explorer**
    - Enabled for local spaces (`target.on === null`).
@@ -76,7 +78,7 @@ Capturing `active` from `focused()` at right-click time ensures actions target t
    - Refresh the affected parent folder and git marks after any mutation.
 
 6. **Workspace root actions** (shown on workspace root rows)
-   - **New terminal or agent here…**: opens `multi-root` (`role: "new"`, `props: { space, root: target.root }`) when installed, or starts a terminal in `target.root` via `run("tab.new", { space, folder: target.root })`.
+   - **New terminal here**: starts a terminal in the captured root and space via `run("tab.new", { space: target.space, folder: target.root })`.
    - **Remove from workspace**: removes `target.root` from `shared("multi-root.spaces")` and updates the workspace file when mapped. Disabled when only one root remains.
 
 ## Implementation and verification
@@ -84,7 +86,7 @@ Capturing `active` from `focused()` at right-click time ensures actions target t
 Implement the runtime under `files-plus/mods/files-plus/`:
 
 - `main.js`: panel view, popup menu role, and dialog role
-- `workspace.js`, `roots.js`, `config.js`: adapted from `multi-root-files` and `multi-root` with root addition/removal and right-click menu wiring
+- `workspace.js`, `roots.js`, `config.js`: file tree, persisted workspace data, root addition/removal and right-click menu wiring
 - `actions.js`: path formatting, `@` terminal insertion, collision-safe copy/paste, CRUD commands, and Finder/Explorer reveal
 
 Verification scope:
@@ -102,7 +104,7 @@ Verification scope:
 
 The user's 2026-11-01 requests authorize Files Plus development and testing on `mod/file-plus`, local `main` integration and installation in Herdr, then community publication. Implementation used `/Users/fanghu/Documents/Work/.agent-worktrees/file-plus/herdr-mods`, based on local main `6b715689e7062528627e6813f048575f36be6377`. Other task worktrees remain untouched. The publication scope includes the necessary commits, main integration and push to the existing public repository.
 
-The independently installable runtime is under `files-plus/mods/files-plus/`. It adapts the repository's existing Multi-Roots tree, configuration and read-only editor, adds `actions.js`, internal menu/dialog roles and a Radix palette, and retains the shared workspace format. No changes to the Multi-Roots runtime or Preview Plus plan are required. See [the recipe](../../files-plus/RECIPE.md) for installation and the final behavior.
+The independently installable runtime is under `files-plus/mods/files-plus/`. It contains the file tree, configuration and read-only editor, plus `actions.js`, internal menu/dialog roles and a Radix palette, and retains the shared workspace format. See [the recipe](../../files-plus/RECIPE.md) for installation and the final behavior.
 
 Implementation decisions:
 
@@ -127,7 +129,7 @@ Final package checks found no syntax, whitespace or documentation-link errors. A
 ### Local installation acceptance
 
 - Runtime commit `6e586be27e4b06bd3c962bfd02deb58a5a26577c` was fast-forwarded into local `main` before installation. The runtime in `~/.config/herdr-app/mods/files-plus/` matches all 11 committed source files. Tests, screenshots and generated IDE files were not copied as installation inputs.
-- The existing personal `main-graph` layout retains its node tree and block ids. Only `files.content.mod` changed from `multi-root-files` to `files-plus`. The existing Files panel is shown and selected. Shortcut bytes and other runtime mods are unchanged.
+- The existing personal `main-graph` layout retains its node tree and block ids. Only `files.content.mod` changed to `files-plus`. The existing Files panel is shown and selected. Shortcut bytes and other runtime mods are unchanged.
 - The original layout and installation metadata are saved under `~/.config/herdr-app/backups/files-plus-20261101-121208/`. To roll back, restore `layouts/main-graph.json` from that backup and remove only the newly added `mods/files-plus/` directory.
 - `herdr-app check ~/.config/herdr-app/mods/files-plus` passes. Live `herdr-app status` has no mod/layout errors. Native UI checks exercise the actual file right-click menu, Escape, README source preview and Back, plus the Add folder dialog and system picker cancellation. The selected space remains a single-folder space after cancellation.
 - `/tmp/herdr-files-plus-installed-20261101.png` captures the installed panel in the person's running window. It is local evidence; the distributed preview remains the disposable-fixture capture.
@@ -146,3 +148,11 @@ Herdr's [sharing instructions](https://herdr.dev/mods/) discover public reposito
 GitHub delivery is verified at publication commit `bf9125e4414ae43ab1c43a0ba320e295160f7491`: the repository is public with topic `herdr-mod`, and all 13 published recipe/preview/runtime artifacts match their Git blobs. The public raw PNG is byte-identical to the local preview, with SHA-256 `7953dccab9320f6f03d5321f8094ab4434598e436342414eefbfda62fdfc2cfc`.
 
 The official [catalog index](https://assets.herdr.dev/mods/index.json), generated at `2026-11-01T05:00:16.267Z`, lists `files-plus` as **Files Plus**, with `modNames: ["files-plus"]`, `hasKeys: false`, `hasPreview: true` and repository head `da98d11b87f703b36709ee9811100e617d1b0682`. Its [served preview](https://assets.herdr.dev/previews/7953dccab9320f6f03d5321f8094ab4434598e436342414eefbfda62fdfc2cfc.png) was downloaded and inspected. It is byte-identical to the published 1840 × 1300 PNG, with the same SHA-256 above. Both the community entry and its new preview are confirmed visible.
+
+### Workspace launcher update (2026-11-01)
+
+The root menu now offers **New terminal here** and starts the terminal directly in the captured space and root. Workspace browsing and root actions are self-contained. Existing workspace files and persisted shared-state keys remain compatible.
+
+Verification: all 27 automated Files Plus tests pass, including launch targeting after focus changes with an old launcher installation present. Source and disposable-installation `herdr-app check` pass. An isolated native Herdr window shows both saved workspace roots and the updated menu; the new terminal's physical cwd matches the selected root, its space is correct, and workspace bytes and mappings remain unchanged. The window reports no mod or layout errors. Evidence: `/tmp/fp.1WL0m8/retirement-report.json` and `/tmp/fp.1WL0m8/root-menu.png`. All 38 local Markdown link targets resolve and `git diff --check` passes.
+
+Delivery is limited to a local source commit. The normal app home and community catalog are outside this update's scope.

@@ -1,4 +1,4 @@
-// Lazy tree and read-only preview adapted from Herdr files and Multi-Roots.
+// Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, settings, window, props, shared, setShared, run, openOverlay } from "herdr";
