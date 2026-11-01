@@ -1,6 +1,6 @@
 # Files Plus implementation plan
 
-Status: runtime implemented on local branch `mod/file-plus` on 2026-11-01. Automated and isolated native acceptance results are recorded [below](#implementation-and-acceptance). Installation into the person's normal Herdr home, Git commits, push and publication are outside this local development delivery.
+Status: implemented, merged into local `main` and installed in the person's normal Herdr home on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`. Automated, isolated native and local installation acceptance are recorded [below](#implementation-and-acceptance). Remote push and publication have not been requested or performed.
 
 Follow the existing [Multi-Roots plan](multi-root.md) for workspace config format and `shared("multi-root.spaces")` semantics. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
 
@@ -100,7 +100,7 @@ Verification scope:
 
 ## Implementation and acceptance
 
-The user's 2026-11-01 request authorizes full Files Plus development and testing on `mod/file-plus`. Work is isolated at `/Users/fanghu/Documents/Work/.agent-worktrees/file-plus/herdr-mods`, based on local main `6b715689e7062528627e6813f048575f36be6377`. Other task worktrees and the normal Herdr configuration are preserved. No commit, push, merge or public release has been performed.
+The user's 2026-11-01 requests authorize Files Plus development and testing on `mod/file-plus`, followed by local `main` integration and installation in Herdr. Implementation used `/Users/fanghu/Documents/Work/.agent-worktrees/file-plus/herdr-mods`, based on local main `6b715689e7062528627e6813f048575f36be6377`. Other task worktrees remain untouched. The delivery scope includes the necessary commits and local merge, with no remote push or public release.
 
 The independently installable runtime is under `files-plus/mods/files-plus/`. It adapts the repository's existing Multi-Roots tree, configuration and read-only editor, adds `actions.js`, internal menu/dialog roles and a Radix palette, and retains the shared workspace format. No changes to the Multi-Roots runtime or Preview Plus plan are required. See [the recipe](../../files-plus/RECIPE.md) for installation and the final behavior.
 
@@ -115,11 +115,20 @@ Implementation decisions:
 Verification on macOS with installed Herdr 0.1.11 and Node.js 22.23.4:
 
 - 26 automated tests pass using `node --experimental-vm-modules --test files-plus/tests/*.test.mjs`. File operations use real disposable directories and POSIX commands; only the host APIs are adapted for Node. Coverage includes references and physical aliases, clipboard restoration, copy naming/cycles/symlinks, CRUD and Trash, machine routing, conflict-safe workspace updates, bounds, missing/binary previews, retained editor state and stale handoff ordering.
-- Native `herdr-app check` passes for the source and installed disposable runtime. The normal app is not the installation target.
+- Native `herdr-app check` passes for the source and installed disposable runtime. Initial acceptance uses a separate app home; normal-home installation acceptance is recorded below.
 - 12 native acceptance groups pass in `/tmp/fp.bgRLqL`; report: `/tmp/fp.bgRLqL/native-report.json`. These exercise actual GPUI views and filesystem/clipboard/terminal APIs: source preview, file/folder creation, rename and collision errors, same-directory and cross-directory copy, cycle refusal, path copying, two-root focus retention, precise same-root/cross-root terminal bytes with no Enter, root dialogs/menus, configuration preservation/conflicts, Trash/Finder and standalone root-terminal launch.
 - Optional pairing passes in the same native session using a minimal receiver fixture: Markdown, PNG and PDF targets select the receiver; its back command returns to the existing tree with expansion retained; ordinary text stays in the source editor. Report: `/tmp/fp.bgRLqL/native-pair-report.json`. This proves the Files Plus protocol and stack integration, not Preview Plus's future renderer.
 - Actual screenshots cover the source editor, name-conflict dialog, Add folder dialog, trees and context menu. Final popup sizing and light/dark appearance were checked separately after the correction above. The distributed `files-plus/preview.png` is captured directly from the disposable native window. `herdr-app status` reports zero mod/layout errors.
 
-Remaining acceptance boundaries: the computer-use connection timed out, so the real system folder picker's confirmation/cancellation has not been automated. Success, cancel, duplicate and external-edit behavior of its root-update helpers are covered; the actual Add folder dialog is rendered and captured. Windows, Linux and remote-machine native interaction remain unverified. Preview Plus rich rendering remains its separate planned implementation.
+Remaining acceptance boundaries: the real system folder picker was opened and cancelled during local installation acceptance. Adding a new root through native confirmation and focus-switching during that selection remain manual checks. Success, cancel, duplicate and external-edit behavior of the root-update helpers is automated. Windows, Linux and remote-machine native interaction remain unverified. Preview Plus rich rendering remains its separate planned implementation.
 
-Final package checks found no syntax, whitespace or documentation-link errors. All 11 runtime files match the checked disposable installation. App-generated IDE files are excluded from the package. The native test app and its separate core were stopped after capture; evidence under `/tmp/fp.bgRLqL` and the uncommitted task worktree are retained for review. The normal Herdr app still uses `main-graph`, reports zero errors and has no Files Plus installation.
+Final package checks found no syntax, whitespace or documentation-link errors. All 11 runtime files match the checked disposable installation. App-generated IDE files are excluded from the package. The native test app and its separate core were stopped after capture; evidence under `/tmp/fp.bgRLqL` is retained for review.
+
+### Local installation acceptance
+
+- Runtime commit `6e586be27e4b06bd3c962bfd02deb58a5a26577c` was fast-forwarded into local `main` before installation. The runtime in `~/.config/herdr-app/mods/files-plus/` matches all 11 committed source files. Tests, screenshots and generated IDE files were not copied as installation inputs.
+- The existing personal `main-graph` layout retains its node tree and block ids. Only `files.content.mod` changed from `multi-root-files` to `files-plus`. The existing Files panel is shown and selected. Shortcut bytes and other runtime mods are unchanged.
+- The original layout and installation metadata are saved under `~/.config/herdr-app/backups/files-plus-20261101-121208/`. To roll back, restore `layouts/main-graph.json` from that backup and remove only the newly added `mods/files-plus/` directory.
+- `herdr-app check ~/.config/herdr-app/mods/files-plus` passes. Live `herdr-app status` has no mod/layout errors. Native UI checks exercise the actual file right-click menu, Escape, README source preview and Back, plus the Add folder dialog and system picker cancellation. The selected space remains a single-folder space after cancellation.
+- `/tmp/herdr-files-plus-installed-20261101.png` captures the installed panel in the person's running window. It is local evidence; the distributed preview remains the disposable-fixture capture.
+- The development branch/worktree is retained for this active conversation. Local `main` is the installed source. No remote push has been performed.

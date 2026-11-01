@@ -119,3 +119,5 @@ XDG_STATE_HOME=/tmp/fp.EXAMPLE/s XDG_CONFIG_HOME=/tmp/fp.EXAMPLE/c HC_SESSION=fp
 ```
 
 Recorded acceptance results are maintained in the [implementation plan](../docs/plans/files-plus.md#implementation-and-acceptance).
+
+Local installation acceptance on 2026-11-01 uses Herdr 0.1.11 and runtime commit `6e586be27e4b06bd3c962bfd02deb58a5a26577c`, merged into local `main`. All 11 installed runtime files match source, the existing Files block uses `files-plus`, shortcuts are unchanged, native `check` passes and live `status` has no errors. The actual window verifies file right-click, Escape, README source preview, Back, and opening/cancelling the system folder picker without changing the space. Confirming a new root and the cross-space picker scenario remain manual acceptance. The layout backup and local screenshot are recorded in the implementation plan.
