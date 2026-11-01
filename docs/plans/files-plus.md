@@ -1,6 +1,6 @@
 # Files Plus implementation plan
 
-Status: implemented, merged into local `main` and installed in the person's normal Herdr home on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`. Community publication is authorized and the package is prepared for the public GitHub repository; publication verification is recorded below.
+Status: implemented, installed locally and published to the public GitHub repository on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`; the community recipe and preview were published in `bf9125e4414ae43ab1c43a0ba320e295160f7491`. Official catalog acceptance is awaiting the next index snapshot; publication verification is recorded below.
 
 Follow the existing [Multi-Roots plan](multi-root.md) for workspace config format and `shared("multi-root.spaces")` semantics. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
 
@@ -100,7 +100,7 @@ Verification scope:
 
 ## Implementation and acceptance
 
-The user's 2026-11-01 requests authorize Files Plus development and testing on `mod/file-plus`, followed by local `main` integration and installation in Herdr. Implementation used `/Users/fanghu/Documents/Work/.agent-worktrees/file-plus/herdr-mods`, based on local main `6b715689e7062528627e6813f048575f36be6377`. Other task worktrees remain untouched. The delivery scope includes the necessary commits and local merge, with no remote push or public release.
+The user's 2026-11-01 requests authorize Files Plus development and testing on `mod/file-plus`, local `main` integration and installation in Herdr, then community publication. Implementation used `/Users/fanghu/Documents/Work/.agent-worktrees/file-plus/herdr-mods`, based on local main `6b715689e7062528627e6813f048575f36be6377`. Other task worktrees remain untouched. The publication scope includes the necessary commits, main integration and push to the existing public repository.
 
 The independently installable runtime is under `files-plus/mods/files-plus/`. It adapts the repository's existing Multi-Roots tree, configuration and read-only editor, adds `actions.js`, internal menu/dialog roles and a Radix palette, and retains the shared workspace format. No changes to the Multi-Roots runtime or Preview Plus plan are required. See [the recipe](../../files-plus/RECIPE.md) for installation and the final behavior.
 
@@ -142,3 +142,5 @@ The publication target is the existing public repository [linziyanleo/herdr-mods
 The public preview was recaptured with `herdr-app shot` in a disposable Herdr 0.1.11 home and core. It shows the native two-root tree and file context menu without a terminal or personal content. The unedited PNG is 1840 × 1300, retains native sRGB with no gAMA override, and has SHA-256 `7953dccab9320f6f03d5321f8094ab4434598e436342414eefbfda62fdfc2cfc`. Native `check` passes and the capture window reports zero errors; runtime files are unchanged from the accepted implementation.
 
 Herdr's [sharing instructions](https://herdr.dev/mods/) discover public repositories with the topic and screen community previews before display. Publishing source and verifying a raw GitHub image are separate from catalog acceptance. Read the live `https://assets.herdr.dev/mods/index.json`, inspect its Files Plus entry and fetch that entry's exact `previewUrl` before reporting that the official preview is visible. The initial index snapshot was generated at `2026-11-01T04:00:17.001Z` and contained only the older Multi-Roots entry from this repository.
+
+GitHub delivery is verified: remote `main` reads back `bf9125e4414ae43ab1c43a0ba320e295160f7491`, the repository is public with topic `herdr-mod`, and all 13 published recipe/preview/runtime artifacts match their Git blobs. The public raw PNG is byte-identical to the local preview, with SHA-256 `7953dccab9320f6f03d5321f8094ab4434598e436342414eefbfda62fdfc2cfc`. The latest observed official snapshot, `2026-11-01T04:30:16.709Z`, predates this push and still contains only the older Multi-Roots entry. Files Plus and its official preview are not yet reported as visible.
