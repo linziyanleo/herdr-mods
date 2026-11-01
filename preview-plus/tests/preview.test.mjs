@@ -46,7 +46,11 @@ test("standalone tree opens Markdown, source, links, history, and ordinary text 
   find(tree, "preview-file-README.md").handlers.on_click({}, state.cx); await state.settle();
   assert.equal(panel.selected.file, path.join(state.dir, "README.md"));
   assert.ok(panel.markdownBlocks.some(block => block.media?.path.startsWith("mods/preview-plus/.cache/")));
-  assert.ok(find(state.render(), "preview-markdown-image-1"));
+  const documentImage = find(state.render(), "preview-markdown-image-1");
+  assert.equal(typeof documentImage.handlers.on_click, "function");
+  documentImage.handlers.on_click({}, state.cx); await state.settle();
+  assert.equal(panel.selected.file, path.join(state.dir, "landscape.png")); assert.equal(panel.history.length, 1);
+  panel.back(state.cx); await state.settle();
   assert.equal(panel.code.readonly, true);
   const editor = panel.code;
   find(state.render(), "preview-source").handlers.on_click({}, state.cx);
@@ -79,6 +83,16 @@ test("Back restores a PDF page and zoom after following a text link", async t =>
   panel.back(state.cx); assert.equal(find(state.render(), "preview-previous").handlers.on_click, undefined);
   await state.settle(); assert.equal(panel.media.page, 2); assert.equal(panel.zoom, 1.5);
   find(state.render(), "preview-previous").handlers.on_click({}, state.cx); await state.settle(); assert.equal(panel.media.page, 1);
+});
+
+test("Fit stays inside the measured viewport at non-default Herdr zoom", async t => {
+  const state = await runtime(t); await fixtures(state.dir); state.props = { file: path.join(state.dir, "landscape.png") }; state.zoom = 1.2;
+  const panel = await state.start();
+  panel.measure({ width: 480, height: 360 }, state.cx);
+  const canvas = find(state.render(), "preview-media"), content = canvas.nodes[0], image = content.nodes[0];
+  assert.ok(image.attributes.w[0] * state.zoom + 32 * state.zoom <= 480);
+  assert.ok(image.attributes.h[0] * state.zoom + 32 * state.zoom <= 360);
+  assert.equal(image.attributes.w[0] / image.attributes.h[0], 640 / 400);
 });
 
 test("old async reads cannot replace a newer target, including an A-B-A sequence", async t => {

@@ -14,7 +14,7 @@ export async function runtime(t) {
   state.spaces = [{ id: "s1", active: true, folder: dir, machine: null }];
   state.panes = [{ pane: "p1", cwd: dir }]; state.focus = { space: "s1", pane: "p1", cwd: dir, terminal: "t1" };
   const host = {
-    appHome: () => path.join(dir, "app"), window: () => ({ platform: state.platform }), settings: () => ({ dark: true }),
+    appHome: () => path.join(dir, "app"), window: () => ({ platform: state.platform }), settings: () => ({ dark: true, zoom: state.zoom || 1 }),
     props: () => state.props, shared: key => state.shared[key], spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
     readTextFile: async (file, options) => {
       if (state.hooks.read) return state.hooks.read(file, options);

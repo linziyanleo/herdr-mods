@@ -247,14 +247,16 @@ export default class PreviewPlus extends View {
         if (!block.media) return TextView.markdown(`preview-markdown-${this.selected.file}-${index}`, block.text)
           .selectable(true).scrollable(false).w_full().flex_none().text_size(13).text_color(colors.foreground).on_link_click((url, cx) => this.follow(url, cx));
         const width = Math.min(block.media.width, Math.max(1, this.viewport.width - 32));
-        return image(block.media.path).id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_pointer()
-          .on_click((_event, cx) => this.follow(block.href, cx));
+        return div().id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_pointer()
+          .on_click((_event, cx) => this.follow(block.href, cx)).child(image(block.media.path).size_full());
       }));
     return this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1();
   }
 
   measure(size, cx) {
-    if (Math.abs(this.viewport.width - size.width) > 0.5 || Math.abs(this.viewport.height - size.height) > 0.5) { this.viewport = size; cx.notify(); }
+    // Measurements are window points; builder dimensions also receive Herdr's zoom.
+    const zoom = settings().zoom || 1, viewport = { width: size.width / zoom, height: size.height / zoom };
+    if (Math.abs(this.viewport.width - viewport.width) > 0.5 || Math.abs(this.viewport.height - viewport.height) > 0.5) { this.viewport = viewport; cx.notify(); }
   }
 
   close() {
