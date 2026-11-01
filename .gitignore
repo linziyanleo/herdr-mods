@@ -21,6 +21,7 @@ herdr.d.ts
 
 # Dependencies and local output
 node_modules/
+preview-plus/mods/preview-plus/.cache/
 *.log
 .DS_Store
 ._*
