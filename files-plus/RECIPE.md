@@ -4,13 +4,13 @@ Browse a single folder or every folder in a Multi-Roots workspace in the Files p
 
 ![Files Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` from a disposable native Herdr window. All shown folders and terminals are test fixtures.
+The preview is an unedited `herdr-app shot` from a disposable native Herdr window. All shown folders are test fixtures. Preserve the capture's sRGB metadata.
 
 ## What you see
 
 The panel defaults to 320px wide; its actual size belongs to the layout. The 42px header holds Files, a 24px Add folder control and a shortened folder, workspace or preview path. A preview adds a 24px back control. Workspace root rows are 30px high; entry rows are 28px with 18px of indentation per level. Roots show their display name and path, highlight the focused terminal's root, and show “Not found” for missing directories. Git letters appear at the right of changed entries.
 
-The pointer menu is 272px wide with 32px rows, two groups, disabled actions and an inline error or progress state. Name and confirmation dialogs are 440px wide. Use 13px body text, 12px secondary text and 14px dialog headings, with 0.5px borders and separators. Controls use 4px radii. There are no animations or decorative labels.
+The pointer menu is 272px wide with 32px rows. Separators precede creation actions and workspace root actions. Disabled actions are dimmed; errors and progress stay in the menu. Name and confirmation dialogs are 440px wide. Use 13px body text, 12px secondary text and 14px dialog headings, with 0.5px borders and separators. Controls use 4px radii. There are no animations or decorative labels.
 
 Colors use [Radix Colors scale roles](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale): Gray 1–2 backgrounds, 3–5 controls and selection, 6–8 borders, 11–12 text; Red, Green, Amber, Blue and Purple 11 for status and source syntax. `settings().dark` selects light or dark values. Native editor chrome follows Herdr's theme.
 
@@ -46,11 +46,71 @@ files-plus/
   tests/
 ```
 
-`main.js` exports the GPUI view and routes `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name/confirmation/root action. `workspace.js` owns lazy tree state, local watchers, a 10-second refresh fallback, Git marks and bounded read-only previews. `roots.js` and `config.js` adapt this repository's Multi-Roots format, root matching, parsing and guarded saves. `actions.js` owns terminal insertion and filesystem commands. `palette.js` owns Radix light/dark values. There are no cross-mod code imports.
+Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, and `dialog` for a modal name, confirmation or root action. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
+
+Keep tree state, local watchers, the 10-second refresh fallback, Git marks and read-only previews in `workspace.js`. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and the two Radix palettes in `palette.js`. There are no cross-mod code imports. The package manifest is:
+
+```json
+{
+  "place": "right",
+  "size": 320,
+  "cloned_from": { "name": "files", "version": "0.1.9" }
+}
+```
+
+No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged.
 
 The baseline is native Herdr 0.1.11. Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/focus/settings, `shared`, `setShared`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `pickFolder`, overlays and `run`. Commands are `pane.focus`, `terminal.paste`, `tab.new` and optional `layout.select`.
 
-Retain the existing `multi-root.spaces` and `multi-root.recent` contracts; prune closed mappings only when the local core's layout is ready. Config parsing errors keep the last valid roots. Additional shared keys are `files-plus.clipboard` (`{path,kind,on}`), `files-plus.revision` (a refresh counter), and optional `preview-plus.target` keyed by space (`{file,root,on}`). Menu targets additionally keep the physical root path for terminal cwd matching; this is derived data, not workspace configuration.
+### Folder context and saved workspaces
+
+In single-folder mode, use the active terminal's live `cwd`, then the active space's folder as fallback. Carry its machine name as `on`, with `null` for this computer. Include the space, cwd and machine in the context key. A changed context resets the tree and preview. Use absolute paths for entry, expansion and Git-mark keys in both modes.
+
+A workspace is a local non-Windows space with a mapping in `shared("multi-root.spaces")`. Its folders replace the single cwd as the browsing roots. Keep expansion and preview state when terminal focus moves between those roots. Match the longest declared or physical root against the focused cwd when highlighting a root or formatting a reference.
+
+Read portable workspace files named `<name>.herdr-workspace.json`:
+
+```json
+{
+  "name": "Product",
+  "folders": [
+    { "path": "./web", "name": "Web" },
+    { "path": "./api", "name": "API" },
+    "./notes"
+  ]
+}
+```
+
+Require a `folders` array of path strings or objects with `path` and optional display `name`. Resolve relative paths from the config directory, expand `~`, normalize `.` and `..`, and keep the first occurrence of each resolved path. Keep missing roots visible. A missing workspace name defaults to the filename without its suffix. Invalid JSON or invalid fields preserve the last valid mapping and expose an error.
+
+Use these persisted shared contracts. Compare values before writing, because a shared write redraws every mod:
+
+```ts
+"multi-root.spaces": Record<SpaceId, {
+  name: string;
+  file: string | null;
+  folders: { name: string | null; path: string; source: string }[];
+  error?: string;
+}>
+"multi-root.recent": string[]
+"files-plus.clipboard": { path: string; kind: "file" | "dir" | "root"; on: string | null }
+"files-plus.revision": number
+"preview-plus.target": Record<SpaceId, { file: string; root: string; on: string | null }>
+```
+
+`path` is resolved and absolute; `source` retains the declared spelling. `file: null` denotes an unsaved workspace. Retain the ten most recent saved config paths. Prune closed workspace mappings only when `machines()` reports the local layout as ready.
+
+Before a root action, capture the space and the config text. Preserve original string entries, path spellings and unknown fields when saving. Write new roots relative to the config directory, using two-space JSON and a trailing newline. Call `writeTextFile(file, text, expectedText)` once. If the expected text is stale, reload and report the conflict without retrying the write. Check the captured mapping before changing it; a late completion must not recreate a closed space.
+
+### Loading and actions
+
+Store loaded directories in a map and expanded folders in a set. Load a directory only when expanded. Share the 5,000-entry budget across roots, sort directories first, and do not traverse symlinks. On POSIX, list names with NUL delimiters so whitespace and newlines remain names. On Windows, use PowerShell literal-path operations. Read Git porcelain status per distinct repository and translate its paths back to declared root paths.
+
+Use `watchFolder` on local roots and the config directory. Reload the config only for changes to its file. Poll remote folders through the 10-second refresh. Guard all asynchronous results with the captured context and request identity. Build `EditorState` with `readonly: true`; retain the existing editor if preview bytes have not changed. Handle missing, binary, unreadable and oversized files as visible states.
+
+Capture `{space,path,kind,root,physicalRoot,on,active:{pane,terminal,cwd}|null}` before opening the popup. The physical root is derived data, never a saved workspace field. All actions use this target rather than the popup's current focus. For agent insertion, save the clipboard text, focus the captured terminal, yield with `cx.sleep(0)`, paste the quoted reference, yield again, then restore previous text if present. `run()` returns no completion result, so restoring the clipboard before that yield can paste the wrong bytes.
+
+Use `cx.spawn` for slow work. Create focus handles, inputs and editors in `init`, events or asynchronous tasks, never during `render`. Each callback uses its own context. Release retained inputs and editors when the view closes. Keep an asynchronous menu action alive until completion, or transfer it to a dialog before closing the menu.
 
 ### Dependencies and access
 
@@ -61,8 +121,8 @@ The mod reads workspace directories and text files, writes only requested filesy
 ### Installation
 
 1. Read the installed Herdr guide. Use `HERDR_APP_HOME` when set, otherwise `~/.config/herdr-app`.
-2. Check for a `mods/files-plus` name conflict. Copy only this package's runtime `.js`, `.svg` and `mod.json` files to a new runtime directory; keep the third-party licenses with the distributed package. Do not copy tests, generated `.d.ts`, `jsconfig.json`, recipes or screenshots into the runtime.
-3. In a personal layout, replace the existing Files block's `content.mod` with `files-plus`, retaining its block id. Clone a bundled layout first. No other mods or shortcut changes are required. To undo, restore the previous mod reference.
+2. Check for a `mods/files-plus` name conflict. Copy only runtime `.js`, `.svg` and `mod.json` files; keep the third-party licenses with the distributed package. Leave tests, generated `.d.ts`, `jsconfig.json`, recipes and screenshots out of the runtime.
+3. To replace an existing Files block, initially install with `place: "none"`. In a personal layout, set the block's `content.mod` to `files-plus`, retaining its id. Restore the packaged manifest after the block uses the new mod. This avoids a second automatically docked copy. Clone a bundled layout before editing it. No other mods or shortcut changes are required. To undo, restore the previous reference.
 4. Run `herdr-app check <app-home>/mods/files-plus`, inspect `herdr-app status`, then try the actual panel.
 
 ### Optional Preview Plus pairing
@@ -93,31 +153,17 @@ Multi-Roots management remains local POSIX support, matching the existing packag
 
 ## Done when
 
-From the repository root:
+Build and exercise these observable behaviors using disposable folders:
 
-```sh
-node --experimental-vm-modules --test files-plus/tests/*.test.mjs
-herdr-app check files-plus/mods/files-plus
-node files-plus/tests/native-session.mjs
-node files-plus/tests/native-verify.mjs /tmp/fp.EXAMPLE/session.json
-node files-plus/tests/native-pair.mjs /tmp/fp.EXAMPLE/session.json
-```
+1. `herdr-app check <app-home>/mods/files-plus` passes. The single-folder tree handles loading, empty, unreadable and missing states, hidden names and symlinks. Expanded directories respect the per-folder and total limits.
+2. Text and Markdown open as read-only source. Back returns to the same tree. Binary, absent and oversized files show their own states. A file edit refreshes the preview; unchanged bytes retain the editor state.
+3. A two-root saved workspace shows both trees, root names, Git marks and missing roots. Focus changes retain expansion and previews. An invalid config keeps the last valid roots with a visible error.
+4. Same-root and cross-root agent references reach the captured terminal with the correct quoting and trailing space, without Enter. Previous clipboard text is restored. A closed terminal is refused.
+5. Copy and Paste preserve the source and choose available copy names. A directory cannot be pasted into itself or through a symlink into a descendant. Cross-machine paste is disabled. Absolute and relative path copying uses the clicked entry's owning root.
+6. New file, New folder, Rename, Trash confirmation and local reveal act on the clicked target and refresh the tree. Invalid or existing names are refused. Cancelling a dialog writes nothing. Root rename and deletion remain disabled.
+7. The native folder picker can confirm and cancel. Duplicate selections leave the workspace unchanged. A different root extends the captured space even if focus moves elsewhere. Saving preserves custom fields, and a conflicting disk edit is not overwritten.
+8. Root actions retain one root, leave removed roots' files intact, and launch a terminal in the requested root. When Multi-Roots is installed, its agent menu receives the captured root and space.
+9. With a compatible Preview Plus receiver and stack, rich targets switch the panel and Back restores the existing tree. Ordinary text stays in the source editor. Missing receivers fall back to source; stale requests cannot replace a later selection. Rich rendering itself belongs to Preview Plus.
+10. `herdr-app status` reports no mod or layout errors. Capture the running panel with `herdr-app shot preview.png`. Use disposable content and retain the native PNG color metadata. Ship this folder without a `layouts/` directory or unused key bindings.
 
-The unit/integration suite runs the real runtime modules against disposable directories and real POSIX file commands. Only the Herdr/GPUI host is adapted for Node. It covers references, terminal capture, clipboard restoration, copy names and cycles, symlinks, literal shell characters, CRUD, Trash, machine routing, workspace conflicts, unknown-field preservation, lazy bounds, editor states, stale reads and Preview Plus handoff ordering.
-
-The native session launches the unchanged installed macOS bundle through LaunchServices with a separate app home and core. Its test-only wrapper invokes the actual runtime methods and renders the real popup/dialog/editor. Terminal recorders check the exact received bytes and the absence of Enter. The verifier writes `native-report.json` and real `herdr-app shot` captures under the printed `/tmp/fp.*` directory. It restores the previous text clipboard and only restores its own test-created Trash entry. No test commands ship in the installed mod.
-
-The optional native pairing check installs a minimal receiver fixture only in that disposable home. It verifies Markdown/image/PDF target delivery, actual stack switching, back commands, retained tree expansion and ordinary-text source preview. It writes `native-pair-report.json`; it does not implement or validate Preview Plus's renderer.
-
-Before accepting an installation, also manually select and cancel a folder in the system picker, add a folder while changing focus to another space, and confirm the captured original space is updated. Automated tests exercise the successful, cancelled, duplicate and conflicting helper paths; a screenshot of the Add folder dialog does not prove a system-picker selection. Preview Plus's own renderer requires its separate acceptance when implemented.
-
-After collecting evidence, stop only that test session with the exact values printed in `session.json`:
-
-```sh
-HERDR_APP_HOME=/tmp/fp.EXAMPLE/app herdr-app do app.quit
-XDG_STATE_HOME=/tmp/fp.EXAMPLE/s XDG_CONFIG_HOME=/tmp/fp.EXAMPLE/c HC_SESSION=fp hc server stop
-```
-
-Recorded acceptance results are maintained in the [implementation plan](../docs/plans/files-plus.md#implementation-and-acceptance).
-
-Local installation acceptance on 2026-11-01 uses Herdr 0.1.11 and runtime commit `6e586be27e4b06bd3c962bfd02deb58a5a26577c`, merged into local `main`. All 11 installed runtime files match source, the existing Files block uses `files-plus`, shortcuts are unchanged, native `check` passes and live `status` has no errors. The actual window verifies file right-click, Escape, README source preview, Back, and opening/cancelling the system folder picker without changing the space. Confirming a new root and the cross-space picker scenario remain manual acceptance. The layout backup and local screenshot are recorded in the implementation plan.
+The committed package also includes automated and isolated native test drivers. Their commands are in [README.md](README.md); they are development tools, not runtime dependencies. Actual results and remaining platform/manual checks are in the [implementation plan](../docs/plans/files-plus.md#implementation-and-acceptance).

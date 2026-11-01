@@ -1,6 +1,6 @@
 # Files Plus implementation plan
 
-Status: implemented, merged into local `main` and installed in the person's normal Herdr home on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`. Automated, isolated native and local installation acceptance are recorded [below](#implementation-and-acceptance). Remote push and publication have not been requested or performed.
+Status: implemented, merged into local `main` and installed in the person's normal Herdr home on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`. Community publication is authorized and the package is prepared for the public GitHub repository; publication verification is recorded below.
 
 Follow the existing [Multi-Roots plan](multi-root.md) for workspace config format and `shared("multi-root.spaces")` semantics. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
 
@@ -131,4 +131,14 @@ Final package checks found no syntax, whitespace or documentation-link errors. A
 - The original layout and installation metadata are saved under `~/.config/herdr-app/backups/files-plus-20261101-121208/`. To roll back, restore `layouts/main-graph.json` from that backup and remove only the newly added `mods/files-plus/` directory.
 - `herdr-app check ~/.config/herdr-app/mods/files-plus` passes. Live `herdr-app status` has no mod/layout errors. Native UI checks exercise the actual file right-click menu, Escape, README source preview and Back, plus the Add folder dialog and system picker cancellation. The selected space remains a single-folder space after cancellation.
 - `/tmp/herdr-files-plus-installed-20261101.png` captures the installed panel in the person's running window. It is local evidence; the distributed preview remains the disposable-fixture capture.
-- The development branch/worktree is retained for this active conversation. Local `main` is the installed source. No remote push has been performed.
+- The development branch/worktree is retained for this active conversation. Local `main` is the installed source. The subsequent community publication request also authorizes remote delivery.
+
+### Community publication
+
+The publication target is the existing public repository [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods), default branch `main`. Its `herdr-mod` topic is already present. The user authorizes the required commits, main integration and push for Files Plus publication.
+
+`files-plus/RECIPE.md` follows the installed guide's five sections and now includes the portable workspace schema, shared-state contracts, context and lifecycle rules, installation steps and observable acceptance checks. It can guide a build from an empty folder without local test receipts or workstation-specific installation notes. The package includes the 11 runtime files, recipe, preview and license notices, with no `layouts/` folder and no required key snippet.
+
+The public preview was recaptured with `herdr-app shot` in a disposable Herdr 0.1.11 home and core. It shows the native two-root tree and file context menu without a terminal or personal content. The unedited PNG is 1840 × 1300, retains native sRGB with no gAMA override, and has SHA-256 `7953dccab9320f6f03d5321f8094ab4434598e436342414eefbfda62fdfc2cfc`. Native `check` passes and the capture window reports zero errors; runtime files are unchanged from the accepted implementation.
+
+Herdr's [sharing instructions](https://herdr.dev/mods/) discover public repositories with the topic and screen community previews before display. Publishing source and verifying a raw GitHub image are separate from catalog acceptance. Read the live `https://assets.herdr.dev/mods/index.json`, inspect its Files Plus entry and fetch that entry's exact `previewUrl` before reporting that the official preview is visible. The initial index snapshot was generated at `2026-11-01T04:00:17.001Z` and contained only the older Multi-Roots entry from this repository.
