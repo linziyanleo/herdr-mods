@@ -1,6 +1,6 @@
 # Files Plus implementation plan
 
-Status: implemented, installed locally and published to GitHub and the official Herdr community catalog on 2026-11-01. The runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`; the community recipe and preview were published in `bf9125e4414ae43ab1c43a0ba320e295160f7491`. The official catalog entry and served preview are verified below. A follow-up for display, performance, motion, content-fitted panel/menu width and drag-to-agent is specified in [Follow-up: display, performance, motion, width and drag-to-agent](#follow-up-display-performance-motion-width-and-drag-to-agent). Design decisions are settled; implementation awaits go-ahead.
+Status: the original package was implemented, installed locally and published to GitHub and the official Herdr community catalog on 2026-11-01. The original runtime source commit is `6e586be27e4b06bd3c962bfd02deb58a5a26577c`; its community recipe and preview were published in `bf9125e4414ae43ab1c43a0ba320e295160f7491`. The official catalog entry and served preview are verified below. The [follow-up](#follow-up-display-performance-motion-width-and-drag-to-agent) is implemented in separate feature commits; isolated native acceptance is in progress before loading it into the working Herdr. This follow-up has not been pushed.
 
 The workspace launcher update below is verified locally and awaits installation and publication.
 
@@ -171,7 +171,7 @@ This plan was checked against Herdr 0.1.11 using `~/.config/herdr-app/AGENTS.md`
 4. **Context menu window boundary**: adopt Option A — exact content-derived width and height with `frame: "none"` plus edge-clamped `at: { x, y }` coordinates so menus near the right or bottom window edge stay fully visible inside Herdr.
 5. **Drag to Agent (`@`)**: dragging a file, folder or workspace root row out of `files-plus` into the workspace / terminal / Agent area inserts its `@` reference into the active Agent or terminal pane without submitting Enter.
 
-### Current findings
+### Baseline findings before the follow-up
 
 | Area | Evidence | Effect |
 | --- | --- | --- |
@@ -315,4 +315,15 @@ Allow dragging any file, folder or workspace root row out of `files-plus` into t
 
 ### Follow-up implementation and acceptance (2026-11-02)
 
-Phase 1 uses retained 100-row child entities, path-filtered local watches, four concurrent directory reads, cached root discovery, two-second Git throttling and incremental budget accounting. All 31 runtime tests and the source `herdr-app check` pass. The installed 0.1.11 JavaScript engine has no `Intl`; sorting uses a module-level collator when available and the existing `localeCompare` behavior otherwise. Native acceptance and installation remain pending until the five phases are complete.
+The five feature commits implement retained tree chunks and incremental refresh, calibrated menus and vector controls, native opacity motion, opt-in panel fitting and Drag to Agent. Follow-up fixes preserve unchanged root-read errors without repeated redraws, discard superseded directory replies, invalidate reads on panel close and release the entry-limit state when folders collapse.
+
+Herdr 0.1.11 has no `Intl`; sorting uses a module-level collator when available and the existing `localeCompare` behavior otherwise. Fully transparent probes do not receive native size callbacks, so calibration uses faint probes behind the opaque header. Menu padding includes its 0.5px border within the measured dimensions. The root-owned FPS HUD requires a ShellRoot absent from Herdr's window; native profiling uses the documented inline monitor.
+
+The user's 2026-11-02 validation boundary is explicit: use one separate Herdr app home and core, close unneeded test windows, then install the accepted runtime into the working Herdr. Do not create verification layouts or spaces in the working instance. The native scripts validate the disposable home before issuing commands. The working runtime and original layout were restored while acceptance continues in `/tmp/fp.1FjNwc`.
+
+Current evidence:
+
+- All 42 runtime tests and `herdr-app check files-plus/mods/files-plus` pass. The isolated API acceptance report covers 12 groups of file, clipboard, terminal, preview and workspace actions, with no mod/layout errors (`/tmp/fp.1FjNwc/native-report.json`).
+- The final JS benchmark alternates 20 fresh processes per side against `80ab6d9`, with 5,000 loaded entries and zero errors. Initial render median/range: 29.89ms [29.36, 35.01] before, 24.92ms [23.12, 26.95] after; unrelated render: 17.90ms [15.94, 22.19] before, 4.29ms [3.84, 4.71] after; collapse: 14.62ms [13.26, 18.00] before, 8.53ms [8.25, 9.28] after. Rebuilt rows are respectively 5,011/5,011, 5,011/0 and 4,511/100. These are JS builder/materialization measurements, excluding native layout, GPU and I/O; they do not establish scroll FPS (`/tmp/files-plus-followup-benchmark-final.json`).
+- One settled native idle sample per side counted 330 program calls over 60.005s before and 18 over 60.077s after, with all 5,000 entries loaded and no mod/layout errors. The final safety poll was still running at the latter cutoff, so the count describes that interval, not the cost of a completed poll (`/tmp/fp.PmLY5u/idle-performance.json`, `/tmp/fp.1psGvV/idle-performance.json`).
+- Native width, theme/zoom screenshots, continuous drag/drop and scroll grading remain open. The isolated window's input interface returns `cgWindowNotFound` / `noWindowsAvailable`; the width check has not passed and must be investigated in a controllable test window. Alternate macOS input requires the user's explicit selection under the computer-control tool's instructions. The public preview has not yet been recaptured. Do not install the candidate into the working Herdr until these acceptance checks finish.
