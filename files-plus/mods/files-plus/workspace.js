@@ -4,7 +4,7 @@ import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
-import { appearance, textStyle, sourceStyle } from "./appearance.js";
+import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
@@ -61,7 +61,7 @@ export class FilesPanel extends View {
   initPanel(cx) {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
     this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map();
-    this.look = appearance(cx);
+    this.look = appearance();
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
     this.revision = shared(REVISION);
@@ -304,13 +304,13 @@ export class FilesPanel extends View {
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
   menu(path, kind, root, event, cx) {
     cx.stop_propagation();
-    const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(cx), viewport(), event.position, zoom(), appearance(cx));
+    const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
     openOverlay({ mod: "files-plus", kind: "popup", ...geometry, props: { role: "menu", target, geometry, pointer: event.position } });
   }
   syncTree(cx, loc = location()) {
     const roots = this.rootInfo || this.workspace?.folders || [];
     this.activeRoot = rootOf(loc.cwd, roots)?.path;
-    const look = appearance(cx), lookKey = JSON.stringify(look), lookChanged = this.lookKey !== lookKey;
+    const look = appearance(), lookKey = JSON.stringify(look), lookChanged = this.lookKey !== lookKey;
     const signature = JSON.stringify([this.treeVersion, this.activeRoot, look]);
     if (signature === this.treeSignature) return;
     this.treeSignature = signature;
@@ -348,8 +348,7 @@ export class FilesPanel extends View {
   scheduleFit(cx, cause = "background") {
     const fit = props()?.fit;
     if (!fit?.node || this.file) return;
-    const look = appearance(cx);
-    const signature = JSON.stringify([this.treeVersion, this.panelTitle(), metrics(cx), look.spacing, viewport(), zoom(), fit]);
+    const signature = JSON.stringify([this.treeVersion, this.panelTitle(), metrics(), viewport(), zoom(), fit]);
     if (signature === this.fitSignature && cause !== "user") return;
     this.fitSignature = signature;
     const token = { context: this.context, cause: cause === "user" || this.fitTimer?.cause === "user" ? "user" : "background" };
@@ -359,7 +358,7 @@ export class FilesPanel extends View {
       this.fitTimer = null;
       const tree = layout();
       if (!findNode(tree, fit.node)) return;
-      const desired = fittedWidth(panelWidth(this.rowModel || [], this.panelTitle(), metrics(cx), appearance(cx)), fit, tree, viewport(), zoom());
+      const desired = fittedWidth(panelWidth(this.rowModel || [], this.panelTitle(), metrics()), fit, tree, viewport(), zoom());
       if (!shouldFit(desired, this.panelSize.width / zoom(), token.cause)) return;
       this.lastRequestedWidth = desired; this.resizePending = token;
       run("layout.resize", { id: fit.node, px: desired });
@@ -392,13 +391,13 @@ export class FilesPanel extends View {
     const loc = location();
     this.scheduleFit(cx);
     const activeRoot = rootOf(loc.cwd, this.rootInfo || this.workspace?.folders || [])?.path;
-    const look = appearance(cx), { colors: t, typography: type, spacing: s } = look;
+    const look = appearance(), { colors: t, font } = look;
     if (loc.key !== this.context || this.revision !== shared(REVISION) || activeRoot !== this.activeRoot || this.treeSignature !== JSON.stringify([this.treeVersion, activeRoot, look]) || this.code && this.previewStyle !== JSON.stringify(sourceStyle())) this.scheduleSync(cx);
     const entry = workspaceOf(this.spaceId), roots = this.rootInfo || entry?.folders || [];
     const fileRoot = this.file ? rootOf(this.file, roots) : null;
     const add = Boolean(this.root || entry?.folders.length) && this.on === null && appWindow().platform !== "windows";
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
-    return textStyle(v_flex().id("files-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground), type.md, type.sans)
+    return v_flex().id("files-plus").size_full().min_w(0).min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).font_family(font).text_size(13)
       .on_size_change((size, cx) => this.panelResized(size, cx))
       .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
       .on_mouse_up("left", () => { this.dragCandidate = null; })
@@ -407,24 +406,24 @@ export class FilesPanel extends View {
         if (row) { if (row.kind === "file") this.openFile(row.path, row.root, cx); else this.toggle(row.path, cx); }
       })
       .on_mouse_move((event, cx) => dragMove(this, event, cx))
-      .child(calibrationProbe(cx, cx => { this.scheduleFit(cx); cx.notify(); }))
-      .child(h_flex().h(type.md.line_height + 2 * s.sm).flex_none().px(s.md).gap(s.sm).items_center().bg(t.background).border_b_1().border_color(t.border)
-        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(type.md.line_height).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_event, cx) => { this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(type.sm.size))))
-        .child(div().child("Files"))
-        .child(h_flex().id("add-folder").size(type.md.line_height).items_center().justify_center().text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
+      .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
+      .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
+        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_event, cx) => { this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
+        .child(div().font_semibold().child("Files"))
+        .child(h_flex().id("add-folder").size(24).items_center().justify_center().text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
           .when(add, el => el.cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))).on_click((_event, cx) => {
             if (!add) return;
             const root = entry?.folders[0]?.path || this.root;
             const target = this.target(root, "root", root);
-            openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target, cx), props: { role: "dialog", action: "add-root", target } });
+            openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target), props: { role: "dialog", action: "add-root", target } });
             cx.stop_propagation();
-          }).child(svg("mods/files-plus/plus.svg").size(type.sm.size)))
-        .child(textStyle(div().flex_1().min_w(0).truncate().text_right().text_color(t.muted), type.sm, type.sans).child(title)))
-      .when(Boolean(entry?.error), el => el.child(textStyle(div().px(s.md).py(s.sm).text_color(t.ansi1), type.sm, type.sans).child(entry.error)))
+          }).child(svg("mods/files-plus/plus.svg").size(14)))
+        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(title)))
+      .when(Boolean(entry?.error), el => el.child(div().px(14).py(8).text_size(12).text_color(t.ansi1).child(entry.error)))
       .when(!this.file, el => el.child(this.treeView))
       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
-        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(s.md).text_color(t.muted)
+        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
   close() {

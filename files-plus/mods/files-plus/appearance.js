@@ -1,13 +1,8 @@
 import { settings, theme } from "herdr";
 
-export function appearance(cx) {
-  const native = cx.theme(), s = settings();
-  // Herdr 0.1.11's Base projection drops color alpha and retains default font faces.
-  return { ...native, colors: theme(), typography: { ...native.typography, sans: s.ui_font_family, mono: s.font_family } };
-}
-
-export function textStyle(el, token, font) {
-  return el.font_family(font).text_size(token.size).line_height(`${token.line_height}px`).font_weight(token.weight);
+// Only values exposed by Herdr belong here. Control defaults match its shipped mods.
+export function appearance() {
+  return { colors: theme(), font: settings().ui_font_family };
 }
 
 export function sourceStyle() {

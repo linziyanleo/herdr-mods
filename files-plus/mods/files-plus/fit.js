@@ -6,17 +6,16 @@ export function findNode(tree, id) {
   for (const node of tree.children || []) { const found = findNode(node, id); if (found) return found; }
   return null;
 }
-export function panelWidth(rows, title, metrics, look) {
-  const { spacing: s, typography: type } = look;
-  const header = 2 * s.md + textWidth("Files", 13, metrics) + type.md.line_height + 3 * s.sm + textWidth(title, 12, metrics);
+export function panelWidth(rows, title, metrics) {
+  const header = 28 + textWidth("Files", 13, metrics) + 24 + 24 + textWidth(title, 12, metrics);
   // Expanded descendants must not move the divider beside the workspace.
   const widths = rows.filter(row => !row.depth).map(row => {
-    const padding = 2 * s.sm;
+    const padding = 16;
     if (row.kind === "status") return padding + textWidth(row.name, 12, metrics);
-    return padding + type.xs.size + type.sm.size + 2 * s.sm + textWidth(row.name, 13, metrics)
-      + (row.detail ? s.sm + textWidth(row.detail, 12, metrics) : 0) + (row.mark ? s.sm + textWidth(row.mark, 12, metrics) : 0);
+    return padding + 12 + 14 + 14 + textWidth(row.name, 13, metrics)
+      + (row.detail ? 7 + textWidth(row.detail, 12, metrics) : 0) + (row.mark ? 7 + textWidth(row.mark, 12, metrics) : 0);
   });
-  return Math.ceil(Math.max(header, ...widths) + 2 * s.md);
+  return Math.ceil(Math.max(header, ...widths) + 26);
 }
 export function fittedWidth(intrinsic, fit, tree, view, zoom = 1) {
   const node = findNode(tree, fit.node), sidebar = findNode(tree, "sidebar");

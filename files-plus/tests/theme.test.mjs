@@ -4,22 +4,27 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { runtime, find } from "./runtime.mjs";
 
-test("retained rows follow same-appearance theme overrides and UI font changes", async t => {
+test("retained rows follow Herdr colors and UI fonts with native panel defaults", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   find(panel.render(r.cx), `file-${r.dir}/home`);
   const chunk = panel.chunks[0].entity;
   r.theme = { ...r.theme, background: "#191918", foreground: "#eeeeec", muted: "#b5b3ad", selected: "#3b3a37" };
   r.settings.ui_font_family = "Geist Mono";
-  r.semantic.typography.md = { size: 15, line_height: 23, weight: 500 }; r.semantic.radius.sm = 9; r.semantic.spacing.lg = 22;
   panel.render(r.cx); await r.drain();
-  const tree = panel.render(r.cx), row = find(tree, `file-${r.dir}/home`);
-  assert.equal(find(tree, "files-plus").attributes.bg[0], r.theme.background);
+  const tree = panel.render(r.cx), root = find(tree, "files-plus"), row = find(tree, `file-${r.dir}/home`);
+  assert.equal(root.attributes.bg[0], r.theme.background);
+  assert.equal(root.attributes.border_color[0], r.theme.border);
+  assert.ok(root.attributes.border_1); assert.equal(root.attributes.rounded[0], 10);
+  assert.equal(root.attributes.text_size[0], 13);
+  const header = root.nodes[1], title = header.nodes.find(n => n.nodes?.includes("Files"));
+  assert.equal(header.attributes.h[0], 42); assert.ok(title.attributes.font_semibold);
   assert.equal(chunk, panel.chunks[0].entity);
   assert.equal(chunk.snapshot().attributes.font_family[0], "Geist Mono");
-  assert.equal(chunk.snapshot().attributes.text_size[0], 15);
-  assert.equal(chunk.snapshot().attributes.line_height[0], "23px"); assert.equal(chunk.snapshot().attributes.font_weight[0], 500);
-  assert.equal(row.attributes.rounded[0], 9);
+  assert.equal(chunk.snapshot().attributes.text_size[0], 13);
+  assert.equal(chunk.snapshot().attributes.line_height, undefined);
+  assert.equal(chunk.snapshot().attributes.font_weight, undefined);
+  assert.equal(row.attributes.rounded[0], 7);
   assert.equal(chunk.snapshot().attributes.text_color[0], r.theme.foreground);
   assert.equal(row.nodes[0].attributes.text_color[0], r.theme.muted);
   r.rebuiltRows = 0;
@@ -45,64 +50,63 @@ test("an open source preview updates its code font and syntax without a file rer
   panel.render(r.cx); await r.drain(); assert.equal(panel.code, current);
 });
 
-test("menus, dialogs and drag pills use Herdr colors and UI typography", async t => {
+test("menus, dialogs and drag pills use Herdr colors, UI fonts and native defaults", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
-  r.settings.ui_font_family = "Geist Mono"; r.semantic.typography.md.size = 15;
+  r.settings.ui_font_family = "Geist Mono";
   for (const role of ["menu", "dialog", "drag"]) {
     r.props = { role, action: "rename", target: r.target("sample.txt"), overlay: role, cursor: { x: 400, y: 200 }, panelBounds: { x: 0, y: 0, width: 100, height: 800 } };
     const view = new Files(); view.init({}, r.cx); await r.drain();
     const el = find(view.render(r.cx), role === "drag" ? "files-drag-pill" : `files-${role}`);
-    assert.equal(el.attributes.font_family[0], "Geist Mono"); assert.equal(el.attributes.text_size[0], 15);
+    assert.equal(el.attributes.font_family[0], "Geist Mono"); assert.equal(el.attributes.text_size[0], 13);
     assert.equal(el.attributes.bg[0], r.theme.popover); assert.equal(el.attributes.text_color[0], r.theme.foreground);
     if (role === "dialog") {
       const button = find(el, "dialog-submit");
       assert.equal(button.attributes.bg[0], r.theme.solid); assert.equal(button.attributes.text_color[0], r.theme.solid_foreground);
+      assert.ok(button.attributes.border_1); assert.equal(button.attributes.rounded[0], 8);
     }
-    assert.equal(el.attributes.border, undefined);
+    if (role !== "drag") {
+      assert.equal(el.attributes.border_1, undefined); assert.equal(el.attributes.rounded, undefined);
+    } else { assert.ok(el.attributes.border_1); assert.equal(el.attributes.rounded[0], 8); }
     view.close();
   }
 });
 
-test("text calibration follows UI font and size rather than the terminal font", async t => {
+test("text calibration follows the configured UI font and the rendered 13px and 12px sizes", async t => {
   const r = await runtime(t), m = await r.load("metrics.js");
-  find(m.calibrationProbe(r.cx, () => {}), "metrics-13-0").handlers.on_size_change({ width: 100 }, r.cx);
-  assert.equal(m.metrics(r.cx).unit13, 10);
-  r.settings.font_family = "Geist Mono"; assert.equal(m.metrics(r.cx).unit13, 10);
-  r.settings.ui_font_family = "Geist Mono"; assert.equal(m.metrics(r.cx).unit13, 0.6 * r.semantic.typography.md.size);
-  r.semantic.typography.md.size = 15;
-  const probe = m.calibrationProbe(r.cx, () => {});
+  find(m.calibrationProbe(() => {}), "metrics-13-0").handlers.on_size_change({ width: 100 }, r.cx);
+  assert.equal(m.metrics().unit13, 10);
+  r.settings.font_family = "Geist Mono"; assert.equal(m.metrics().unit13, 10);
+  r.settings.ui_font_family = "Geist Mono"; assert.equal(m.metrics().unit13, 0.6 * 13);
+  const probe = m.calibrationProbe(() => {});
   assert.equal(probe.attributes.font_family[0], "Geist Mono");
-  assert.equal(find(probe, "metrics-13-0").attributes.text_size[0], 15);
-  assert.equal(find(probe, "metrics-12-0").attributes.text_size[0], 14);
+  assert.equal(find(probe, "metrics-13-0").attributes.text_size[0], 13);
+  assert.equal(find(probe, "metrics-12-0").attributes.text_size[0], 12);
 });
 
-test("spacing and radius changes update retained controls and menu geometry without changing colors", async t => {
+test("generic GPUI tokens cannot replace Herdr native panel or menu defaults", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.cx.theme = () => { throw new Error("Herdr mods do not use the generic Base theme"); };
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
-  find(panel.render(r.cx), `file-${r.dir}/home`);
-  r.semantic.spacing.sm = 11; r.semantic.spacing.lg = 26; r.semantic.radius.sm = 7;
-  r.semantic.typography.md.line_height = 30;
-  panel.render(r.cx); await r.drain();
   const tree = panel.render(r.cx), row = find(tree, `file-${r.dir}/home`);
-  assert.equal(row.attributes.h[0], 30 + r.semantic.spacing.xs);
-  assert.equal(row.attributes.rounded[0], 7); assert.equal(row.attributes.gap[0], 11);
-  assert.equal(find(tree, "files-tree").attributes.p[0], 11);
+  assert.equal(row.attributes.h[0], 28); assert.equal(row.attributes.rounded[0], 7);
+  assert.equal(row.attributes.gap[0], 7); assert.equal(find(tree, "files-tree").attributes.p[0], 6);
   r.props = { role: "menu", target: r.target("sample.txt"), overlay: "menu", pointer: { x: 1200, y: 900 } };
   const menu = new Files(); menu.init({}, r.cx); await r.drain();
-  const oldHeight = menu.geometry.height;
-  assert.equal(find(menu.render(r.cx), "action-copy").attributes.role[0], "button");
-  r.semantic.spacing.sm = 15;
+  const copy = find(menu.render(r.cx), "action-copy");
+  assert.equal(copy.attributes.role[0], "button"); assert.equal(copy.attributes.h[0], 30);
+  assert.equal(copy.attributes.rounded[0], 7);
+  r.theme = { ...r.theme, border: "#ffffff18" };
   menu.render(r.cx); await r.drain();
-  const next = r.calls.find(call => call.command === "openOverlay").spec;
-  assert.ok(next.height > oldHeight); assert.equal(next.frame, undefined);
+  assert.equal(r.calls.some(call => call.command === "openOverlay"), false);
 });
 
-test("Herdr color alpha and configured fonts override the incomplete Base projection", async t => {
+test("Herdr color alpha and configured fonts are used directly and code zoom is applied once", async t => {
   const r = await runtime(t), { appearance, sourceStyle } = await r.load("appearance.js");
   r.theme.border = "#ffffff18"; r.theme.input = "#ffffff24";
-  const look = appearance(r.cx);
+  const look = appearance();
   assert.equal(look.colors.border, "#ffffff18"); assert.equal(look.colors.input, "#ffffff24");
-  assert.equal(look.typography.sans, r.settings.ui_font_family); assert.equal(look.typography.mono, r.settings.font_family);
+  assert.equal(look.font, r.settings.ui_font_family);
+  assert.equal(look.typography, undefined); assert.equal(look.radius, undefined); assert.equal(look.spacing, undefined);
   r.settings.zoom = 1.2; r.settings.font_size = 18;
   assert.equal(sourceStyle().font_size, 15);
 });

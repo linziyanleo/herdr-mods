@@ -1,7 +1,6 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { settings } from "herdr";
-import { appearance, textStyle } from "./appearance.js";
 
 export const TITLES = { "new-file": "New file", "new-folder": "New folder", rename: "Rename", trash: "Move to Trash", "add-root": "Add folder to workspace", "remove-root": "Remove from workspace" };
 const samples = ["MMMMMMMMMM", "中文文件目录名称示例"];
@@ -18,18 +17,18 @@ export function textUnits(text) {
   return width;
 }
 export const textWidth = (text, size = 13, metrics = calibrated) => textUnits(text) * metrics[`unit${size}`];
-export function metrics(cx) {
-  const type = appearance(cx).typography, key = JSON.stringify([type.sans, type.md, type.sm, zoom()]);
-  if (key !== calibrationKey) { calibrationKey = key; calibrated = { unit13: type.md.size * 0.6, unit12: type.sm.size * 0.6 }; }
+export function metrics() {
+  const key = JSON.stringify([settings().ui_font_family, zoom()]);
+  if (key !== calibrationKey) { calibrationKey = key; calibrated = { unit13: 13 * 0.6, unit12: 12 * 0.6 }; }
   return calibrated;
 }
-export function calibrationProbe(cx, onChange) {
-  metrics(cx);
-  const key = calibrationKey, { typography: type, spacing } = appearance(cx);
+export function calibrationProbe(onChange) {
+  metrics();
+  const key = calibrationKey, font = settings().ui_font_family;
   // A zero-opacity subtree is not painted by Herdr 0.1.11, including size callbacks.
   // Place this faint probe behind the opaque header, outside normal layout flow.
-  return v_flex().id(`files-metrics-${key}`).absolute().left(0).top(0).opacity(0.01).w(400).h(type.md.line_height + spacing.sm).flex_none().font_family(type.sans).children([12, 13].map(size => h_flex().flex_none().children(samples.map((sample, index) =>
-    textStyle(div().id(`metrics-${size}-${index}`).flex_none().whitespace_nowrap(), size === 13 ? type.md : type.sm, type.sans).child(sample).on_size_change((box, cx) => {
+  return v_flex().id(`files-metrics-${key}`).absolute().left(0).top(0).opacity(0.01).w(400).h(32).flex_none().font_family(font).children([12, 13].map(size => h_flex().flex_none().children(samples.map((sample, index) =>
+    div().id(`metrics-${size}-${index}`).flex_none().whitespace_nowrap().text_size(size).child(sample).on_size_change((box, cx) => {
       if (key !== calibrationKey || box.width <= 0) return;
       const unit = box.width / zoom() / textUnits(sample), property = `unit${size}`;
       const values = calibrated[`samples${size}`] || [];
@@ -39,10 +38,9 @@ export function calibrationProbe(cx, onChange) {
       onChange(cx);
     })))));
 }
-export function dialogLayout(action, target, cx, view = viewport(), scale = zoom()) {
-  const values = metrics(cx), { spacing: s, typography: type } = appearance(cx);
+export function dialogLayout(action, target, view = viewport(), scale = zoom()) {
+  const values = metrics();
   const prompt = action === "trash" ? `Permanently delete “${target.path.split("/").pop()}”? This cannot be undone.` : action === "remove-root" ? "Remove this folder from the workspace? Files on disk are kept." : "";
-  const width = Math.min(Math.max(420, Math.min(560, Math.ceil(Math.max(textWidth(TITLES[action], 13, values), textWidth(target.path, 12, values), textWidth(prompt, 13, values)) + 2 * s.lg))), view ? Math.max(188, view.width / scale - 2 * s.lg) : 560);
-  const lines = action === "trash" || action === "remove-root" ? 8 : action === "add-root" ? 7 : 6;
-  return { width, height: Math.max(240, lines * type.md.line_height + s.xxl + 2 * s.lg) };
+  const width = Math.min(Math.max(420, Math.min(560, Math.ceil(Math.max(textWidth(TITLES[action], 13, values), textWidth(target.path, 12, values), textWidth(prompt, 13, values)) + 36))), view ? Math.max(188, view.width / scale - 36) : 560);
+  return { width, height: action === "trash" || action === "remove-root" ? 284 : 252 };
 }
