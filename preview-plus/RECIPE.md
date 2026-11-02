@@ -1,6 +1,6 @@
 # Preview Plus
 
-Read Markdown, inspect images and browse PDF pages inside Herdr. Use the mod as the Files panel, receive file selections from Files Plus, or open a file in its own pane. Markdown has Preview and Source controls; local links stay in the viewer and Back retraces them.
+Preview Markdown, inspect images and browse PDF pages inside Herdr. Operate as an independent Files panel, pair seamlessly with Files Plus in a layout stack, or open any file in its own split pane or tab. Markdown provides instant toggle between rich formatted preview and syntax-highlighted source, with native interleaved local images and link navigation. Multi-format image and macOS PDF viewing offer Fit, 100%, multi-level zoom, and page navigation controls. Local relative links resolve across documents and media with a complete in-memory history stack, while smart file watching reloads edits automatically.
 
 ![Preview Plus](preview.png)
 
@@ -8,24 +8,51 @@ The preview is an unedited `herdr-app shot` of a disposable Herdr window using s
 
 ## What you see
 
-The 44px header shows Back, the file name, Markdown's Preview/Source controls and Open. A 28px path row shows the containing directory. A standalone Files tree has Refresh in the header, 30px file rows, 18px nesting and Git status letters at the right. The layout owns the panel width; no layout or keys are installed automatically.
+The 44px header shows Back (`←`, 28px height, 12px text with hover state), the file name or “Files” (13px semibold, truncated), Markdown's Preview and Source mode toggle controls, an Open control for launching local files in the system application, and a Refresh control when viewing the standalone folder tree. A 28px path row below the header displays the containing directory of the active file or the workspace cwd in 12px muted text.
 
-An image or PDF adds a wrapping toolbar with Fit, −, 100% and +. PDFs also show Previous, the current/total page count, and Next. The image canvas scrolls in both directions when zoomed. Fit uses the current viewport with 16px padding and preserves the aspect ratio.
+An image or PDF adds a wrapping toolbar (minimum 36px high with a 0.5px bottom separator) holding Fit, −, 100% and + zoom controls. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. The image canvas scrolls in both directions when zoomed past the viewport. Fit centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
-Use 13px interface text and 12px secondary text, 0.5px separators, no shadows and no animations. Colors follow [Radix scale roles](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale): Gray 1–3 backgrounds, Gray 4 hover, Gray 5 selection, Gray 6 separators and Gray 11–12 text. Red, Green, Amber, Blue and Purple 11 carry errors, Git states and source syntax. Choose the light or dark palette using `settings().dark`. Native editor and rich-text internals use Herdr's theme.
+Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor with 12px text. The standalone Files tree features 30px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
+
+Use 13px interface text and 12px secondary text, 0.5px separators, no shadows and no animations. Colors follow [Radix Colors scale roles](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale): Gray 1–3 backgrounds, Gray 4 hover, Gray 5 selection, Gray 6 separators and Gray 11–12 text. Red, Green, Amber, Blue and Purple 11 carry errors, Git states and source syntax. Choose the light or dark palette using `settings().dark`. Native editor and rich-text internals use Herdr's theme.
 
 ## How it behaves
 
-- With no `file` or `previewStack` prop, show the focused terminal's single-folder tree. Load folders lazily; sort directories first, include hidden entries, omit `.git` and avoid recursing through symlink directories. Keep expansion state while a file replaces the tree. Back from the first file returns to that tree.
-- With `previewStack`, read `shared("preview-plus.target")[spaceId]`. At the root of history, Back selects `files-plus-tree` in that stack. Leave the source tree and other shared state alone.
-- With `file`, show that absolute path directly. Default `root` to its directory and `on` to local. A pane's initial target has no parent tree, so Back is disabled until a link adds history.
-- Render `.md` and `.markdown` through native `TextView.markdown`; Source uses a retained read-only `Editor`. Plain text uses the same editor. Truncate text after 400,000 characters, retain the source for Preview/Source switching, and show explicit missing, unreadable and binary-file states.
-- Resolve local Markdown links against the current file's directory, including `..`, encoded names, and paths with spaces. Carry the owning root and machine through navigation. Save each previous target's source mode, page and zoom in memory. HTTP(S) links call `cx.open_url` without adding history. Fragment-only links leave the current view in place.
-- Render local Markdown image references as native image blocks among the text blocks. Support inline and reference image syntax, angle-delimited destinations, escaped parentheses, optional titles and linked images. Preserve fenced/inline code. Reuse reference definitions in each text block so links still resolve across images. Clicking an image opens it, or follows its enclosing link. Images preserve their aspect ratio and fit the document width. HTML `<img>` syntax and precise inline-image/list/table composition are not implemented.
-- Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cache/`. Derive the filename from source path, modification time and size. Keep source bytes unchanged. Fit is the default; zoom ranges from 5% to 800%. Open launches the local system application.
-- On macOS, use PDFKit to inspect the page count and rasterize only the requested page, never the entire PDF. Cache each page separately. Limit the raster's longest edge to 2,048 pixels and its scale to 2×; zoom enlarges that raster. Clamp the page if an external edit reduces the page count. Reject locked, empty or unreadable PDFs with a visible error.
-- Watch the displayed local file and local images referenced by Markdown. Resolve parent-directory aliases to physical paths when comparing native events. Reload modified, atomically replaced, deleted and restored files. Queue a reload if an update arrives during a read/conversion. Ignore unrelated file events. Remote trees refresh every ten seconds and offer manual Refresh; remote previews reload when reopened or sent `preview-plus.refresh`.
-- Apply async results only when the target request, file, machine and active space still match. Switching a target resets link history. Release retained editors when the target or view closes.
+### Three operating modes
+
+- **Standalone Files panel mode** (with no `file` or `previewStack` prop): displays the focused terminal's single-folder tree. Loads folders lazily; sorts directories first, includes hidden entries, omits `.git` and avoids recursing through symlink directories. Retains expansion state while a file replaces the tree. Clicking Back (`←`) walks link history first, then returns to that tree. Remote trees refresh on a 10-second timer and offer manual Refresh.
+- **Paired with Files Plus** (`props.previewStack` set): receives file targets from Files Plus via `shared("preview-plus.target")[spaceId]`. At the root of history, clicking Back runs `run("layout.select", { stack: props().previewStack, child: "files-plus-tree" })` to return to Files Plus. Leaves the source tree and other shared state alone.
+- **Standalone mod pane or tab** (`props.file` passed via `pane.split` or `tab.new`): shows that absolute path directly, defaulting `root` to its directory and `on` to local. Back is disabled until a followed link adds history.
+
+### Markdown preview and source editing
+
+Render `.md` and `.markdown` through native `TextView.markdown()`; Source uses a retained read-only `Editor`. Plain text uses the same editor. Truncate text after 400,000 characters with a visible notice, retain the source for Preview/Source switching, and show explicit missing, unreadable and binary-file states.
+
+### Interleaved inline Markdown images
+
+Render local Markdown image references as native image blocks interleaved with text blocks inside the same scroll region. Support inline and reference image syntax, angle-delimited destinations, escaped parentheses, optional titles and linked images. Preserve fenced and inline code blocks without rewriting code examples. Reuse reference definitions in each text block so links still resolve across image boundaries. Clicking an image opens it in Preview Plus or follows its enclosing link. Images preserve their aspect ratio and fit the document width. HTML `<img>` syntax and precise inline-image/list/table composition are not implemented.
+
+### Relative link navigation and in-memory history stack
+
+Resolve local Markdown links against the current file's directory, including `..`, encoded names, and paths with spaces. Carry the owning root and machine through navigation. Save each previous target's source mode, page and zoom in memory. When navigating back, restore the previous document's exact source toggle, zoom level, and PDF page number. HTTP(S) links call `cx.open_url` without adding history. Fragment-only links leave the current view in place.
+
+### Multi-format image inspection
+
+Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cache/`. Derive the filename from source path, modification time and size. Keep source bytes unchanged. Fit is the default; zoom ranges from 5% to 800% in 1.25× steps. Open launches the local system application (`open`, `explorer.exe`, or `xdg-open`). Disabled for remote files.
+
+### High-performance macOS PDF viewing
+
+On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page count and rasterize only the requested page, never the entire PDF into memory at once. Cache each page separately as PNG, limiting the raster's longest edge to 2,048 pixels and its scale to 2×; zoom enlarges that raster. Previous and Next controls turn pages with bounds checking. Clamp the page if an external edit reduces the page count. Reject locked, empty or unreadable PDFs with a visible error.
+
+### Smart file watching and live reload
+
+Watch the displayed local file and local images referenced by Markdown using `watchFolder`. Resolve parent-directory aliases to physical paths (`pwd -P`) when comparing native events to handle macOS `/private/tmp` vs `/tmp` paths. Reload modified, atomically replaced, deleted and restored files. Queue a reload if an update arrives during an active read or conversion. Ignore unrelated file events. Remote previews reload when reopened or sent `preview-plus.refresh`.
+
+### Request identity and external commands
+
+Apply async results only when the target request, file, machine and active space still match. Switching a target resets link history. Release retained editors when the target or view closes.
+
+Optional external commands can be sent via `nextCommand()`: `back`, `source`, `preview`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
 
 Agent working, blocked, done and idle displays remain the surrounding Herdr UI's responsibility.
 
@@ -43,9 +70,40 @@ Default-export a class extending `View`. `main.js` owns mode selection, request 
 
 Use GPUI `div`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `window`, `appHome`, `exec`, `readTextFile`, `watchFolder`, `nextCommand` and `run`. Only paired Back runs `layout.select`; it never writes the shared target.
 
-The mod manifest is `{ "place": "none" }`. See the [installation instructions](README.md) for the three supported layouts and pane commands. There are no cross-mod code imports and no shortcut changes. Optional command names are `back`, `source`, `preview`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
+The mod manifest is `{ "place": "none" }`. Supported layout setups include:
 
-`on_size_change` reports window points, while builder dimensions receive Herdr's app zoom. Divide measured dimensions by `settings().zoom` before computing fit sizes. Put Markdown images inside an interactive `div`; the 0.1.11 host did not deliver clicks attached directly to `image()`.
+1. **Standalone Files panel**:
+```json
+{ "id": "files", "type": "block", "content": { "mod": "preview-plus" } }
+```
+
+2. **Paired with Files Plus**:
+```json
+{
+  "id": "files", "type": "stack", "active": "files-plus-tree",
+  "children": [
+    { "id": "files-plus-tree", "type": "block", "content": { "mod": "files-plus", "props": { "previewStack": "files" } } },
+    { "id": "preview-plus", "type": "block", "content": { "mod": "preview-plus", "props": { "previewStack": "files" } } }
+  ]
+}
+```
+
+3. **Standalone pane or tab**:
+```sh
+herdr-app do pane.split '{"direction":"right","mod":"preview-plus","props":{"file":"/absolute/path/README.md"}}'
+herdr-app do tab.new '{"name":"Document","mod":"preview-plus","props":{"file":"/absolute/path/guide.pdf"}}'
+```
+
+Shared state contract when paired with Files Plus:
+```ts
+"preview-plus.target": Record<SpaceId, {
+  file: string;
+  root: string;
+  on: string | null;
+}>
+```
+
+`on_size_change` reports window points, while builder dimensions receive Herdr's app zoom. Divide measured dimensions by `settings().zoom || 1` before computing fit sizes. Put Markdown images inside an interactive `div` so native clicks are reliably delivered.
 
 ### External programs and files
 
@@ -71,6 +129,18 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 
 Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/preview.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
 
-Acceptance requires an expanded standalone tree, Markdown Preview/Source, a followed note/image and correct Back history, a visible native document image, fit/100%/zoom, PNG/SVG display, both PDF pages, external-file updates/deletion/recovery, paired Files Plus handoff and return, a standalone mod pane, and `herdr-app status` with `errors: []`. Capture `preview.png` with `herdr-app shot` from the final runtime. The implementation plan records the actual environment and completed checks.
+Build and verify these observable behaviors using disposable files:
 
-On 2026-11-01 the installed mod was also tested with real mouse input in Herdr 0.1.11's existing `main-graph` window at 120% app zoom. Files handoff, Preview/Source, relative document/image navigation, 100%/Fit, history return and two-page PDF navigation passed with no reported errors. The focused suite passed 17 tests. See the implementation plan for backup and receipt paths; the live user's window is not included in the public preview.
+1. `herdr-app check preview-plus/mods/preview-plus` passes with zero errors.
+2. The standalone tree handles lazy loading, hidden files, symlinks, git status marks, and returns to the tree with expansion preserved when Back is clicked.
+3. Paired stack mode receives file targets from Files Plus via `shared("preview-plus.target")` and returns to `files-plus-tree` with `layout.select` when Back is clicked at history root.
+4. Standalone pane or tab mode (`props.file`) renders the specified file directly.
+5. Markdown opens in formatted `TextView.markdown` with instant toggle to syntax-highlighted source `Editor`. Plain text files open in the source editor. Missing, unreadable, binary and truncated files display distinct visible states.
+6. Local inline images in Markdown render at document width interleaved with text blocks, preserve code blocks and reference link definitions, and open on click.
+7. Relative Markdown links navigate across documents and media, pushing to the history stack. Back retraces history in reverse and restores exact source mode, zoom level, and PDF page number.
+8. External HTTP(S) links launch the system browser via `cx.open_url` without pushing history.
+9. PNG, JPEG, WebP and SVG images display with Fit, 100%, zoom in/out (5% to 800%), two-way scrolling, and external Open launch.
+10. Multi-page PDFs on macOS rasterize on demand per page with page turning (`Previous` / `Next`), `<page> / <total>` indicator, page clamping on external edit, and clear error states for locked or invalid PDFs.
+11. Local file watcher detects modifications, atomic replacements, deletions, and restorations of displayed files and referenced Markdown images, reloading live.
+12. External command dispatching via `preview-plus.<command>` executes back, source, preview, refresh, fit, zoom-in, zoom-out, next and previous.
+13. `herdr-app status` reports zero mod or layout errors, and `preview.png` is captured with `herdr-app shot` from the live running window.
