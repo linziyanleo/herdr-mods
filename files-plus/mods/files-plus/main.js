@@ -98,7 +98,7 @@ export default class FilesPlus extends FilesPanel {
     const t = palette(), list = menuItems(this.targetEntry);
     const { width, height } = this.geometry;
     if (!list[this.at]?.enabled) this.at = list.findIndex(item => item.enabled);
-    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).text_size(13).text_color(t.foreground)
+    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(4.5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).text_size(13).text_color(t.foreground)
       .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_key_down((event, cx) => {
         if (this.busy) { cx.stop_propagation(); return; }

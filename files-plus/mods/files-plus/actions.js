@@ -3,7 +3,7 @@ import { basename, dirname, joinPath, contains, relativePath, workspaceOf } from
 import { textWidth } from "./metrics.js";
 
 export function menuLayout(items, statusText, metrics, viewport, pointer, zoom = 1) {
-  const width = Math.ceil(Math.min(Math.max(188, viewport ? viewport.width / zoom - 16 : 10000), Math.max(188,
+  const width = Math.min(Math.floor(Math.max(188, viewport ? viewport.width / zoom - 16 : 10000)), Math.ceil(Math.max(188,
     Math.max(...items.map(item => textWidth(item.label, 13, metrics) + 30), textWidth(statusText, 12, metrics) + 26) + 4)));
   const intrinsicHeight = items.length * 32 + items.filter(item => item.group).length * 8.5 + 10 + 24;
   const height = Math.min(intrinsicHeight, viewport ? Math.max(32, viewport.height / zoom - 16) : intrinsicHeight);
