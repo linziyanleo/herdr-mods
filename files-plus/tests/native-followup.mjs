@@ -32,6 +32,7 @@ async function request(value) {
   assert.equal(reply.error, undefined); return reply;
 }
 const shots = [], checks = [];
+const width = value => Math.round(value.panelSize.width / (value.zoom || 1));
 async function shot(name) { const file = path.join(base, `${name}.png`); await execute("herdr-app", ["shot", file], { env }); shots.push(file); }
 async function close() { for (const overlay of JSON.parse((await execute("herdr-app", ["status"], { env })).stdout).overlays) await command("overlay.close"); }
 const settingsPath = path.join(info.app, "settings.json"), originalSettingsText = await fs.readFile(settingsPath, "utf8"), originalSettings = JSON.parse(originalSettingsText);
@@ -44,33 +45,38 @@ const layout = { id: "root", type: "column", children: [{ id: "tabs", type: "blo
   { id: "terminal", type: "block", content: { tab: "active" } },
   { id: "panel", type: "column", min: 280, max: 900, size: { px: 420 }, children: [{ id: "files", type: "block", content: { mod: driverMod, props: { base, owner: !info.driverMod, driverMod, fit: { node: "panel", min: 280, max: 0.38 } } } }] }
 ] }] };
-await request({ type: "activate" });
-await close(); await command("layout.set", { layout });
-await request({ type: "workspace", file: workspace });
+assert.equal((await request({ type: "activate" })).windowActive, true, "Bring the disposable Herdr window to the foreground before native UI acceptance");
 if (!info.driverMod) await command("window.maximize");
-const initial = await until(panel, value => value.visible && value.lastRequestedWidth > 0 && value.panelSize && Math.abs(value.panelSize.width / (value.zoom || 1) - value.lastRequestedWidth) <= 4, "initial fitted width");
+await close();
+await fs.writeFile(path.join(info.app, "layouts/files-plus-fit.json"), JSON.stringify(layout));
+await command("layout.switch", { name: "files-plus-fit" });
+await request({ type: "workspace", file: null });
+await request({ type: "workspace", file: workspace });
+await new Promise(resolve => setTimeout(resolve, 400));
+const initial = await until(panel, value => value.visible && value.panelSize && (!value.lastRequestedWidth || Math.abs(width(value) - value.lastRequestedWidth) <= 4), "initial fitted width");
 assert.ok(initial.metrics.unit13 > 0 && initial.metrics.samples13?.length === 2);
-checks.push({ name: "calibrated panel fitting", width: initial.lastRequestedWidth, metrics: initial.metrics });
+assert.ok(width(initial) >= 280 && width(initial) <= Math.floor(initial.viewport.width / (initial.zoom || 1) * 0.38));
+checks.push({ name: "calibrated panel fitting", width: width(initial), metrics: initial.metrics });
 
 const folder = path.join(web, "width-fixture"); await fs.mkdir(folder, { recursive: true });
 const wideName = "中文文件".repeat(14) + ".txt", longFile = path.join(folder, wideName);
 await fs.writeFile(longFile, "Wide filename fixture\n");
 await request({ type: "toggle", path: folder });
-const expanded = await until(panel, value => value.folders.includes(folder) && value.entries[folder]?.some(entry => entry.name === wideName) && value.lastRequestedWidth > initial.lastRequestedWidth, "user expansion grows panel");
-assert.ok(expanded.lastRequestedWidth <= Math.floor(expanded.viewport.width / (expanded.zoom || 1) * 0.38));
+const expanded = await until(panel, value => value.folders.includes(folder) && value.entries[folder]?.some(entry => entry.name === wideName) && width(value) > width(initial), "user expansion grows panel");
+assert.ok(width(expanded) <= Math.floor(expanded.viewport.width / (expanded.zoom || 1) * 0.38));
 await request({ type: "toggle", path: folder });
-const collapsed = await until(panel, value => !value.folders.includes(folder) && value.lastRequestedWidth < expanded.lastRequestedWidth, "user collapse shrinks panel");
-checks.push({ name: "user grows and shrinks", expanded: expanded.lastRequestedWidth, collapsed: collapsed.lastRequestedWidth });
+const collapsed = await until(panel, value => !value.folders.includes(folder) && width(value) < width(expanded), "user collapse shrinks panel");
+checks.push({ name: "user grows and shrinks", expanded: width(expanded), collapsed: width(collapsed) });
 
 const backgroundFile = path.join(web, wideName); await fs.writeFile(backgroundFile, "Background width fixture\n");
-const grown = await until(panel, value => value.entries[web]?.some(entry => entry.name === wideName) && value.lastRequestedWidth > collapsed.lastRequestedWidth, "background grows panel");
+const grown = await until(panel, value => value.entries[web]?.some(entry => entry.name === wideName) && width(value) > width(collapsed), "background grows panel");
 await fs.unlink(backgroundFile);
 await until(panel, value => !value.entries[web]?.some(entry => entry.name === wideName), "background deletion appears");
 await new Promise(resolve => setTimeout(resolve, 500));
-assert.equal((await panel()).lastRequestedWidth, grown.lastRequestedWidth);
-checks.push({ name: "background never shrinks", width: grown.lastRequestedWidth });
+assert.equal(width(await panel()), width(grown));
+checks.push({ name: "background never shrinks", width: width(grown) });
 
-const manualWidth = grown.lastRequestedWidth > 420 ? 420 : 560;
+const manualWidth = width(grown) > 420 ? 420 : 560;
 await command("layout.resize", { id: "panel", px: manualWidth });
 const manual = await until(panel, value => Boolean(value.manualWidthSpace), "manual resize pauses fitting");
 await request({ type: "toggle", path: folder }); await new Promise(resolve => setTimeout(resolve, 600));
@@ -92,8 +98,9 @@ console.log("passed: calibration, user/background fitting, manual override, cont
 try {
 for (const appearance of ["dark", "light"]) for (const scale of [1, 1.2]) {
   await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, "utf8")), appearance }));
+  await command("app.theme", { name: appearance === "dark" ? "graphite" : "paper" });
   await setZoom(scale);
-  const state = await until(panel, value => value.zoom === scale && value.metrics.samples13?.length === 2, "zoom calibration");
+  const state = await until(panel, value => value.dark === (appearance === "dark") && Math.abs(value.zoom - scale) < 0.001 && value.metrics.samples13?.length === 2, "theme and zoom calibration");
   const view = state.viewport;
   for (const kind of ["file", "root"]) {
     const reply = await request({ type: "menu", path: kind === "root" ? web : source, root: web, kind, pointer: { x: view.width - 2, y: view.height - 2 } });
@@ -106,6 +113,7 @@ for (const appearance of ["dark", "light"]) for (const scale of [1, 1.2]) {
   await request({ type: "dialog", action: "rename", path: source, root: web }); await shot(`dialog-${appearance}-${scale}`); await close();
 }
 } finally {
+  await command("app.theme", { name: originalSettings.appearance === "light" ? "paper" : "graphite" });
   await setZoom(originalZoom);
   const restored = JSON.parse(await fs.readFile(settingsPath, "utf8"));
   for (const key of ["appearance", "zoom"]) {

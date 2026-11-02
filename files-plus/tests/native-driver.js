@@ -10,6 +10,10 @@ import { fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 
 export default class NativeDriver extends FilesPlus {
+  panelResized(size, cx) {
+    this.sizeEvents = [...(this.sizeEvents || []), { size, at: Date.now(), requested: this.lastRequestedWidth, pending: Boolean(this.resizePending), viewport: viewport() }].slice(-20);
+    super.panelResized(size, cx);
+  }
   render(cx) {
     this.renderCount = (this.renderCount || 0) + 1; this.renderedLayout = layout();
     const content = super.render(cx);
@@ -66,7 +70,7 @@ export default class NativeDriver extends FilesPlus {
           else if (request.type === "welcome-dismiss") { setShared("frame.welcomed", "skipped"); closeOverlay("frame-welcome"); }
           else if (request.type === "clipboard-start") { this.clipboardBefore = cx.read_from_clipboard(); cx.write_to_clipboard("files-plus clipboard baseline"); }
           else if (request.type === "clipboard-restore") { if (this.clipboardBefore !== undefined) cx.write_to_clipboard(this.clipboardBefore); }
-          const value = { ok: true, overlay: ["menu", "dialog"].includes(request.type) ? this.requestOverlay : undefined, focused: focused(), clipboard: request.type === "snapshot" ? cx.read_from_clipboard() : undefined };
+          const value = { ok: true, overlay: ["menu", "dialog"].includes(request.type) ? this.requestOverlay : undefined, focused: focused(), windowActive: globalThis.window?.is_window_active?.(), clipboard: request.type === "snapshot" ? cx.read_from_clipboard() : undefined };
           await writeTextFile(`${spec.base}/receipt.json`, JSON.stringify(value), await readTextFile(`${spec.base}/receipt.json`));
           cx.notify();
         } catch (error) {
@@ -82,8 +86,8 @@ export default class NativeDriver extends FilesPlus {
       folders: [...(this.folders || [])], entries: Object.fromEntries(this.entries || []), marks: this.marks || {}, preview: this.code ? { readonly: true } : null, workspaces: shared("multi-root.spaces") || {} };
     if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
-      selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats });
-    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), windowActive: globalThis.window?.is_window_active?.() });
+      selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents });
+    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
     else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: this.entered });
     const text = JSON.stringify(value);
     if (this.recording || text === this.recorded) return;
