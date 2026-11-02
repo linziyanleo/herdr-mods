@@ -12,7 +12,7 @@ export function textUnits(text) {
   for (const char of String(text || "")) {
     const cp = char.codePointAt(0);
     if (/[\u0300-\u036f\ufe00-\ufe0f\u200d]/.test(char)) continue;
-    width += cp >= 0x1100 && (cp <= 0x115f || cp >= 0x2e80 && cp <= 0xa4cf || cp >= 0xac00 && cp <= 0xd7af || cp >= 0xf900 && cp <= 0xfaff || cp >= 0xfe10 && cp <= 0xfe6f || cp >= 0xff01 && cp <= 0xff60 || cp >= 0x1f000) ? 2 : 1;
+    width += cp >= 0x1100 && (cp <= 0x115f || cp >= 0x2300 && cp <= 0x23ff || cp >= 0x2600 && cp <= 0x27bf || cp >= 0x2e80 && cp <= 0xa4cf || cp >= 0xac00 && cp <= 0xd7af || cp >= 0xf900 && cp <= 0xfaff || cp >= 0xfe10 && cp <= 0xfe6f || cp >= 0xff01 && cp <= 0xff60 || cp >= 0x1f000) ? 2 : 1;
   }
   return width;
 }

@@ -394,7 +394,7 @@ export class FilesPanel extends View {
       .on_mouse_up("left", () => { this.dragCandidate = null; })
       .on_mouse_move((event, cx) => dragMove(this, event, cx))
       .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
-      .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().border_b(0.5).border_color(t.border)
+      .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().bg(t.background).border_b(0.5).border_color(t.border)
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_event, cx) => { this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().font_semibold().child("Files"))

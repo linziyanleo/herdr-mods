@@ -5,6 +5,7 @@ import { runtime, find } from "./runtime.mjs";
 test("text widths count CJK and emoji and menu sizing includes every label and error", async t => {
   const r = await runtime(t), m = await r.load("metrics.js"), a = await r.load("actions.js"), metrics = { unit13: 8, unit12: 7 };
   assert.equal(m.textUnits("A中文😀"), 7);
+  assert.equal(m.textUnits("⚠️⌛"), 4);
   const items = [{ label: "Copy", enabled: true }, { label: "中文文件夹名称".repeat(3), group: true }];
   const view = { width: 1600, height: 1000 };
   const normal = a.menuLayout(items, "", metrics, view, { x: 1598, y: 998 }, 1);
