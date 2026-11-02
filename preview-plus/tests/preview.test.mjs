@@ -89,7 +89,7 @@ test("Fit stays inside the measured viewport at non-default Herdr zoom", async t
   const state = await runtime(t); await fixtures(state.dir); state.props = { file: path.join(state.dir, "landscape.png") }; state.zoom = 1.2;
   const panel = await state.start();
   panel.measure({ width: 480, height: 360 }, state.cx);
-  const canvas = find(state.render(), "preview-media"), content = canvas.nodes[0], image = content.nodes[0];
+  const canvas = find(state.render(), "preview-media"), image = canvas.nodes.find(node => node.kind === "image");
   assert.ok(image.attributes.w[0] * state.zoom + 32 * state.zoom <= 480);
   assert.ok(image.attributes.h[0] * state.zoom + 32 * state.zoom <= 360);
   assert.equal(image.attributes.w[0] / image.attributes.h[0], 640 / 400);

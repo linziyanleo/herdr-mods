@@ -1,5 +1,5 @@
 import { View, div, image } from "gpui-kit";
-import { v_flex, h_flex, TextView, Editor, EditorState } from "gpui-base";
+import { v_flex, h_flex, TextView, Editor, EditorState, Input, InputState } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
@@ -38,6 +38,12 @@ export default class PreviewPlus extends View {
   init(_props, cx) {
     this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
     this.viewport = { width: 400, height: 500 }; this.zoom = null; this.page = 1; this.total = 0;
+    this.pan = { x: 0, y: 0 };
+    this.zoomInput = InputState.new({ value: "" });
+    this.zoomInput.on("focus", () => { this.zoomEditing = true; });
+    this.zoomInput.on("change", (_event, cx) => { if (this.zoomEditing) { this.zoomDirty = true; cx.notify(); } });
+    this.zoomInput.on("submit", (_event, cx) => this.applyZoomInput(cx));
+    this.zoomInput.on("blur", (_event, cx) => { this.zoomEditing = false; this.applyZoomInput(cx); });
     this.sync(cx);
     cx.spawn(async cx => {
       for (;;) {
@@ -95,6 +101,8 @@ export default class PreviewPlus extends View {
     if (!this.selected) return;
     const selected = this.selected, type = kind(selected.file), request = { owner: this.owner, selected, page: this.page };
     this.request = request; this.releaseEditor(); this.text = null; this.markdownBlocks = null; this.media = null;
+    this.zoomDirty = false; this.zoomEditing = false;
+    this.pan = { x: 0, y: 0 }; this.drag = null;
     this.error = null; this.actionError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
     this.watchTargets(selected.on ? [] : [selected.file], cx);
     cx.spawn(async cx => {
@@ -192,10 +200,63 @@ export default class PreviewPlus extends View {
 
   fitScale() {
     if (!this.media) return 1;
-    return imageSize(this.media.width, this.media.height, this.viewport, null).width / this.media.width;
+    return this.mediaSize(null).width * (settings().zoom || 1) / this.media.width;
   }
 
-  setZoom(value, cx) { this.zoom = value === null ? null : Math.min(8, Math.max(0.05, value)); cx.notify(); }
+  mediaSize(zoom = this.zoom) {
+    const appZoom = settings().zoom || 1;
+    return imageSize(this.media.width / appZoom, this.media.height / appZoom, this.viewport, zoom);
+  }
+
+  zoomLabel() { return this.media ? `${Number(((this.zoom ?? this.fitScale()) * 100).toFixed(2))}%` : ""; }
+
+  applyZoomInput(cx) {
+    if (this.media && this.zoomDirty) {
+      const text = this.zoomInput.value().trim().replace(/%$/, "").trim();
+      if (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(text) && Number.isFinite(Number(text))) this.setZoom(Number(text) / 100, cx);
+    }
+    this.zoomDirty = false;
+    this.zoomInput.set_value(this.zoomLabel());
+    cx.notify();
+  }
+
+  setZoom(value, cx) {
+    if (value !== null && !Number.isFinite(value)) return;
+    this.zoom = value === null ? null : Math.min(8, Math.max(0.05, value));
+    if (value === null) this.pan = { x: 0, y: 0 };
+    this.clampPan();
+    this.zoomDirty = false; this.zoomInput.set_value(this.zoomLabel()); cx.notify();
+  }
+
+  scrollZoom(event, cx) {
+    if (!this.media || this.loading) return;
+    if (event.modifiers?.shift) {
+      const appZoom = settings().zoom || 1;
+      this.pan.x += event.delta.x / appZoom; this.pan.y += event.delta.y / appZoom;
+      this.clampPan(); cx.stop_propagation(); cx.notify(); return;
+    }
+    const delta = event.delta_lines ? event.delta_lines.y * 40 : event.delta.y;
+    if (!Number.isFinite(delta) || delta === 0) return;
+    cx.stop_propagation();
+    this.setZoom((this.zoom ?? this.fitScale()) * Math.exp(Math.max(-1, Math.min(1, delta * 0.005))), cx);
+  }
+
+  clampPan() {
+    if (!this.media) return;
+    const size = this.mediaSize();
+    for (const [axis, dimension] of [["x", "width"], ["y", "height"]]) {
+      const limit = Math.max(0, (size[dimension] - this.viewport[dimension] + 32) / 2);
+      this.pan[axis] = Math.max(-limit, Math.min(limit, this.pan[axis]));
+    }
+  }
+
+  dragImage(event, cx) {
+    if (!this.drag) return;
+    const appZoom = settings().zoom || 1;
+    this.pan.x += (event.position.x - this.drag.x) / appZoom;
+    this.pan.y += (event.position.y - this.drag.y) / appZoom;
+    this.drag = event.position; this.clampPan(); cx.stop_propagation(); cx.notify();
+  }
 
   turnPage(delta, cx) {
     if (kind(this.selected?.file || "") !== "pdf" || !this.total) return;
@@ -214,6 +275,13 @@ export default class PreviewPlus extends View {
 
   render(cx) {
     this.sync(cx);
+    if (!this.zoomEditing && !this.zoomRefreshPending && this.zoomInput.value() !== this.zoomLabel()) {
+      this.zoomRefreshPending = true;
+      cx.timer.after(0, cx => {
+        this.zoomRefreshPending = false;
+        if (!this.closed && !this.zoomEditing) { this.zoomInput.set_value(this.zoomLabel()); cx.notify(); }
+      });
+    }
     if (this.code && this.codeStyle !== JSON.stringify(sourceStyle())) {
       const previous = this.code;
       cx.spawn(async cx => {
@@ -236,7 +304,11 @@ export default class PreviewPlus extends View {
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
         .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
         .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) > 0.05))
-        .child(button("preview-zoom-actual", "100%", colors, cx => this.setZoom(1, cx), Boolean(this.media), this.zoom === 1))
+        .child(h_flex().w(76).h(28).flex_none().items_center().justify_center()
+          .border(0.5).border_color(colors.border).rounded(6).text_color(colors.foreground)
+          .child(Input.new(this.zoomInput).id("preview-zoom-percent")
+            .w(Math.min(70, Math.max(24, this.zoomInput.value().length * 7.2 + 2))).h(24).px(0)
+            .font_family("Geist Mono").text_size(12).disabled(!this.media).accessibility_label("Zoom percentage (5–800%)")))
         .child(button("preview-zoom-in", "+", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) < 8))
         .child(div().flex_1())
         .when(type === "pdf", el => el
@@ -253,11 +325,19 @@ export default class PreviewPlus extends View {
   body(type, colors) {
     if (this.error || this.loading) return div().flex_1().p(16).text_size(12).text_color(colors.muted).child(this.error || "Loading preview…");
     if (this.media) {
-      const size = imageSize(this.media.width, this.media.height, this.viewport, this.zoom);
-      return div().id("preview-media").flex_1().min_h(0).min_w(0).overflow_scrollbar()
+      const size = this.mediaSize();
+      const x = (this.viewport.width - size.width) / 2 + this.pan.x;
+      const y = (this.viewport.height - size.height) / 2 + this.pan.y;
+      return div().id("preview-media").relative().flex_1().min_h(0).min_w(0).overflow_hidden()
+        .when(Boolean(this.drag), el => el.cursor_grabbing())
+        .when(!this.drag, el => el.cursor_grab())
+        .on_mouse_down("left", (event, cx) => { this.drag = event.position; cx.stop_propagation(); cx.notify(); })
+        .on_mouse_move((event, cx) => this.dragImage(event, cx))
+        .on_mouse_up("left", (_event, cx) => { this.drag = null; cx.notify(); })
+        .on_hover((hovered, cx) => { if (!hovered && this.drag) { this.drag = null; cx.notify(); } })
+        .on_scroll_wheel((event, cx) => this.scrollZoom(event, cx))
         .on_size_change((size, cx) => this.measure(size, cx))
-        .child(v_flex().min_w_full().min_h_full().w(size.width + 32).h(size.height + 32).p(16).items_center().justify_center()
-          .child(image(this.media.path).w(size.width).h(size.height).flex_none()));
+        .child(image(this.media.path).absolute().left(x).top(y).w(size.width).h(size.height));
     }
     if (type === "markdown" && !this.source) return v_flex().id("preview-markdown").flex_1().min_h(0).overflow_y_scrollbar().p(16).gap(12)
       .on_size_change((size, cx) => this.measure(size, cx))
@@ -274,10 +354,10 @@ export default class PreviewPlus extends View {
   measure(size, cx) {
     // Measurements are window points; builder dimensions also receive Herdr's zoom.
     const zoom = settings().zoom || 1, viewport = { width: size.width / zoom, height: size.height / zoom };
-    if (Math.abs(this.viewport.width - viewport.width) > 0.5 || Math.abs(this.viewport.height - viewport.height) > 0.5) { this.viewport = viewport; cx.notify(); }
+    if (Math.abs(this.viewport.width - viewport.width) > 0.5 || Math.abs(this.viewport.height - viewport.height) > 0.5) { this.viewport = viewport; this.clampPan(); cx.notify(); }
   }
 
   close() {
-    this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor();
+    this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release();
   }
 }

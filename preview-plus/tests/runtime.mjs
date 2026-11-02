@@ -49,6 +49,8 @@ export async function runtime(t) {
   };
   const kit = { View: class {}, div: () => builder("div"), image: file => builder("image", file) };
   const base = { h_flex: () => builder("row"), v_flex: () => builder("column"),
+    InputState: { new: options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) },
+    Input: { new: state => builder("input", state) },
     TextView: { markdown: (id, text) => builder("markdown", text).id(id) },
     EditorState: { new: options => ({ ...options, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
   const context = vm.createContext({ console }), cache = new Map();
@@ -64,7 +66,7 @@ export async function runtime(t) {
   }
   state.load = async name => { const loaded = await module(path.join(runtimeDir, name)); if (loaded.status !== "evaluated") await loaded.evaluate(); return loaded.namespace; };
   state.cx = { stop_propagation() {}, notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
-    spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; }, timer: { every: (ms, fn) => state.timers.push({ ms, fn }) } };
+    spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; }, timer: { after: (_ms, fn) => Promise.resolve().then(() => fn(state.cx)), every: (ms, fn) => state.timers.push({ ms, fn }) } };
   // Watchers and nextCommand deliberately remain pending. Drain only finite work.
   state.settle = async () => {
     for (let n = 0; n < 800; n++) {
