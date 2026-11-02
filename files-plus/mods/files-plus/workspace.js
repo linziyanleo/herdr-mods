@@ -1,10 +1,10 @@
 // Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, settings, window as appWindow, props, shared, setShared, run, openOverlay, layout } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
-import { palette } from "./palette.js";
+import { palette, typography, sourceStyle } from "./palette.js";
 import { visibleRows, TreeView, RowChunk, CHUNK_SIZE } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
@@ -287,14 +287,17 @@ export class FilesPanel extends View {
           this.fileError = text === null ? "This file is no longer available" : "Binary file, no text preview"; changed ||= this.fileError !== previousError; return;
         }
         const value = text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text;
-        if (this.code && this.previewText === value) return;
-        this.code?.release(); this.previewText = value; changed = true;
-        const t = palette(), ext = path.split(".").pop().toLowerCase();
-        this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true, value,
-          font_family: settings().font_family, font_size: 12, syntax: { keyword: t.purple, string: t.green, comment: t.muted, function: t.blue, type: t.amber, number: t.red, constant: t.blue } });
+        if (this.code && this.previewText === value && this.previewStyle === JSON.stringify(sourceStyle())) return;
+        this.previewText = value; changed = true; this.updatePreview();
       } catch { if (this.previewRequest === request && this.current(context)) { changed = Boolean(this.code); this.code?.release(); this.code = null; this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; changed ||= this.fileError !== previousError; } }
       finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
     });
+  }
+  updatePreview() {
+    const style = sourceStyle(), ext = this.file.split(".").pop().toLowerCase();
+    this.code?.release();
+    this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true, value: this.previewText, ...style });
+    this.previewStyle = JSON.stringify(style);
   }
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
   menu(path, kind, root, event, cx) {
@@ -305,7 +308,7 @@ export class FilesPanel extends View {
   syncTree(cx, loc = location()) {
     const roots = this.rootInfo || this.workspace?.folders || [];
     this.activeRoot = rootOf(loc.cwd, roots)?.path;
-    const signature = JSON.stringify([this.treeVersion, this.activeRoot, settings().dark]);
+    const t = palette(), type = typography(), signature = JSON.stringify([this.treeVersion, this.activeRoot, t, type]);
     if (signature === this.treeSignature) return;
     this.treeSignature = signature;
     let rows = visibleRows(this);
@@ -319,12 +322,11 @@ export class FilesPanel extends View {
       }
     }
     this.rowModel = rows;
-    const t = palette();
     const count = Math.ceil(rows.length / CHUNK_SIZE), previous = this.chunks;
     const retained = new Map(previous.map(chunk => [chunk.id, chunk])), chunks = [];
     for (let index = 0; index < count; index++) {
-      const part = rows.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE), key = JSON.stringify([part, t]);
-      const id = part[0].id, data = { rows: part, panel: this, t }, chunk = retained.get(id);
+      const part = rows.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE), key = JSON.stringify([part, t, type]);
+      const id = part[0].id, data = { rows: part, panel: this, t, type }, chunk = retained.get(id);
       if (!chunk) chunks.push({ id, entity: cx.new(RowChunk, data), key });
       else {
         if (chunk.key !== key) { chunk.entity.set_props(data); chunk.key = key; }
@@ -376,18 +378,20 @@ export class FilesPanel extends View {
       const loc = location(), revision = shared(REVISION);
       if (loc.key !== this.context || this.revision !== revision) { this.revision = revision; this.refresh(cx); }
       else this.syncTree(cx, loc);
+      if (this.code && this.previewStyle !== JSON.stringify(sourceStyle())) { this.updatePreview(); cx.notify(); }
     });
   }
   renderPanel(cx) {
     const loc = location();
     this.scheduleFit(cx);
     const activeRoot = rootOf(loc.cwd, this.rootInfo || this.workspace?.folders || [])?.path;
-    if (loc.key !== this.context || this.revision !== shared(REVISION) || activeRoot !== this.activeRoot || this.treeSignature !== JSON.stringify([this.treeVersion, activeRoot, settings().dark])) this.scheduleSync(cx);
-    const entry = workspaceOf(this.spaceId), t = palette(), roots = this.rootInfo || entry?.folders || [];
+    const t = palette(), type = typography();
+    if (loc.key !== this.context || this.revision !== shared(REVISION) || activeRoot !== this.activeRoot || this.treeSignature !== JSON.stringify([this.treeVersion, activeRoot, t, type]) || this.code && this.previewStyle !== JSON.stringify(sourceStyle())) this.scheduleSync(cx);
+    const entry = workspaceOf(this.spaceId), roots = this.rootInfo || entry?.folders || [];
     const fileRoot = this.file ? rootOf(this.file, roots) : null;
     const add = Boolean(this.root || entry?.folders.length) && this.on === null && appWindow().platform !== "windows";
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
-    return v_flex().id("files-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
+    return v_flex().id("files-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).font_family(type.font).text_size(type.body)
       .on_size_change((size, cx) => this.panelResized(size, cx))
       .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
       .on_mouse_up("left", () => { this.dragCandidate = null; })
@@ -409,8 +413,8 @@ export class FilesPanel extends View {
             openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target), props: { role: "dialog", action: "add-root", target } });
             cx.stop_propagation();
           }).child(svg("mods/files-plus/plus.svg").size(14)))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.muted).child(title)))
-      .when(Boolean(entry?.error), el => el.child(div().px(12).py(8).text_size(12).text_color(t.red).child(entry.error)))
+        .child(div().flex_1().min_w(0).truncate().text_right().text_size(type.secondary).text_color(t.muted).child(title)))
+      .when(Boolean(entry?.error), el => el.child(div().px(12).py(8).text_size(type.secondary).text_color(t.red).child(entry.error)))
       .when(!this.file, el => el.child(this.treeView))
       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0).opacity(this.previewEntered === false ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
         .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)

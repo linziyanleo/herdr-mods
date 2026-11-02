@@ -1,7 +1,7 @@
 // Test-only wrapper. Copied beside the real runtime with main.js renamed panel.js.
 import FilesPlus from "./panel.js";
 import { div } from "gpui-kit";
-import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setShared, openOverlay, focused, layout, settings, closeOverlay, appHome } from "herdr";
+import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setShared, openOverlay, focused, layout, settings, theme, closeOverlay, appHome } from "herdr";
 import { location } from "./workspace.js";
 import { parseConfig, setWorkspace } from "./roots.js";
 import { menuItems, menuLayout } from "./actions.js";
@@ -92,8 +92,9 @@ export default class NativeDriver extends FilesPlus {
     if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
       selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
+      treeLook: this.chunks[0] ? JSON.parse(this.chunks[0].key).slice(1) : null, previewStyle: this.previewStyle,
       dragStarts: shared("files-plus.native-drag") });
-    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
+    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, look: settings(), colors: theme(), windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
     else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: this.entered });
     const text = JSON.stringify(value);
     if (this.recording || text === this.recorded) return;

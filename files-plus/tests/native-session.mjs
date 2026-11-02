@@ -42,7 +42,7 @@ if (process.argv.includes("--performance")) {
   const tree = path.join(driver, "tree.js");
   try {
     const code = await fs.readFile(tree, "utf8");
-    await fs.writeFile(tree, code.replace("const { rows, panel, t } = this.data;", "const { rows, panel, t } = this.data; const stats = globalThis.__fpStats ||= { exec: 0, rows: 0, programs: {} }; stats.rows += rows.filter(row => row.path).length;"));
+    await fs.writeFile(tree, code.replace("const { rows, panel, t, type } = this.data;", "const { rows, panel, t, type } = this.data; const stats = globalThis.__fpStats ||= { exec: 0, rows: 0, programs: {} }; stats.rows += rows.filter(row => row.path).length;"));
   } catch (error) { if (error.code !== "ENOENT") throw error; }
 }
 await fs.mkdir(path.join(app, "layouts"));

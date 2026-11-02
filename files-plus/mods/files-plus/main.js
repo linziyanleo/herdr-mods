@@ -4,7 +4,7 @@ import { props, setShared, run, openOverlay, closeOverlay, pickFolder, window as
 import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
-import { palette } from "./palette.js";
+import { palette, typography } from "./palette.js";
 import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { renderDrag } from "./drag.js";
@@ -95,10 +95,10 @@ export default class FilesPlus extends FilesPanel {
     });
   }
   renderMenu() {
-    const t = palette(), list = menuItems(this.targetEntry);
+    const t = palette(), type = typography(), list = menuItems(this.targetEntry);
     const { width, height } = this.geometry;
     if (!list[this.at]?.enabled) this.at = list.findIndex(item => item.enabled);
-    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(4.5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).text_size(13).text_color(t.foreground)
+    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(4.5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).font_family(type.font).text_size(type.body).text_color(t.foreground)
       .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_key_down((event, cx) => {
         if (this.busy) { cx.stop_propagation(); return; }
@@ -118,27 +118,27 @@ export default class FilesPlus extends FilesPanel {
           .when(item.enabled && !this.busy, el => el.cursor_pointer().hover(s => s.bg(t.hover)))
           .on_hover((hovered, cx) => { if (hovered && item.enabled && !this.busy) { this.at = index; cx.notify(); } })
           .on_click((_event, cx) => this.choose(index, cx)).child(item.label))))
-      .child(h_flex().h(24).flex_none().px(8).items_center().text_size(12).text_color(this.error ? t.red : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
+      .child(h_flex().h(24).flex_none().px(8).items_center().text_size(type.secondary).text_color(this.error ? t.red : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
   }
   renderDialog() {
-    const t = palette(), action = this.action, target = this.targetEntry;
+    const t = palette(), type = typography(), action = this.action, target = this.targetEntry;
     const rootAction = action === "add-root" || action === "remove-root";
     const enabled = !this.busy && !this.preparing && (!this.input || Boolean(this.input.value().trim())) && (!rootAction || Boolean(this.captured));
     const button = (id, text, primary, active, fn) => h_flex().id(id).h(32).px(12).items_center().justify_center().rounded(4).role("button").accessibility_label(text).disabled(!active)
       .bg(primary ? t.solid : t.raised).text_color(primary ? t.solidText : t.foreground).when(!active, el => el.opacity(0.5))
       .when(active, el => el.cursor_pointer().hover(s => s.opacity(0.88))).on_click((_event, cx) => { if (active) fn(cx); }).child(text);
-    return v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_color(t.foreground).text_size(13)
+    return v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_color(t.foreground).font_family(type.font).text_size(type.body)
       .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_key_down((event, cx) => {
         if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }
         else if (event.key === "enter" && !this.input) { this.submit(cx); cx.stop_propagation(); }
       })
-      .child(div().text_size(14).font_semibold().child(TITLES[action] || "File action"))
-      .child(div().text_size(12).text_color(t.muted).truncate().child(target.path))
+      .child(div().text_size(type.heading).font_semibold().child(TITLES[action] || "File action"))
+      .child(div().text_size(type.secondary).text_color(t.muted).truncate().child(target.path))
       .when(Boolean(this.input), el => el.child(Input.new(this.input).h(34).px(10).rounded(4).border(0.5).border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Name")))
       .when(action === "trash", el => el.child(div().child(target.on === null && appWindow().platform === "macos" ? `Move “${basename(target.path)}” to Trash?` : `Permanently delete “${basename(target.path)}”? This cannot be undone.`)))
       .when(action === "remove-root", el => el.child(div().child("Remove this folder from the workspace? Files on disk are kept.")))
-      .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(12).text_color(this.error ? t.red : t.muted).child(this.error || "Loading workspace…")))
+      .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(type.secondary).text_color(this.error ? t.red : t.muted).child(this.error || "Loading workspace…")))
       .child(div().flex_1())
       .child(h_flex().justify_end().gap(8)
         .child(button("dialog-cancel", "Cancel", false, !this.busy, () => closeOverlay(props().overlay)))

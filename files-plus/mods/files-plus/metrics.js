@@ -1,6 +1,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { settings } from "herdr";
+import { typography } from "./palette.js";
 
 export const TITLES = { "new-file": "New file", "new-folder": "New folder", rename: "Rename", trash: "Move to Trash", "add-root": "Add folder to workspace", "remove-root": "Remove from workspace" };
 const defaults = { unit13: 7.6, unit12: 7 }, samples = ["MMMMMMMMMM", "中文文件目录名称示例"];
@@ -18,17 +19,17 @@ export function textUnits(text) {
 }
 export const textWidth = (text, size = 13, metrics = calibrated) => textUnits(text) * metrics[`unit${size}`];
 export function metrics() {
-  const s = settings(), key = JSON.stringify([s.font_family, s.ui_font_size, s.zoom]);
-  if (key !== calibrationKey) { calibrationKey = key; calibrated = { ...defaults }; }
+  const s = settings(), type = typography(), key = JSON.stringify([type, s.zoom]);
+  if (key !== calibrationKey) { calibrationKey = key; calibrated = { unit13: defaults.unit13 * type.body / 13, unit12: defaults.unit12 * type.secondary / 12 }; }
   return calibrated;
 }
 export function calibrationProbe(onChange) {
   metrics();
-  const key = calibrationKey;
+  const key = calibrationKey, type = typography();
   // A zero-opacity subtree is not painted by Herdr 0.1.11, including size callbacks.
   // Place this faint probe behind the opaque header, outside normal layout flow.
-  return v_flex().id(`files-metrics-${key}`).absolute().left(0).top(0).opacity(0.01).w(400).h(32).flex_none().children([12, 13].map(size => h_flex().flex_none().children(samples.map((sample, index) =>
-    div().id(`metrics-${size}-${index}`).flex_none().whitespace_nowrap().text_size(size).child(sample).on_size_change((box, cx) => {
+  return v_flex().id(`files-metrics-${key}`).absolute().left(0).top(0).opacity(0.01).w(400).h(32).flex_none().font_family(type.font).children([12, 13].map(size => h_flex().flex_none().children(samples.map((sample, index) =>
+    div().id(`metrics-${size}-${index}`).flex_none().whitespace_nowrap().text_size(size === 13 ? type.body : type.secondary).child(sample).on_size_change((box, cx) => {
       if (key !== calibrationKey || box.width <= 0) return;
       const unit = box.width / zoom() / textUnits(sample), property = `unit${size}`;
       const values = calibrated[`samples${size}`] || [];

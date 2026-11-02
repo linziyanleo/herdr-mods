@@ -13,14 +13,15 @@ export async function runtime(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "files-plus-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dir, "home"));
-  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true }, layout: {}, rebuiltRows: 0, notifications: 0 };
+  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true, ui_font_family: "Geist", ui_font_size: 13, font_family: "JetBrains Mono", font_size: 14 }, layout: {}, rebuiltRows: 0, notifications: 0 };
+  state.theme = { background: "#111113", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#363a3f", input: "#43484e", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#b0b4ba", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
   state.spaces = [{ id: "s1", name: "Product", folder: dir, machine: null, active: true, tabs: [{ id: "tab1", active: true }] }];
   state.panes = [{ pane: "p1", terminal: "t1", cwd: dir, tab: "tab1" }];
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
   const host = {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
     spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
-    machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, layout: () => state.layout,
+    machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, theme: () => state.theme, layout: () => state.layout,
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
       await state.hooks.beforeRead?.(file);
