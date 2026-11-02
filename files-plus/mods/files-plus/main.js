@@ -15,6 +15,8 @@ export default class FilesPlus extends FilesPanel {
     const p = props() || {};
     this.role = p.role; this.targetEntry = p.target; this.action = p.action; this.busy = false; this.at = 0;
     if (!this.role) { this.initPanel(cx); return; }
+    this.entered = false;
+    cx.timer.after(0, cx => { this.entered = true; cx.notify(); });
     this.handle = cx.focus_handle();
     if (this.role === "menu") {
       this.error = p.error; this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(), viewport(), p.pointer, zoom());
@@ -94,6 +96,7 @@ export default class FilesPlus extends FilesPanel {
     const { width, height } = this.geometry;
     if (!list[this.at]?.enabled) this.at = list.findIndex(item => item.enabled);
     return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).text_size(13).text_color(t.foreground)
+      .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_key_down((event, cx) => {
         if (this.busy) { cx.stop_propagation(); return; }
         if (event.key === "up" || event.key === "down") {
@@ -122,6 +125,7 @@ export default class FilesPlus extends FilesPanel {
       .bg(primary ? t.solid : t.raised).text_color(primary ? t.solidText : t.foreground).when(!active, el => el.opacity(0.5))
       .when(active, el => el.cursor_pointer().hover(s => s.opacity(0.88))).on_click((_event, cx) => { if (active) fn(cx); }).child(text);
     return v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_color(t.foreground).text_size(13)
+      .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_key_down((event, cx) => {
         if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }
         else if (event.key === "enter" && !this.input) { this.submit(cx); cx.stop_propagation(); }

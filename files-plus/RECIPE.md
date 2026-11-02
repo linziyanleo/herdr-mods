@@ -18,6 +18,8 @@ Colors use [Radix Colors scale roles](https://www.radix-ui.com/colors/docs/palet
 
 Folders load lazily, directories sort first, hidden entries are included and `.git` is omitted. Symlinks appear as files and are not recursively followed. Opening text replaces the tree with a read-only source editor. Back returns to the existing expansions. File changes refresh the tree, Git marks and an open preview. An unchanged file keeps its existing editor and scroll state. Switching terminal focus within a workspace preserves expansions and previews.
 
+Menus, dialogs, newly expanded rows, the drag pill and incoming tree/source previews fade with native opacity transitions (250ms, ease-out). Loading labels pulse natively over 1200ms. A single deferred callback changes each entrance target; timers never animate individual frames. Collapsing removes children immediately, and panel resizing has no animated reflow.
+
 Right-click captures the entry, owning root, machine and active terminal before the popup takes focus. Up/down skip disabled menu actions, Enter chooses, and Escape closes. Long-running actions keep their owner open until they finish; errors remain visible.
 
 - Add to agent (@) pastes a reference plus a trailing space without Enter. Use a path relative to the terminal's cwd only when that cwd and the entry belong to the same root and the entry is beneath the cwd. Otherwise use the absolute path. Quote whitespace, quotes and backslashes. Match physical terminal cwd paths against declared workspace-root aliases. Refuse an unavailable captured terminal. Preserve a previous text clipboard, including an empty string; Herdr's text clipboard API cannot restore an image-only clipboard.

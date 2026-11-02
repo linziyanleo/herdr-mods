@@ -213,6 +213,7 @@ export class FilesPanel extends View {
     if (this.folders.has(path)) {
       for (const folder of [...this.folders]) if (contains(path, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
     } else {
+      this.revealPath = path;
       this.folders.add(path);
       if (!this.entries.has(path) && !this.pending.has(path)) {
         const context = this.context, pending = this.pending;
@@ -220,7 +221,7 @@ export class FilesPanel extends View {
         cx.spawn(async cx => {
           try { await this.loadFolder(path, context); }
           catch (error) { if (this.current(context)) this.error = error.message || String(error); }
-          finally { pending.delete(path); if (pending === this.pending) { this.treeVersion++; this.syncTree(cx); cx.notify(); } }
+          finally { pending.delete(path); if (pending === this.pending) { this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
         });
       }
     }
@@ -245,6 +246,16 @@ export class FilesPanel extends View {
     const same = path && this.file === path;
     if (!same) { this.code?.release(); this.code = null; this.previewText = null; }
     this.file = path; this.fileError = null; this.openRequest = null;
+    if (!same && cx) {
+      this.previewEntered = false;
+      if (!path) this.treeView.set_props({ chunks: this.chunks.map(chunk => chunk.entity), panel: this, entered: false });
+      cx.timer.after(0, cx => {
+        if (this.file !== path) return;
+        this.previewEntered = true;
+        if (!path) this.treeView.set_props({ chunks: this.chunks.map(chunk => chunk.entity), panel: this, entered: true });
+        cx.notify();
+      });
+    }
     const request = this.previewRequest = {};
     if (!path || !cx) return;
     const context = this.context, on = this.on;
@@ -278,7 +289,18 @@ export class FilesPanel extends View {
     const signature = JSON.stringify([this.treeVersion, this.activeRoot, settings().dark]);
     if (signature === this.treeSignature) return;
     this.treeSignature = signature;
-    const rows = this.rowModel = visibleRows(this), t = palette();
+    let rows = visibleRows(this);
+    if (this.revealPath) {
+      const previous = new Set((this.rowModel || []).map(row => row.key));
+      this.fresh = new Set(rows.filter(row => row.path && contains(this.revealPath, row.path) && !previous.has(row.key)).map(row => row.path));
+      rows = visibleRows(this);
+      if (this.fresh.size && !this.freshTimer) {
+        this.freshTimer = true;
+        cx.timer.after(0, cx => { this.freshTimer = false; this.fresh.clear(); this.treeVersion++; this.syncTree(cx); });
+      }
+    }
+    this.rowModel = rows;
+    const t = palette();
     const count = Math.ceil(rows.length / CHUNK_SIZE), previous = this.chunks.length;
     for (let index = 0; index < count; index++) {
       const part = rows.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE), key = JSON.stringify([part, t]);
@@ -312,7 +334,7 @@ export class FilesPanel extends View {
       .child(calibrationProbe(cx => cx.notify()))
       .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().border_b(0.5).border_color(t.border)
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_event, cx) => { this.show(null); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
+          .on_click((_event, cx) => { this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().font_semibold().child("Files"))
         .child(h_flex().id("add-folder").size(24).items_center().justify_center().text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
           .when(add, el => el.cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))).on_click((_event, cx) => {
@@ -325,7 +347,9 @@ export class FilesPanel extends View {
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.muted).child(title)))
       .when(Boolean(entry?.error), el => el.child(div().px(12).py(8).text_size(12).text_color(t.red).child(entry.error)))
       .when(!this.file, el => el.child(this.treeView))
-      .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted).child(this.fileError || "Loading file…")));
+      .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0).opacity(this.previewEntered === false ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
+        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
+          .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
   close() { this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release(); }
 }

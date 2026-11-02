@@ -37,9 +37,11 @@ export class RowChunk extends View {
   render() {
     const { rows, panel, t } = this.data;
     return v_flex().children(rows.map(row => {
-      if (row.kind === "status") return div().id(row.id).pl(8 + row.depth * 18).py(6).text_size(12).text_color(row.error ? t.red : t.muted).child(row.name);
+      if (row.kind === "status") return div().id(row.id).pl(8 + row.depth * 18).py(6).text_size(12).text_color(row.error ? t.red : t.muted)
+        .when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name);
       const folder = row.kind !== "file";
       return h_flex().id(row.id).h(28).flex_none().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer()
+        .opacity(row.fresh ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
         .on_click((_event, cx) => { if (!row.missing) folder ? panel.toggle(row.path, cx) : panel.openFile(row.path, row.root, cx); })
         .on_mouse_down("right", (event, cx) => panel.menu(row.path, row.kind, row.root, event, cx))
@@ -56,8 +58,9 @@ export class TreeView extends View {
   init(p) { this.update(p); }
   update(p) { this.data = p; }
   render() {
-    const { chunks, panel } = this.data;
+    const { chunks, panel, entered = true } = this.data;
     return v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+      .opacity(entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_mouse_down("right", (event, cx) => { if (!panel.workspace && panel.root) panel.menu(panel.root, "dir", panel.root, event, cx); })
       .children(chunks);
   }
