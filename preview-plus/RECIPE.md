@@ -4,13 +4,13 @@ Preview Markdown, inspect images and browse PDF pages inside Herdr. Operate as a
 
 ![Preview Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` of a disposable Herdr window showing the personal workspace sidebar, Files Plus, and Preview Plus Markdown/PDF panes. Each package ships its own runtime. All documents are synthetic. Preserve the capture's sRGB metadata.
+The preview is an unedited `herdr-app shot` of a disposable Herdr window showing an image in Fit mode with its calculated percentage. All documents are synthetic. Preserve the capture's sRGB metadata.
 
 ## What you see
 
 The 42px header shows Back (`←`, 28px height, 12px text with hover state), the file name or “Files” (13px semibold, truncated), Markdown's Preview and Source mode toggle controls, an Open control for launching local files in the system application, and a Refresh control when viewing the standalone folder tree. A 28px path row below the header displays the containing directory of the active file or the workspace cwd in 12px muted text.
 
-An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, 100% and + zoom controls. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. The image canvas scrolls in both directions when zoomed past the viewport. Fit centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
+An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, an editable percentage and + zoom controls. The percentage frame is 76px wide and 28px high, with a 0.5px border and centered 12px Geist Mono text. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. Drag enlarged media with the left mouse button to pan in both directions; the pointer changes from grab to grabbing. Releasing or leaving the canvas stops the drag. Fit resets panning, centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
 Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. The standalone Files tree features 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
@@ -40,7 +40,7 @@ Resolve local Markdown links against the current file's directory, including `..
 
 ### Multi-format image inspection
 
-Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cache/`. Derive the filename from source path, modification time and size. Keep source bytes unchanged. Fit is the default; zoom ranges from 5% to 800% in 1.25× steps. Open launches the local system application (`open`, `explorer.exe`, or `xdg-open`). Disabled for remote files.
+Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cache/`. Derive the filename from source path, modification time and size. Keep source bytes unchanged. Fit is the default; its percentage follows the fitted display size divided by the source image dimensions. Percentages use logical window pixels per source pixel, independent of Herdr's app zoom (not physical Retina pixels). Enter a number with an optional percent suffix and press Enter or leave the field to apply it; invalid text restores the current percentage, and numeric values clamp to 5–800%. Enter 100 for actual size. The −/+ buttons step by 1.25×. Mouse wheel and trackpad vertical scrolling over the canvas zoom continuously from the current size. Hold Shift to pan instead. Panning is bounded by the enlarged image edges; smaller images stay centered. Herdr 0.1.11 exposes scroll events but no pinch/magnify event; trackpad pinch is not supported. The same controls apply to PDF rasters. Open launches the local system application (`open`, `explorer.exe`, or `xdg-open`). Disabled for remote files.
 
 ### High-performance macOS PDF viewing
 
@@ -129,6 +129,8 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 
 ## Done when
 
+Local zoom/drag verification (2026-11-02, macOS, Herdr 0.1.11): all 26 runtime tests and `herdr-app check` passed. A fresh disposable window rendered the centered percentage and fitted image, with no status errors or runtime log output; its `herdr-app shot` is the package preview. Event tests cover percentage submission/blur, pixel and line scrolling, drag/release/exit, Fit reset and app zoom compensation. Physical mouse/trackpad interaction remains unverified.
+
 Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/*.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
 
 Build and verify these observable behaviors using disposable files:
@@ -141,7 +143,7 @@ Build and verify these observable behaviors using disposable files:
 6. Local inline images in Markdown render at document width interleaved with text blocks, preserve code blocks and reference link definitions, and open on click.
 7. Relative Markdown links navigate across documents and media, pushing to the history stack. Back retraces history in reverse and restores exact source mode, zoom level, and PDF page number.
 8. External HTTP(S) links launch the system browser via `cx.open_url` without pushing history.
-9. PNG, JPEG, WebP and SVG images display with Fit, 100%, zoom in/out (5% to 800%), two-way scrolling, and external Open launch.
+9. PNG, JPEG, WebP and SVG images display with Fit, centered editable percentage (Enter/blur, invalid values, 5–800% bounds), wheel/trackpad scroll zoom, left-button dragging, Shift-scroll panning, and external Open launch. Fit percentages follow viewport changes; 100% dimensions remain stable at 120% app zoom. Dragging stops on release/exit, and Fit restores the center.
 10. Multi-page PDFs on macOS rasterize on demand per page with page turning (`Previous` / `Next`), `<page> / <total>` indicator, page clamping on external edit, and clear error states for locked or invalid PDFs.
 11. Local file watcher detects modifications, atomic replacements, deletions, and restorations of displayed files and referenced Markdown images, reloading live.
 12. External command dispatching via `preview-plus.<command>` executes back, source, preview, refresh, fit, zoom-in, zoom-out, next and previous.
