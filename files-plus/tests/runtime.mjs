@@ -7,20 +7,20 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const execute = promisify(execFile);
-const runtimeDir = fileURLToPath(new URL("../mods/files-plus/", import.meta.url));
+const runtimeDir = process.env.FILES_PLUS_RUNTIME || fileURLToPath(new URL("../mods/files-plus/", import.meta.url));
 
 export async function runtime(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "files-plus-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dir, "home"));
-  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [] };
-  state.spaces = [{ id: "s1", name: "Product", folder: dir, machine: null, active: true, tabs: [{ id: "tab1" }] }];
+  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true }, layout: {}, rebuiltRows: 0, notifications: 0 };
+  state.spaces = [{ id: "s1", name: "Product", folder: dir, machine: null, active: true, tabs: [{ id: "tab1", active: true }] }];
   state.panes = [{ pane: "p1", terminal: "t1", cwd: dir, tab: "tab1" }];
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
   const host = {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
     spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
-    machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => ({ dark: true }),
+    machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, layout: () => state.layout,
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
       await state.hooks.beforeRead?.(file);
@@ -68,7 +68,7 @@ export async function runtime(t) {
   const kit = { View: class {}, div: () => builder("div"), svg: file => builder("svg", file) };
   const base = { v_flex: () => builder("column"), h_flex: () => builder("row"), InputState: { new: input }, Input: { new: value => builder("input", value) },
     EditorState: { new: options => ({ ...options, release() { this.released = true; } }) }, Editor: { new: value => builder("editor", value) } };
-  const context = vm.createContext({ console });
+  const context = vm.createContext({ console, window: { viewport_size: () => state.viewport || { width: 1600, height: 1000 } } });
   const cache = new Map();
   async function module(file) {
     if (cache.has(file)) return cache.get(file);
@@ -83,18 +83,43 @@ export async function runtime(t) {
     return result;
   }
   state.load = async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
-  state.cx = { notify() {}, stop_propagation() {}, sleep: async () => {},
+  state.cx = { notify(entity) { if (entity) entity.dirty = true; else state.notifications++; }, stop_propagation() {}, sleep: async () => {},
+    new(Class, props) {
+      const view = new Class(), entity = { view, dirty: true, released: false,
+        set_props(props) { view.update?.(props); this.dirty = true; },
+        release() { this.released = true; return true; },
+        snapshot() {
+          if (this.dirty) { this.dirty = false; if (Class.name === "RowChunk") state.rebuiltRows += view.data.rows.length; this.element = view.render(state.cx); }
+          return this.element;
+        }
+      };
+      view.init?.(props, state.cx); return entity;
+    },
     focus_handle: () => ({ focus() {} }), read_from_clipboard: () => state.clipboard, write_to_clipboard: text => { state.clipboard = text; },
     spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; },
-    timer: { every: (ms, fn) => state.timers.push({ ms, fn }) }
+    timer: { every: (ms, fn) => state.timers.push({ ms, fn, repeat: true }), after: (ms, fn) => state.timers.push({ ms, fn }) }
   };
-  state.drain = async () => { while (state.tasks.length) await Promise.all(state.tasks.splice(0)); };
+  state.drain = async () => {
+    while (state.tasks.length || state.timers.some(timer => !timer.repeat && timer.ms === 0)) {
+      while (state.tasks.length) await Promise.all(state.tasks.splice(0));
+      const ready = state.timers.filter(timer => !timer.repeat && timer.ms === 0);
+      state.timers = state.timers.filter(timer => !ready.includes(timer));
+      for (const timer of ready) timer.fn(state.cx);
+    }
+  };
+  state.advance = async ms => {
+    const ready = state.timers.filter(timer => !timer.repeat && timer.ms <= ms);
+    state.timers = state.timers.filter(timer => !ready.includes(timer));
+    for (const timer of ready) timer.fn(state.cx);
+    await state.drain();
+  };
   state.target = (name = "", kind = "file", root = dir) => ({ space: "s1", path: path.join(dir, name), kind, root, on: null, active: { pane: "p1", terminal: "t1", cwd: root } });
   return state;
 }
 
 export function find(element, id) {
   if (!element || typeof element !== "object") return null;
+  if (Object.hasOwn(element, "snapshot")) return find(element.snapshot(), id);
   if (element.attributes?.id?.[0] === id) return element;
   for (const child of element.nodes || []) { const result = find(child, id); if (result) return result; }
   return null;

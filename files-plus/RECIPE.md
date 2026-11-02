@@ -48,7 +48,7 @@ files-plus/
 
 Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, and `dialog` for a modal name, confirmation or root action. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
 
-Keep tree state, local watchers, the 10-second refresh fallback, Git marks and read-only previews in `workspace.js`. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and the two Radix palettes in `palette.js`. There are no cross-mod code imports. The package manifest is:
+Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and the two Radix palettes in `palette.js`. There are no cross-mod code imports. The package manifest is:
 
 ```json
 {

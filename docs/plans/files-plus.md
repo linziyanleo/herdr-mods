@@ -159,7 +159,7 @@ Delivery is limited to a local source commit. The normal app home and community 
 
 ## Follow-up: display, performance, motion, width and drag-to-agent
 
-Status: design settled on 2026-11-02 (updated from the 2026-11-01 draft). The accepted behavior and contracts above stay in force unless an item below explicitly changes them.
+Status: implementation authorized on 2026-11-02, including feature commits, local main integration and normal-home installation with `props.fit`. The accepted behavior and contracts above stay in force unless an item below explicitly changes them.
 
 This plan was checked against Herdr 0.1.11 using `~/.config/herdr-app/AGENTS.md`, `herdr.d.ts` and `gpui-kit.d.ts`, the runtime at `files-plus/mods/files-plus/`, the sibling `preview-plus`, `git-graph` and `spaces` mods, and the installed `main-graph` layout. In `main-graph`, the `files-plus-tree` block sits in stack `files`, then stack `panel-body`, inside column `panel` (`px: 368`, `min: 280`, `max: 900`) to the right of `main` (`tab: "active"`).
 
@@ -312,3 +312,7 @@ Allow dragging any file, folder or workspace root row out of `files-plus` into t
   - Run `herdr-app check files-plus/mods/files-plus` and confirm `herdr-app status` reports zero mod/layout errors.
   - Capture `herdr-app shot` screenshots in light and dark themes covering: vector header icons, 28 px rows with active-file selection retained after preview Back, auto-sized file and root context menus at the bottom-right window corner, dialogs, proportional `fit` resize at 100% and zoomed scale, and the `role: "drag"` floating `@` pill + resulting terminal prompt text (with no Enter submitted).
 - **Packaging.** Update `files-plus/RECIPE.md` (`props.fit` with ratio/px `max`, calibrated menu sizing, motion, drag-to-agent interaction, and single-window menu/pane hit-test boundaries) and recapture `files-plus/preview.png` when visual changes ship. Applying `props.fit` to personal `~/.config/herdr-app/layouts/main-graph.json` remains gated on explicit installation approval.
+
+### Follow-up implementation and acceptance (2026-11-02)
+
+Phase 1 uses retained 100-row child entities, path-filtered local watches, four concurrent directory reads, cached root discovery, two-second Git throttling and incremental budget accounting. All 31 runtime tests and the source `herdr-app check` pass. The installed 0.1.11 JavaScript engine has no `Intl`; sorting uses a module-level collator when available and the existing `localeCompare` behavior otherwise. Native acceptance and installation remain pending until the five phases are complete.

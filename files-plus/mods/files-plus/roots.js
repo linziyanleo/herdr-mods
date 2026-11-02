@@ -93,12 +93,12 @@ export async function reloadWorkspace(id) {
   }
 }
 
-export async function describeRoots(folders) {
+export async function describeRoots(folders, on = null) {
   return Promise.all(folders.map(async folder => {
-    const physical = await exec("sh", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "files-plus", folder.path]).catch(() => null);
+    const physical = !on && window().platform === "windows" ? { code: 0, stdout: folder.path } : await exec("sh", ["-c", 'cd "$1" 2>/dev/null && pwd -P', "files-plus", folder.path], { on }).catch(() => null);
     if (physical?.code !== 0) return { ...folder, exists: false, physical: null, top: null };
     const path = physical.stdout.trim();
-    const top = await exec("git", [...READ, "rev-parse", "--show-toplevel"], { cwd: path }).catch(() => null);
+    const top = await exec("git", [...READ, "rev-parse", "--show-toplevel"], { cwd: path, on }).catch(() => null);
     return { ...folder, exists: true, physical: path, top: top?.code === 0 ? top.stdout.trim() : null };
   }));
 }
