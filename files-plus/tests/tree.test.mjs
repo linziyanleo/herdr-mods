@@ -69,3 +69,20 @@ test("an unchanged root read failure remains visible without repeated redraws an
   panel.refresh(r.cx); await r.drain(); assert.equal(panel.error, null);
   assert.ok(panel.entries.get(r.dir).some(entry => entry.name === "home"));
 });
+
+test("newer directory reads win and a late read cannot update a closed panel", async t => {
+  const r = await runtime(t), { default: Files } = await r.load("main.js");
+  const panel = new Files(); panel.init({}, r.cx); await r.drain();
+  const folder = path.join(r.dir, "folder"); panel.folders.add(folder);
+  const replies = [];
+  r.hooks.exec = async (command, args) => command === "sh" && args[1]?.startsWith("n=0") && args.at(-1) === folder ? new Promise(resolve => replies.push(resolve)) : null;
+  const response = name => ({ code: 0, stdout: `f\0${name}\0`, stderr: "" });
+  const older = panel.loadFolder(folder, panel.context), newer = panel.loadFolder(folder, panel.context);
+  replies[1](response("new.txt")); await newer;
+  replies[0](response("old.txt")); await older;
+  assert.equal(panel.entries.get(folder)[0].name, "new.txt");
+  assert.equal(panel.entryCount, [...panel.entries.values()].reduce((count, rows) => count + rows.length, 0));
+  const closing = panel.loadFolder(folder, panel.context); panel.close();
+  replies[2](response("after-close.txt")); await closing;
+  assert.equal(panel.entries.get(folder)[0].name, "new.txt");
+});

@@ -59,7 +59,7 @@ export async function directory(path, on) {
 
 export class FilesPanel extends View {
   initPanel(cx) {
-    this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.watches = new Map(); this.marks = {};
+    this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
     this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map();
     this.treeView = cx.new(TreeView, { chunks: [], panel: this });
     this.revision = shared(REVISION);
@@ -116,28 +116,36 @@ export class FilesPanel extends View {
   dropFolder(path) {
     this.entryCount -= this.entries.get(path)?.length || 0;
     const removed = this.entries.delete(path), limited = this.limits.delete(path);
+    this.pending.delete(path); this.limited = this.limits.size > 0;
     return removed || limited;
   }
   async loadFolder(path, context) {
-    if (!this.current(context)) return;
-    const entries = this.entries;
-    const list = await directory(path, this.on);
-    if (entries !== this.entries || !this.current(context) || !this.folders.has(path)) return;
-    const used = this.entryCount - (this.entries.get(path)?.length || 0);
-    const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
-    if (!same(this.entries.get(path), next)) { this.entries.set(path, next); this.entryCount = used + next.length; this.treeVersion++; }
-    if (list.length > next.length) this.limits.add(path); else this.limits.delete(path);
-    for (const child of [...this.folders]) if (child !== path && dirname(child) === path && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
-      for (const folder of [...this.folders]) if (contains(child, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
-    }
-    this.limited = this.limits.size > 0;
+    if (!this.current(context) || !this.folders.has(path)) return false;
+    const entries = this.entries, pending = this.pending, request = {};
+    pending.set(path, request);
+    try {
+      const list = await directory(path, this.on);
+      if (entries !== this.entries || pending.get(path) !== request || !this.current(context) || !this.folders.has(path)) return false;
+      const used = this.entryCount - (this.entries.get(path)?.length || 0);
+      const next = list.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || collator.compare(a.name, b.name));
+      if (!same(this.entries.get(path), next)) { this.entries.set(path, next); this.entryCount = used + next.length; this.treeVersion++; }
+      if (list.length > next.length) this.limits.add(path); else this.limits.delete(path);
+      for (const child of [...this.folders]) if (child !== path && dirname(child) === path && !next.some(entry => entry.dir && joinPath(path, entry.name) === child)) {
+        for (const folder of [...this.folders]) if (contains(child, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
+      }
+      this.limited = this.limits.size > 0;
+      return true;
+    } catch (error) {
+      if (entries === this.entries && pending.get(path) === request && this.current(context)) throw error;
+      return false;
+    } finally { if (pending.get(path) === request) pending.delete(path); }
   }
   refresh(cx, options = {}) {
     const loc = location(), context = loc.key;
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
-      this.pending = new Set(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
+      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
@@ -225,11 +233,11 @@ export class FilesPanel extends View {
       this.folders.add(path);
       if (!this.entries.has(path) && !this.pending.has(path)) {
         const context = this.context, pending = this.pending;
-        pending.add(path);
         cx.spawn(async cx => {
-          try { await this.loadFolder(path, context); }
-          catch (error) { if (this.current(context)) this.error = error.message || String(error); }
-          finally { pending.delete(path); if (pending === this.pending) { this.fitCause = "user"; this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
+          let completed = false;
+          try { completed = await this.loadFolder(path, context); }
+          catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
+          finally { if (completed && pending === this.pending) { this.fitCause = "user"; this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
         });
       }
     }
@@ -405,5 +413,8 @@ export class FilesPanel extends View {
         .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
-  close() { this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release(); }
+  close() {
+    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null;
+    this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
+  }
 }

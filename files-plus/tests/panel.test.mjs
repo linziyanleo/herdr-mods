@@ -112,6 +112,8 @@ test("lazy loads share the 5,000 entry budget and cap every directory at 500", a
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   const counts = [...panel.entries.values()].map(list => list.length);
   assert.ok(counts.every(n => n <= 500)); assert.equal(counts.reduce((a, b) => a + b, 0), 5000); assert.equal(panel.limited, true);
+  for (const root of r.shared["multi-root.spaces"].s1.folders) panel.toggle(root.path, r.cx);
+  assert.equal(panel.entryCount, 0); assert.equal(panel.limited, false);
 });
 
 test("popup navigation skips disabled actions and dialog cancellation does not mutate", async t => {
