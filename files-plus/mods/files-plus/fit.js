@@ -8,7 +8,8 @@ export function findNode(tree, id) {
 }
 export function panelWidth(rows, title, metrics) {
   const header = 24 + textWidth("Files", 13, metrics) + 24 + 8 + 24 + textWidth(title, 12, metrics);
-  const widths = rows.map(row => {
+  // Expanded descendants must not move the divider beside the workspace.
+  const widths = rows.filter(row => !row.depth).map(row => {
     const padding = 16 + (row.depth || 0) * 18;
     if (row.kind === "status") return padding + textWidth(row.name, 12, metrics);
     return padding + 12 + 14 + 14 + textWidth(row.name, 13, metrics)

@@ -63,7 +63,7 @@ Existing workspace files use a captured expected-text write: preserve path spell
 
 Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
 
-Measure the header title, every visible root name/path, entry name/Git mark and placeholder with the same calibrated metrics as the menu, including indentation, icons, gaps and scrollbar space. Debounce `layout.resize` by 250ms and ignore changes under 16px. User expansion, collapse and context changes may grow or shrink the panel; background filesystem/Git updates only grow it. Skip source previews and hidden panels. A divider resize differing from the last requested width by more than 4px pauses fitting until the space or workspace context changes. Normalize pointer and measurement coordinates by app zoom.
+Measure the header and top-level rows with the same calibrated metrics as the menu, including icons, gaps and scrollbar space. Workspace mode measures root names and paths; single-folder mode measures direct entries. Expanded descendants never contribute to panel width, and long names truncate within the layout's width. Expanding and collapsing folders keep the divider in place. Debounce `layout.resize` by 250ms and ignore changes under 16px. Context changes may grow or shrink the panel; background top-level updates only grow it. Skip source previews and hidden panels. A divider resize differing from the last requested width by more than 4px pauses fitting until the space or workspace context changes. Normalize pointer and measurement coordinates by app zoom.
 
 Agent working, blocked, done and idle displays remain the surrounding Herdr UI's responsibility.
 
@@ -102,7 +102,7 @@ The baseline is native Herdr 0.1.11. Use `cx.spawn`, `cx.timer`, `cx.sleep`, foc
 
 Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
 
-Measure the header title, every visible root name/path, entry name/Git mark and placeholder with the same calibrated metrics as the menu, including indentation, icons, gaps and scrollbar space. Debounce `layout.resize` by 250ms and ignore changes under 16px. User expansion, collapse and context changes may grow or shrink the panel; background filesystem/Git updates only grow it. Skip source previews and hidden panels. A divider resize differing from the last requested width by more than 4px pauses fitting until the space or workspace context changes. Normalize pointer/measurement coordinates by app zoom.
+Use the top-level measurement and stable folder-expansion behavior described in **Adaptive panel fitting** above. Keep ratio/pixel caps, zoom normalization and manual divider overrides.
 
 ### Folder context and saved workspaces
 

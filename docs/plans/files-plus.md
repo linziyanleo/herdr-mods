@@ -159,6 +159,8 @@ Delivery is limited to a local source commit. The normal app home and community 
 
 ## Follow-up: display, performance, motion, width and drag-to-agent
 
+The original phase plan below is historical. Later corrections at the end of this document supersede its affected contracts; the recipe describes current behavior.
+
 Status: implementation authorized on 2026-11-02, including feature commits, local main integration and normal-home installation with `props.fit`. The accepted behavior and contracts above stay in force unless an item below explicitly changes them.
 
 This plan was checked against Herdr 0.1.11 using `~/.config/herdr-app/AGENTS.md`, `herdr.d.ts` and `gpui-kit.d.ts`, the runtime at `files-plus/mods/files-plus/`, the sibling `preview-plus`, `git-graph` and `spaces` mods, and the installed `main-graph` layout. In `main-graph`, the `files-plus-tree` block sits in stack `files`, then stack `panel-body`, inside column `panel` (`px: 368`, `min: 280`, `max: 900`) to the right of `main` (`tab: "active"`).
@@ -336,3 +338,9 @@ Local delivery:
 - All 17 installed runtime files byte-match the repository. The original mod is backed up at `~/.config/herdr-app/backups/files-plus-followup-final-20261102T061835/files-plus`, with a sibling `installation.json` receipt. The preview uses the existing disposable-window native capture; no additional tests were run after the user's stop instruction.
 - The working Herdr now uses `main-files-plus`, a personal copy of its read-only bundled `main`, created with `layout.clone` to preserve its look and saved sizes. Its existing `files` block points to `files-plus`, with `fit: {node:"panel",min:280,max:0.38}`; retaining the block id preserves the tab bar's Files toggle. `mod.open` only opens an overlay and is not a persistent Files-panel installation.
 - The persistent mount is saved in `~/.config/herdr-app/layouts/main-files-plus.json`. The original layout and click state are backed up at `~/.config/herdr-app/backups/files-plus-mount-20261102T062827`, alongside `mount-receipt.json`. The original `main`, settings, key bindings, selected space and selected tab were preserved. Readback and a private native capture confirm the actual Files Plus panel, with no mod/layout errors. No test window was opened, and no Git push was performed.
+
+### Folder width correction (2026-11-02)
+
+The user requested separate local commits for stable folder width, smoother folder motion and Herdr look integration. Expanded descendants no longer contribute to `props.fit` measurements: workspace mode measures root rows; single-folder mode measures direct entries. Toggling folders does not request a user-driven refit. Long names truncate within the panel. Context fitting, window caps and manual-divider overrides remain supported.
+
+The new nested-folder regression failed on the original runtime and passes after the fix. All ten focused fitting/tree tests, `herdr-app check files-plus/mods/files-plus` and whitespace checks pass. In the disposable Herdr 0.1.11 window, opening and closing two nested folders with a long filename retained a measured 389px width throughout, with no mod/layout errors. Report and native capture: `/tmp/fp.gGe9jW/stable-width-report.json`, `/tmp/fp.gGe9jW/stable-width.png`. The broader native follow-up script stopped at its foreground-window requirement; it is not reported as passing. This correction does not install or publish the candidate.

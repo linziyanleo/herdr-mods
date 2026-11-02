@@ -36,11 +36,11 @@ export class RowChunk extends View {
   update(p) { this.data = p; }
   render() {
     const { rows, panel, t } = this.data;
-    return v_flex().children(rows.map(row => {
+    return v_flex().w_full().min_w(0).children(rows.map(row => {
       if (row.kind === "status") return div().id(row.id).pl(8 + row.depth * 18).py(6).text_size(12).text_color(row.error ? t.red : t.muted)
         .when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name);
       const folder = row.kind !== "file";
-      return h_flex().id(row.id).h(28).flex_none().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer()
+      return h_flex().id(row.id).w_full().min_w(0).h(28).flex_none().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer()
         .opacity(row.fresh ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
         .on_mouse_down("left", (event) => { panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
@@ -51,7 +51,7 @@ export class RowChunk extends View {
         .on_mouse_down("right", (event, cx) => panel.menu(row.path, row.kind, row.root, event, cx))
         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
         .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
-        .child(div().when(!row.detail, el => el.flex_1().min_w(0).truncate()).when(row.kind === "root", el => el.font_medium()).child(row.name))
+        .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).when(row.kind === "root", el => el.font_medium()).child(row.name))
         .when(Boolean(row.detail), el => el.child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(row.detail)))
         .when(Boolean(row.mark), el => el.child(div().text_size(12).text_color(row.mark === "A" ? t.green : row.mark === "D" || row.mark === "U" ? t.red : t.amber).child(row.mark)));
     }));
@@ -63,7 +63,7 @@ export class TreeView extends View {
   update(p) { this.data = p; }
   render() {
     const { chunks, panel, entered = true } = this.data;
-    return v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+    return v_flex().id("files-tree").w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(6)
       .opacity(entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
       .on_mouse_down("right", (event, cx) => { if (!panel.workspace && panel.root) panel.menu(panel.root, "dir", panel.root, event, cx); })
       .children(chunks);

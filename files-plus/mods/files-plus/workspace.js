@@ -225,7 +225,6 @@ export class FilesPanel extends View {
     });
   }
   toggle(path, cx) {
-    this.fitCause = "user";
     if (this.folders.has(path)) {
       for (const folder of [...this.folders]) if (contains(path, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
     } else {
@@ -237,7 +236,7 @@ export class FilesPanel extends View {
           let completed = false;
           try { completed = await this.loadFolder(path, context); }
           catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
-          finally { if (completed && pending === this.pending) { this.fitCause = "user"; this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
+          finally { if (completed && pending === this.pending) { this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
         });
       }
     }
@@ -388,7 +387,7 @@ export class FilesPanel extends View {
     const fileRoot = this.file ? rootOf(this.file, roots) : null;
     const add = Boolean(this.root || entry?.folders.length) && this.on === null && appWindow().platform !== "windows";
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
-    return v_flex().id("files-plus").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
+    return v_flex().id("files-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
       .on_size_change((size, cx) => this.panelResized(size, cx))
       .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
       .on_mouse_up("left", () => { this.dragCandidate = null; })

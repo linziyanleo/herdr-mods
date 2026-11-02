@@ -62,19 +62,24 @@ const folder = path.join(web, "width-fixture"); await fs.mkdir(folder, { recursi
 const wideName = "中文文件".repeat(14) + ".txt", longFile = path.join(folder, wideName);
 await fs.writeFile(longFile, "Wide filename fixture\n");
 await request({ type: "toggle", path: folder });
-const expanded = await until(panel, value => value.folders.includes(folder) && value.entries[folder]?.some(entry => entry.name === wideName) && width(value) > width(initial), "user expansion grows panel");
-assert.ok(width(expanded) <= Math.floor(expanded.viewport.width / (expanded.zoom || 1) * 0.38));
+const expanded = await until(panel, value => value.folders.includes(folder) && value.entries[folder]?.some(entry => entry.name === wideName), "expanded folder loads");
+await new Promise(resolve => setTimeout(resolve, 600));
+assert.equal(width(await panel()), width(initial));
 await request({ type: "toggle", path: folder });
-const collapsed = await until(panel, value => !value.folders.includes(folder) && width(value) < width(expanded), "user collapse shrinks panel");
-checks.push({ name: "user grows and shrinks", expanded: width(expanded), collapsed: width(collapsed) });
+const collapsed = await until(panel, value => !value.folders.includes(folder), "folder collapses");
+await new Promise(resolve => setTimeout(resolve, 600));
+assert.equal(width(await panel()), width(initial));
+checks.push({ name: "expansion and collapse keep panel width", initial: width(initial), expanded: width(expanded), collapsed: width(collapsed) });
 
 const backgroundFile = path.join(web, wideName); await fs.writeFile(backgroundFile, "Background width fixture\n");
-const grown = await until(panel, value => value.entries[web]?.some(entry => entry.name === wideName) && width(value) > width(collapsed), "background grows panel");
+const grown = await until(panel, value => value.entries[web]?.some(entry => entry.name === wideName), "background entry appears");
+await new Promise(resolve => setTimeout(resolve, 500));
+assert.equal(width(await panel()), width(initial));
 await fs.unlink(backgroundFile);
 await until(panel, value => !value.entries[web]?.some(entry => entry.name === wideName), "background deletion appears");
 await new Promise(resolve => setTimeout(resolve, 500));
 assert.equal(width(await panel()), width(grown));
-checks.push({ name: "background never shrinks", width: width(grown) });
+checks.push({ name: "workspace descendants keep panel width on background updates", width: width(grown) });
 
 const manualWidth = width(grown) > 420 ? 420 : 560;
 await command("layout.resize", { id: "panel", px: manualWidth });
@@ -93,7 +98,7 @@ await request({ type: "back" });
 assert.equal((await until(panel, value => value.file === null, "Back to tree")).selectedFile, source);
 checks.push({ name: "selection retained after preview Back" });
 await fs.writeFile(path.join(base, "followup-report.json"), JSON.stringify({ checks, screenshots: shots, stage: "sizing passed; theme/zoom checks pending" }, null, 2));
-console.log("passed: calibration, user/background fitting, manual override, context reset and preview selection");
+console.log("passed: calibration, stable folder width, manual override, context reset and preview selection");
 
 try {
 for (const appearance of ["dark", "light"]) for (const scale of [1, 1.2]) {
