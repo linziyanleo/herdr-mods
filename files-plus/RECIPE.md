@@ -1,6 +1,6 @@
 # Files Plus
 
-Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy a path, reveal it, or create, rename and remove files. A persistent + adds a workspace folder. Text and Markdown open as read-only source in the same panel, with a back button.
+Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy an absolute or relative path, reveal it in Finder or File Explorer, or create, rename and remove files. A persistent + adds workspace folders, and root entries offer a dedicated root menu to launch terminals or remove folders. Drag any file or folder to insert an agent reference into the active terminal or agent. Adaptive fitting sizes the panel to content, context menus fit their text within window edges, and entrance animations run smoothly via native transitions. High-performance retained row chunking and incremental change tracking keep scrolling and tree updates fast. Text and Markdown open as read-only source in the same panel with a back button, or hand off rich media seamlessly to Preview Plus.
 
 ![Files Plus](preview.png)
 
@@ -8,31 +8,62 @@ The preview is an unedited `herdr-app shot` from a disposable native Herdr windo
 
 ## What you see
 
-The panel defaults to 320px wide; its actual size belongs to the layout. The 42px header holds Files, a 24px Add folder control and a shortened folder, workspace or preview path. A preview adds a 24px back control. Both controls use Lucide SVGs and a hover state. All tree rows are 28px high with 18px of indentation per level. Roots show their display name and path, highlight the focused terminal's root, and show “Not found” for missing directories. The last activated file stays selected after returning from preview. Git letters appear at the right of changed entries.
+The panel defaults to 320px wide; its actual size belongs to the layout. The 42px header holds Files, a 24px Add folder control (`plus.svg`) and a shortened folder, workspace or preview path. A preview adds a 24px back control (`arrow-left.svg`). Both controls use Lucide SVGs with hover backgrounds. All tree rows are 28px high with 18px of indentation per level, using Lucide folder, file and chevron icons. Roots show their display name and path, highlight the focused terminal's root, and show “Not found” for missing directories. The last activated file stays selected with a highlighted background after returning from preview. Git letters appear at the right of changed entries.
 
-Pointer menus fit their longest label or status text using hidden 12px/13px ASCII/CJK calibration probes, with a 188px minimum and window-width cap. They use 32px rows, 8.5px separators and a reserved 24px status slot. Frameless 10px surfaces have 5px item radii, 0.5px borders and window-edge clamping in zoom-normalized coordinates. Errors widen and reopen the menu when needed. Name and confirmation dialogs fit the action and path, between 420px and 560px wide within the viewport. Use 13px body text, 12px secondary text and 14px dialog headings. Disabled actions are dimmed; errors and progress stay visible.
+Dragging any file, folder or workspace root row at least 6px shows a floating `@` drag pill with the file or folder icon, entry basename and an `@` badge. When the pointer moves outside the Files panel, the pill updates its text to “Click to add @” with a copy cursor when a drop target is available, or a no-drop cursor when no terminal exists. The frameless floating overlay remains inside the Herdr window.
+
+Pointer menus fit their longest label or status text using hidden 12px/13px ASCII/CJK calibration probes, with a 188px minimum and window-width cap. They use 32px rows, 8.5px separators and a reserved 24px status slot. Frameless 10px surfaces have 5px item radii, 0.5px borders and window-edge clamping in zoom-normalized coordinates so menus near the right or bottom edges remain fully visible. Errors widen and reopen the menu when needed. Name and confirmation dialogs fit the action and path, between 420px and 560px wide within the viewport. Use 13px body text, 12px secondary text and 14px dialog headings. Disabled actions are dimmed; errors and progress stay visible.
 
 Colors use [Radix Colors scale roles](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale): Gray 1–2 backgrounds, 3–5 controls and selection, 6–8 borders, 11–12 text; Red, Green, Amber, Blue and Purple 11 for status and source syntax. `settings().dark` selects light or dark values. Native editor chrome follows Herdr's theme.
 
 ## How it behaves
 
-Folders load lazily, directories sort first, hidden entries are included and `.git` is omitted. Symlinks appear as files and are not recursively followed. Opening text replaces the tree with a read-only source editor. Back returns to the existing expansions. File changes refresh the tree, Git marks and an open preview. An unchanged file keeps its existing editor and scroll state. Switching terminal focus within a workspace preserves expansions and previews.
+### Tree browsing and virtualization
 
-Menus, dialogs, newly expanded rows, the drag pill and incoming tree/source previews fade with native opacity transitions (250ms, ease-out). Loading labels pulse natively over 1200ms. A single deferred callback changes each entrance target; timers never animate individual frames. Collapsing removes children immediately, and panel resizing has no animated reflow.
+Folders load lazily, directories sort first, hidden entries are included and `.git` is omitted. Symlinks appear as files and are not recursively followed. Visible rows are flattened and partitioned into retained chunks of 100 rows in child views inside a native scrolling container. Scrolling executes entirely in native Rust with zero JavaScript calls per frame. Unrelated live updates (such as agent ticks or terminal output in other panes) rebuild zero tree rows.
 
-Right-click captures the entry, owning root, machine and active terminal before the popup takes focus. Up/down skip disabled menu actions, Enter chooses, and Escape closes. Long-running actions keep their owner open until they finish; errors remain visible.
+Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Incremental filesystem watching via `watchFolder` maps changed paths back to their parent directories, debounces filesystem bursts by 200ms, lists at most four folders concurrently, and reloads only expanded affected folders. Internal `.git` lock churn is ignored, and Git status is throttled to once per repository every two seconds. Cached physical roots and repository discovery persist until context or config changes.
 
-Drag a file, folder or workspace root at least 6px to show a floating `@` pill, then click outside Files to insert into the captured terminal without Enter. The pill shows “Click to add @” outside the panel. Click inside Files, Escape or right-click to cancel. Releases delivered to the floating surface also complete or cancel the operation; Herdr 0.1.11 can retain the original mouse grab, so click completion remains available. When Files has keyboard focus, capture the shown tab's focused terminal, then an Agent terminal, then its first terminal. Focus in another space never falls back. Herdr exposes no split-pane rectangles, so the drop destination is the captured terminal of the shown tab throughout the workspace area. The frameless floating overlay stays inside the app window.
+### Built-in source preview and Preview Plus handoff
 
-- Add to agent (@) pastes a reference plus a trailing space without Enter. Use a path relative to the terminal's cwd only when that cwd and the entry belong to the same root and the entry is beneath the cwd. Otherwise use the absolute path. Quote whitespace, quotes and backslashes. Match physical terminal cwd paths against declared workspace-root aliases. Refuse an unavailable captured terminal. Preserve a previous text clipboard, including an empty string; Herdr's text clipboard API cannot restore an image-only clipboard.
-- Copy uses an internal shared clipboard. Paste targets the clicked directory or a file's parent, requires the same machine, and chooses `name copy.ext`, `name copy 2.ext`, or the corresponding folder name when needed. Existing files are not overwritten. Reject directory cycles, including a local/POSIX symlink alias into the source directory. Copy symlinks as links.
-- Copy path copies the absolute path. Copy relative path always uses the owning root and yields `.` for a root row.
-- Reveal uses Finder, File Explorer or the local Linux file manager. Remote reveal is disabled.
-- New file and New folder prompt for a name inside the clicked directory or file's parent. Reject blank names, `.`/`..`, separators, control characters and existing entries. Rename is prefilled and stays in the same parent. Workspace roots cannot be renamed or deleted from this menu.
-- Move to Trash asks for confirmation. Local macOS entries move to `~/.Trash` with collision-safe naming. Other platforms and remote machines display an explicit permanent-deletion confirmation. A failure stays in the dialog.
-- A workspace root also offers New terminal here and Remove from workspace. Start the terminal in the captured space and root. Removing a root keeps files on disk and requires at least one root to remain.
+Opening text replaces the tree with a read-only syntax-highlighted source editor (`EditorState` with `readonly: true`). Back returns to the existing expanded tree and restores row selection. File changes refresh the tree, Git marks and an open preview. An unchanged file keeps its existing editor and scroll state. Switching terminal focus within a workspace preserves expansions and previews.
 
-Add folder works for local POSIX spaces, including ordinary single-folder spaces and preview headers. Capture the original space and displayed folder before opening the system picker. Cancel and duplicate selections leave data unchanged. Adding a different folder converts an ordinary space to an unsaved workspace, preserving its name, tabs and terminals. Existing workspace files use a captured expected-text write: preserve path spelling, string entries, unknown fields and two-space formatting; new folders use relative paths. A conflicting edit reloads instead of overwriting the file. A closed or replaced target cannot be recreated by a late completion.
+When paired with Preview Plus via `props.previewStack` in a layout stack, clicking `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` or `.pdf` publishes the target `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and selects `preview-plus` in that stack. Ordinary text stays in Files Plus's built-in source editor. If Preview Plus is absent or not installed, rich files gracefully fall back to the built-in source editor.
+
+### Native motion and transitions
+
+Menus, dialogs, newly expanded rows, the drag pill and incoming tree/source previews fade with native opacity transitions (`.transition("opacity", { duration: 250, easing: "ease-out" })`). Loading labels pulse natively over 1200ms via `.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })`. A single deferred callback changes each entrance target; timers never animate individual frames. Collapsing removes children immediately, and panel resizing has no animated reflow.
+
+### Right-click file manager menu
+
+Right-click captures the entry, owning root, physical alias, machine and active terminal before the popup takes focus. Up/down arrows navigate items, Enter chooses, and Escape closes. Long-running actions keep their owner open until they finish; errors remain visible.
+
+- **Add to agent (@)**: pastes a reference plus a trailing space into the captured terminal without Enter. Uses a path relative to the terminal's cwd only when that cwd and the entry belong to the same root and the entry is beneath the cwd; otherwise uses the absolute path so cross-root references remain unambiguous. Quotes whitespace, quotes and backslashes. Matches physical terminal cwd paths against declared workspace-root aliases. Refuses an unavailable captured terminal. Preserves and restores previous clipboard text, including an empty string.
+- **Copy and Paste**: Copy writes the entry path, kind and machine to `shared("files-plus.clipboard")`. Paste targets the clicked directory or a file's parent, requires the same machine, and automatically chooses `name copy.ext`, `name copy 2.ext`, or the corresponding folder name when a collision exists. Existing files are never overwritten. Rejects directory cycles, including local/POSIX symlink aliases into the source directory. Copies symlinks as links.
+- **Copy path and Copy relative path**: Copy path copies the absolute path. Copy relative path resolves relative to the entry's owning workspace root and yields `.` for a root row.
+- **Reveal**: opens Finder on macOS (`open -R`), File Explorer on Windows (`explorer.exe /select`), or the local Linux file manager (`xdg-open`). Remote reveal is disabled.
+- **New file and New folder**: prompts for a name inside the clicked directory or file's parent via a modal dialog. Rejects blank names, `.`/`..`, separators, control characters and existing entries.
+- **Rename**: prefilled modal dialog renaming in place within the parent directory. Rejects collisions. Workspace roots cannot be renamed from this menu.
+- **Move to Trash**: prompts for confirmation. Local macOS entries move safely to `~/.Trash` with collision-safe naming. Other platforms and remote machines display an explicit permanent-deletion confirmation dialog.
+- **Root actions**: workspace root rows offer **New terminal here** (starts a terminal tab in the captured space and root) and **Remove from workspace** (removes the root from the workspace mapping without deleting files on disk; requires at least one root to remain).
+
+### Drag to Agent (@) gesture
+
+Drag a file, folder or workspace root at least 6px to show the floating `@` pill, then click outside Files to insert into the captured terminal without Enter. The pill shows “Click to add @” outside the panel. Click inside Files, Escape or right-click to cancel. Releases delivered to the floating surface also complete or cancel the operation; Herdr 0.1.11 can retain the original mouse grab, so click completion remains available.
+
+When Files has keyboard focus, target capture inspects the active tab and picks in priority order: the focused terminal pane, then a running Agent pane, then its first terminal pane. Focus in another space never falls back. Herdr exposes no split-pane rectangles, so the drop destination is the captured terminal of the shown tab throughout the workspace area. The frameless floating overlay stays inside the app window.
+
+### Multi-root workspaces and persistent + folder addition
+
+Add folder works for local POSIX spaces, including ordinary single-folder spaces and preview headers. Captures the original space and displayed folder before opening the system picker. Cancel and duplicate selections leave data unchanged. Adding a different folder converts an ordinary space to an unsaved workspace, preserving its name, tabs and terminals.
+
+Existing workspace files use a captured expected-text write: preserve path spelling, string entries, unknown fields and two-space formatting; new folders use relative paths. A conflicting disk edit reloads instead of overwriting the file. A closed or replaced target cannot be recreated by a late completion.
+
+### Adaptive panel fitting
+
+Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
+
+Measure the header title, every visible root name/path, entry name/Git mark and placeholder with the same calibrated metrics as the menu, including indentation, icons, gaps and scrollbar space. Debounce `layout.resize` by 250ms and ignore changes under 16px. User expansion, collapse and context changes may grow or shrink the panel; background filesystem/Git updates only grow it. Skip source previews and hidden panels. A divider resize differing from the last requested width by more than 4px pauses fitting until the space or workspace context changes. Normalize pointer and measurement coordinates by app zoom.
 
 Agent working, blocked, done and idle displays remain the surrounding Herdr UI's responsibility.
 
