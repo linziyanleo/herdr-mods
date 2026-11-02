@@ -32,7 +32,7 @@ test("short movement preserves clicks while drag threshold opens a full-window o
   row.handlers["on_mouse_down:left"]({ position: { x: 1100, y: 100 } }, r.cx);
   root.handlers.on_mouse_move({ position: { x: 1106, y: 100 } }, r.cx);
   const spec = r.calls.find(c => c.command === "openOverlay").spec;
-  assert.equal(spec.props.role, "drag"); assert.equal(spec.width, 1600); assert.equal(spec.height, 1000); assert.equal(spec.frame, "none");
+  assert.equal(spec.props.role, "drag"); assert.equal(spec.kind, "window"); assert.equal(spec.width, 1600); assert.equal(spec.height, 1000); assert.equal(spec.frame, "none");
   row.handlers.on_click({}, r.cx); assert.equal(panel.file, null);
 });
 
@@ -49,8 +49,13 @@ test("drag release outside pastes one reference without Enter and restores clipb
   drag = create({ x: 500, y: 100 });
   drag.render(r.cx).handlers.on_key_down({ key: "escape" }, r.cx); await r.drain(); assert.equal(r.pasted, undefined);
   drag = create({ x: 500, y: 100 });
-  drag.render(r.cx).handlers.on_mouse_up({ position: drag.cursor }, r.cx); await r.drain();
+  const surface = drag.render(r.cx);
+  surface.handlers.on_mouse_up({ position: drag.cursor }, r.cx);
+  surface.handlers.on_click({ position: drag.cursor }, r.cx); await r.drain();
   assert.equal(r.pasted, '@"some file.txt" '); assert.equal(r.clipboard, "original clipboard");
   assert.equal(r.calls.filter(c => c.command === "terminal.paste").length, 1);
   assert.ok(!/[\r\n]/.test(r.pasted));
+  r.pasted = undefined;
+  drag = create({ x: 500, y: 100 });
+  drag.render(r.cx).handlers["on_mouse_down:right"]({}, r.cx); await r.drain(); assert.equal(r.pasted, undefined);
 });
