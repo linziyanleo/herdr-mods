@@ -32,7 +32,9 @@ When paired with Preview Plus via `props.previewStack` in a layout stack, clicki
 
 ### Native motion and transitions
 
-Menus, dialogs, newly expanded rows, the drag pill and incoming tree/source previews fade with native opacity transitions (`.transition("opacity", { duration: 250, easing: "ease-out" })`). Loading labels pulse natively over 1200ms via `.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })`. A single deferred callback changes each entrance target; timers never animate individual frames. Collapsing removes children immediately, and panel resizing has no animated reflow.
+Folder children expand from 0px to their 28px row height and collapse back to 0px with native height and opacity transitions, using 250ms `ease-out`. Closing rows stay mounted for the transition and reject clicks and drags, while their directory state is released immediately. Reopening a folder retargets its existing rows; old cleanup callbacks cannot remove reopened children or affect another workspace. Loading and empty-folder placeholders use the same row motion.
+
+Menus, dialogs, the drag pill and incoming tree/source previews fade with native opacity transitions. Loading labels pulse natively over 1200ms via `.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })`. A single deferred callback changes each entrance target, and one cleanup callback releases outgoing rows after 250ms. Timers never animate individual frames. Motion uses Herdr's native GPUI engine; GSAP's `requestAnimationFrame`/`setTimeout` ticker is unavailable in this runtime. Panel resizing has no animated reflow.
 
 ### Right-click file manager menu
 

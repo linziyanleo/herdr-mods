@@ -3,10 +3,24 @@ import { v_flex, h_flex } from "gpui-base";
 import { joinPath, label, shortPath } from "./roots.js";
 
 export const CHUNK_SIZE = 100;
+export const FOLDER_MOTION = { duration: 250, easing: "ease-out" };
+
+export function retainClosingRows(previous, rows, closingKeys) {
+  if (!closingKeys.size) return rows;
+  const keys = new Set(rows.map(row => row.key)), before = new Map();
+  let pending = [];
+  for (const row of previous) {
+    if (keys.has(row.key)) {
+      if (pending.length) before.set(row.key, pending);
+      pending = [];
+    } else if (closingKeys.has(row.key)) pending.push({ ...row, leaving: true });
+  }
+  return [...rows.flatMap(row => [...(before.get(row.key) || []), row]), ...pending];
+}
 
 export function visibleRows(state) {
   const out = [];
-  const status = (key, name, depth = 0, error = false) => out.push({ key, id: key, kind: "status", name, depth, error });
+  const status = (key, name, depth = 0, error = false) => out.push({ key, id: key, kind: "status", name, depth, error, fresh: state.fresh?.has(key) || false });
   const walk = (prefix, root, depth) => {
     if (depth > 40) return;
     const list = state.entries.get(prefix);
@@ -37,18 +51,19 @@ export class RowChunk extends View {
   render() {
     const { rows, panel, t, type } = this.data;
     return v_flex().w_full().min_w(0).font_family(type.font).text_size(type.body).text_color(t.foreground).children(rows.map(row => {
-      if (row.kind === "status") return div().id(row.id).pl(8 + row.depth * 18).py(6).text_size(type.secondary).text_color(row.error ? t.red : t.muted)
-        .when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name);
+      if (row.kind === "status") return h_flex().id(row.id).h(row.fresh || row.leaving ? 0 : 28).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(type.secondary).text_color(row.error ? t.red : t.muted)
+        .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
+        .child(div().truncate().tooltip(row.name).when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
       const folder = row.kind !== "file";
-      return h_flex().id(row.id).w_full().min_w(0).h(28).flex_none().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer()
-        .opacity(row.fresh ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
+      return h_flex().id(row.id).w_full().min_w(0).h(row.fresh || row.leaving ? 0 : 28).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer().disabled(Boolean(row.leaving))
+        .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
-        .on_mouse_down("left", (event) => { panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
+        .on_mouse_down("left", (event) => { if (row.leaving) return; panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
         .on_click((_event, cx) => {
-          if (panel.suppressClick) { panel.suppressClick = false; cx.stop_propagation(); return; }
+          if (row.leaving || panel.suppressClick) { panel.suppressClick = false; cx.stop_propagation(); return; }
           if (!row.missing) panel.clickedRow = row;
         })
-        .on_mouse_down("right", (event, cx) => panel.menu(row.path, row.kind, row.root, event, cx))
+        .on_mouse_down("right", (event, cx) => { if (row.leaving) cx.stop_propagation(); else panel.menu(row.path, row.kind, row.root, event, cx); })
         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
         .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).when(row.kind === "root", el => el.font_medium()).child(row.name))

@@ -5,7 +5,7 @@ import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appW
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { palette, typography, sourceStyle } from "./palette.js";
-import { visibleRows, TreeView, RowChunk, CHUNK_SIZE } from "./tree.js";
+import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
 import { dragMove } from "./drag.js";
@@ -148,6 +148,7 @@ export class FilesPanel extends View {
       this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
+      this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.freshTimer = null; this.revealPath = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
     }
     this.watchConfig(loc.space, loc.entry?.file, cx);
@@ -226,6 +227,15 @@ export class FilesPanel extends View {
   }
   toggle(path, cx) {
     if (this.folders.has(path)) {
+      const rows = this.rowModel || [], index = rows.findIndex(row => row.path === path);
+      if (index >= 0) for (let i = index + 1; i < rows.length && rows[i].depth > rows[index].depth; i++) this.closingKeys.add(rows[i].key);
+      if (this.closingKeys.size) {
+        const token = this.exitTimer = {}, generation = this.generation;
+        cx.timer.after(FOLDER_MOTION.duration, cx => {
+          if (this.exitTimer !== token || this.generation !== generation) return;
+          this.exitTimer = null; this.closingKeys.clear(); this.treeVersion++; this.syncTree(cx); cx.notify();
+        });
+      }
       for (const folder of [...this.folders]) if (contains(path, folder)) { this.folders.delete(folder); this.dropFolder(folder); }
     } else {
       this.revealPath = path;
@@ -236,11 +246,11 @@ export class FilesPanel extends View {
           let completed = false;
           try { completed = await this.loadFolder(path, context); }
           catch (error) { if (this.current(context)) { completed = true; this.error = error.message || String(error); } }
-          finally { if (completed && pending === this.pending) { this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
+          finally { if (completed && pending === this.pending) { this.revealPath = path; this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify(); } }
         });
       }
     }
-    this.treeVersion++; this.syncTree(cx); cx.notify();
+    this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify();
   }
   openFile(path, root, cx) {
     this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
@@ -314,13 +324,14 @@ export class FilesPanel extends View {
     let rows = visibleRows(this);
     if (this.revealPath) {
       const previous = new Set((this.rowModel || []).map(row => row.key));
-      this.fresh = new Set(rows.filter(row => row.path && contains(this.revealPath, row.path) && !previous.has(row.key)).map(row => row.path));
+      this.fresh = new Set(rows.filter(row => (row.path && contains(this.revealPath, row.path) || row.key === `empty-${this.revealPath}`) && !previous.has(row.key)).map(row => row.key));
       rows = visibleRows(this);
       if (this.fresh.size && !this.freshTimer) {
-        this.freshTimer = true;
-        cx.timer.after(0, cx => { this.freshTimer = false; this.fresh.clear(); this.treeVersion++; this.syncTree(cx); });
+        const token = this.freshTimer = {}, generation = this.generation;
+        cx.timer.after(0, cx => { if (this.freshTimer !== token || this.generation !== generation) return; this.freshTimer = null; this.fresh.clear(); this.treeVersion++; this.syncTree(cx); });
       }
     }
+    rows = retainClosingRows(this.rowModel || [], rows, this.closingKeys);
     this.rowModel = rows;
     const count = Math.ceil(rows.length / CHUNK_SIZE), previous = this.chunks;
     const retained = new Map(previous.map(chunk => [chunk.id, chunk])), chunks = [];
@@ -421,7 +432,7 @@ export class FilesPanel extends View {
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
   close() {
-    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null;
+    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null; this.freshTimer = null;
     this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
   }
 }
