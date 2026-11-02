@@ -310,15 +310,20 @@ export class FilesPanel extends View {
     }
     this.rowModel = rows;
     const t = palette();
-    const count = Math.ceil(rows.length / CHUNK_SIZE), previous = this.chunks.length;
+    const count = Math.ceil(rows.length / CHUNK_SIZE), previous = this.chunks;
+    const retained = new Map(previous.map(chunk => [chunk.id, chunk])), chunks = [];
     for (let index = 0; index < count; index++) {
       const part = rows.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE), key = JSON.stringify([part, t]);
-      const data = { rows: part, panel: this, t };
-      if (!this.chunks[index]) this.chunks[index] = { entity: cx.new(RowChunk, data), key };
-      else if (this.chunks[index].key !== key) { this.chunks[index].entity.set_props(data); this.chunks[index].key = key; }
+      const id = part[0].id, data = { rows: part, panel: this, t }, chunk = retained.get(id);
+      if (!chunk) chunks.push({ id, entity: cx.new(RowChunk, data), key });
+      else {
+        if (chunk.key !== key) { chunk.entity.set_props(data); chunk.key = key; }
+        chunks.push(chunk); retained.delete(id);
+      }
     }
-    for (const chunk of this.chunks.splice(count)) chunk.entity.release();
-    if (count !== previous) this.treeView.set_props({ chunks: this.chunks.map(chunk => chunk.entity), panel: this });
+    for (const chunk of retained.values()) chunk.entity.release();
+    this.chunks = chunks;
+    if (chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this });
     this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
   }
   panelTitle() { return this.workspace?.name || (this.root ? label({ path: this.root }) : ""); }
@@ -339,6 +344,7 @@ export class FilesPanel extends View {
       if (!shouldFit(desired, this.panelSize.width / zoom(), token.cause)) return;
       this.lastRequestedWidth = desired; this.resizePending = token;
       run("layout.resize", { id: fit.node, px: desired });
+      cx.spawn(async cx => { await cx.sleep(0); cx.notify(); });
       cx.timer.after(500, () => { if (this.resizePending === token) this.resizePending = null; });
     });
   }

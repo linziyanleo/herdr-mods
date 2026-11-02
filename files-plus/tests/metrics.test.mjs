@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runtime } from "./runtime.mjs";
+import { runtime, find } from "./runtime.mjs";
 
 test("text widths count CJK and emoji and menu sizing includes every label and error", async t => {
   const r = await runtime(t), m = await r.load("metrics.js"), a = await r.load("actions.js"), metrics = { unit13: 8, unit12: 7 };
@@ -25,4 +25,15 @@ test("dialog sizing follows action, text and viewport bounds", async t => {
   assert.equal(m.dialogLayout("trash", { path: "/a" }).height, 252);
   assert.equal(m.dialogLayout("rename", { path: "/long".repeat(100) }).width, 560);
   assert.ok(m.dialogLayout("rename", { path: "/long".repeat(100) }, m.metrics(), { width: 500, height: 800 }, 1.2).width < 420);
+});
+
+test("painted calibration probes normalize zoom and reset when appearance metrics change", async t => {
+  const r = await runtime(t), m = await r.load("metrics.js");
+  r.settings.zoom = 1.2;
+  const probe = m.calibrationProbe(() => {});
+  find(probe, "metrics-13-0").handlers.on_size_change({ width: 120, height: 16 }, r.cx);
+  find(probe, "metrics-13-1").handlers.on_size_change({ width: 18 * 6 * 1.2, height: 16 }, r.cx);
+  assert.equal(m.metrics().unit13, 10);
+  r.settings.zoom = 1;
+  assert.equal(m.metrics().unit13, 7.6);
 });

@@ -60,7 +60,7 @@ export async function runtime(t) {
       if (key === "child") return child => { target.nodes.push(child); return el; };
       if (key === "children") return children => { target.nodes.push(...children); return el; };
       if (String(key).startsWith("on_")) return (...args) => { target.handlers[key] = args.at(-1); if (args.length > 1) target.handlers[`${key}:${args[0]}`] = args.at(-1); return el; };
-      return (...args) => { target.attributes[key] = args; return el; };
+      return (...args) => { if (key === "id" && /^(file|root)-/.test(args[0])) state.rowBuilds = (state.rowBuilds || 0) + 1; target.attributes[key] = args; return el; };
     } });
     return el;
   }
