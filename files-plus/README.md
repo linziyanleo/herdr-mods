@@ -8,6 +8,8 @@ See [the recipe](RECIPE.md) for installation, behavior, dependencies, limitation
 
 Install only `mods/files-plus/` into your Herdr app home's `mods/`, after checking for a conflicting name. In a personal layout, replace the existing Files block's `content.mod` with `files-plus`, retaining its block id. Clone a bundled layout before editing it. No shortcut changes or other runtime mods are required.
 
+`mod.open {name:"files-plus"}` opens an overlay; it does not replace the layout's Files panel. For the bundled `main`, use `layout.clone` to preserve its look and saved sizes, then point the personal copy's existing `files` block to `files-plus`. Keep the `files` block id so the tab bar's Files button continues to work.
+
 Run the automated tests from the repository root with Node.js 22 or newer:
 
 ```sh
