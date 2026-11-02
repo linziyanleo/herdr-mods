@@ -1,13 +1,13 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { props, setShared, run, openOverlay, closeOverlay, pickFolder, window } from "herdr";
+import { props, setShared, run, openOverlay, closeOverlay, pickFolder, window as appWindow } from "herdr";
 import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 import { palette } from "./palette.js";
-import { CLIPBOARD, menuItems, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
+import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
+import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 
-const TITLES = { "new-file": "New file", "new-folder": "New folder", rename: "Rename", trash: "Move to Trash", "add-root": "Add folder to workspace", "remove-root": "Remove from workspace" };
 const NAME_ACTIONS = new Set(["new-file", "new-folder", "rename"]);
 
 export default class FilesPlus extends FilesPanel {
@@ -17,6 +17,7 @@ export default class FilesPlus extends FilesPanel {
     if (!this.role) { this.initPanel(cx); return; }
     this.handle = cx.focus_handle();
     if (this.role === "menu") {
+      this.error = p.error; this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(), viewport(), p.pointer, zoom());
       this.at = menuItems(this.targetEntry).findIndex(item => item.enabled);
       this.handle.focus();
     } else if (this.role === "dialog") {
@@ -39,7 +40,7 @@ export default class FilesPlus extends FilesPanel {
     }
   }
   openDialog(action) {
-    openOverlay({ mod: "files-plus", kind: "dialog", modal: true, width: 440, height: 240,
+    openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout(action, this.targetEntry),
       props: { role: "dialog", action, target: this.targetEntry } });
     closeOverlay(props().overlay);
   }
@@ -63,6 +64,11 @@ export default class FilesPlus extends FilesPanel {
         closeOverlay(props().overlay);
       } catch (error) {
         this.error = error.message || String(error); this.busy = false; cx.notify();
+        const p = props(), geometry = menuLayout(menuItems(target), this.error, metrics(), viewport(), p.pointer, zoom());
+        if (geometry.width !== this.geometry.width || geometry.height !== this.geometry.height) {
+          openOverlay({ mod: "files-plus", kind: "popup", frame: "none", ...geometry, props: { role: "menu", target, geometry, pointer: p.pointer, error: this.error } });
+          closeOverlay(p.overlay);
+        }
       }
     });
   }
@@ -85,9 +91,9 @@ export default class FilesPlus extends FilesPanel {
   }
   renderMenu() {
     const t = palette(), list = menuItems(this.targetEntry);
-    const height = list.length * 32 + list.filter(item => item.group).length * 8.5 + 10 + (this.busy || this.error ? 64 : 0);
+    const { width, height } = this.geometry;
     if (!list[this.at]?.enabled) this.at = list.findIndex(item => item.enabled);
-    return v_flex().id("files-menu").track_focus(this.handle).w_full().h(height).max_h(600).min_h(0).overflow_y_scrollbar().p(5).bg(t.popover).text_size(13).text_color(t.foreground)
+    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).text_size(13).text_color(t.foreground)
       .on_key_down((event, cx) => {
         if (this.busy) { cx.stop_propagation(); return; }
         if (event.key === "up" || event.key === "down") {
@@ -100,13 +106,13 @@ export default class FilesPlus extends FilesPanel {
       })
       .children(list.map((item, index) => v_flex().flex_none()
         .when(item.group, el => el.child(div().mx(7).my(4).h(0.5).bg(t.border)))
-        .child(h_flex().id(`action-${item.id}`).h(32).px(10).rounded(4).items_center().flex_none().disabled(!item.enabled || this.busy).role("button").accessibility_label(item.label)
+        .child(h_flex().id(`action-${item.id}`).h(32).px(10).rounded(5).items_center().flex_none().disabled(!item.enabled || this.busy).role("button").accessibility_label(item.label)
           .text_color(!item.enabled || this.busy ? t.muted : item.danger ? t.red : t.foreground)
           .when(index === this.at && item.enabled, el => el.bg(t.selected))
           .when(item.enabled && !this.busy, el => el.cursor_pointer().hover(s => s.bg(t.hover)))
           .on_hover((hovered, cx) => { if (hovered && item.enabled && !this.busy) { this.at = index; cx.notify(); } })
           .on_click((_event, cx) => this.choose(index, cx)).child(item.label))))
-      .when(this.busy || Boolean(this.error), el => el.child(div().p(8).text_size(12).text_color(this.error ? t.red : t.muted).child(this.error || "Working…")));
+      .child(h_flex().h(24).flex_none().px(8).items_center().text_size(12).text_color(this.error ? t.red : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
   }
   renderDialog() {
     const t = palette(), action = this.action, target = this.targetEntry;
@@ -123,13 +129,13 @@ export default class FilesPlus extends FilesPanel {
       .child(div().text_size(14).font_semibold().child(TITLES[action] || "File action"))
       .child(div().text_size(12).text_color(t.muted).truncate().child(target.path))
       .when(Boolean(this.input), el => el.child(Input.new(this.input).h(34).px(10).rounded(4).border(0.5).border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Name")))
-      .when(action === "trash", el => el.child(div().child(target.on === null && window().platform === "macos" ? `Move “${basename(target.path)}” to Trash?` : `Permanently delete “${basename(target.path)}”? This cannot be undone.`)))
+      .when(action === "trash", el => el.child(div().child(target.on === null && appWindow().platform === "macos" ? `Move “${basename(target.path)}” to Trash?` : `Permanently delete “${basename(target.path)}”? This cannot be undone.`)))
       .when(action === "remove-root", el => el.child(div().child("Remove this folder from the workspace? Files on disk are kept.")))
       .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(12).text_color(this.error ? t.red : t.muted).child(this.error || "Loading workspace…")))
       .child(div().flex_1())
       .child(h_flex().justify_end().gap(8)
         .child(button("dialog-cancel", "Cancel", false, !this.busy, () => closeOverlay(props().overlay)))
-        .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && window().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
+        .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
   }
   render(cx) {
     if (this.role === "menu") return this.renderMenu();

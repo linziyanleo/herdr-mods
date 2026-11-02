@@ -1,11 +1,12 @@
 // Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, settings, window, props, shared, setShared, run, openOverlay } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, settings, window as appWindow, props, shared, setShared, run, openOverlay } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
-import { captureTarget, installed, REVISION } from "./actions.js";
+import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { palette } from "./palette.js";
 import { visibleRows, TreeView, RowChunk, CHUNK_SIZE } from "./tree.js";
+import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -40,7 +41,7 @@ export function location() {
 }
 
 export async function directory(path, on) {
-  if (!on && window().platform === "windows") {
+  if (!on && appWindow().platform === "windows") {
     const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
     if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
     const result = JSON.parse(r.stdout || "[]");
@@ -268,7 +269,8 @@ export class FilesPanel extends View {
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
   menu(path, kind, root, event, cx) {
     cx.stop_propagation();
-    openOverlay({ mod: "files-plus", kind: "popup", width: 272, height: kind === "root" ? 428 : 360, at: event.position, props: { role: "menu", target: this.target(path, kind, root) } });
+    const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
+    openOverlay({ mod: "files-plus", kind: "popup", frame: "none", ...geometry, props: { role: "menu", target, geometry, pointer: event.position } });
   }
   syncTree(cx, loc = location()) {
     const roots = this.rootInfo || this.workspace?.folders || [];
@@ -303,21 +305,23 @@ export class FilesPanel extends View {
     if (loc.key !== this.context || this.revision !== shared(REVISION) || activeRoot !== this.activeRoot || this.treeSignature !== JSON.stringify([this.treeVersion, activeRoot, settings().dark])) this.scheduleSync(cx);
     const entry = workspaceOf(this.spaceId), t = palette(), roots = this.rootInfo || entry?.folders || [];
     const fileRoot = this.file ? rootOf(this.file, roots) : null;
-    const add = Boolean(this.root || entry?.folders.length) && this.on === null && window().platform !== "windows";
+    const add = Boolean(this.root || entry?.folders.length) && this.on === null && appWindow().platform !== "windows";
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
     return v_flex().id("files-plus").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
       .on_size_change(size => { this.visible = size.width > 0 && size.height > 0; })
+      .child(calibrationProbe(cx => cx.notify()))
       .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().border_b(0.5).border_color(t.border)
-        .when(Boolean(this.file), el => el.child(div().id("files-back").size(24).cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted)
-          .on_click((_event, cx) => { this.show(null); cx.notify(); }).child("←")))
+        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_event, cx) => { this.show(null); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().font_semibold().child("Files"))
-        .child(div().id("add-folder").size(24).text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
-          .when(add, el => el.cursor_pointer().hover(s => s.bg(t.hover))).on_click((_event, cx) => {
+        .child(h_flex().id("add-folder").size(24).items_center().justify_center().text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
+          .when(add, el => el.cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))).on_click((_event, cx) => {
             if (!add) return;
             const root = entry?.folders[0]?.path || this.root;
-            openOverlay({ mod: "files-plus", kind: "dialog", modal: true, width: 440, height: 220, props: { role: "dialog", action: "add-root", target: this.target(root, "root", root) } });
+            const target = this.target(root, "root", root);
+            openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target), props: { role: "dialog", action: "add-root", target } });
             cx.stop_propagation();
-          }).child("+"))
+          }).child(svg("mods/files-plus/plus.svg").size(14)))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.muted).child(title)))
       .when(Boolean(entry?.error), el => el.child(div().px(12).py(8).text_size(12).text_color(t.red).child(entry.error)))
       .when(!this.file, el => el.child(this.treeView))

@@ -1,5 +1,18 @@
 import { exec, focused, panes, spaces, window, home, appHome, readTextFile, shared, setShared, run } from "herdr";
 import { basename, dirname, joinPath, contains, relativePath, workspaceOf } from "./roots.js";
+import { textWidth } from "./metrics.js";
+
+export function menuLayout(items, statusText, metrics, viewport, pointer, zoom = 1) {
+  const width = Math.ceil(Math.min(Math.max(188, viewport ? viewport.width / zoom - 16 : 10000), Math.max(188,
+    Math.max(...items.map(item => textWidth(item.label, 13, metrics) + 30), textWidth(statusText, 12, metrics) + 26) + 4)));
+  const intrinsicHeight = items.length * 32 + items.filter(item => item.group).length * 8.5 + 10 + 24;
+  const height = Math.min(intrinsicHeight, viewport ? Math.max(32, viewport.height / zoom - 16) : intrinsicHeight);
+  const at = viewport && pointer ? {
+    x: Math.max(8 * zoom, Math.min(pointer.x, viewport.width - width * zoom - 8 * zoom)),
+    y: Math.max(8 * zoom, Math.min(pointer.y, viewport.height - height * zoom - 8 * zoom))
+  } : pointer;
+  return { width, height, ...(at ? { at } : {}) };
+}
 
 export const CLIPBOARD = "files-plus.clipboard", REVISION = "files-plus.revision";
 const windows = on => !on && window().platform === "windows";
