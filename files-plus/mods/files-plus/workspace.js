@@ -115,7 +115,8 @@ export class FilesPanel extends View {
   current(context, loc = location()) { return this.context === context && loc.key === context; }
   dropFolder(path) {
     this.entryCount -= this.entries.get(path)?.length || 0;
-    this.entries.delete(path); this.limits.delete(path);
+    const removed = this.entries.delete(path), limited = this.limits.delete(path);
+    return removed || limited;
   }
   async loadFolder(path, context) {
     if (!this.current(context)) return;
@@ -159,7 +160,8 @@ export class FilesPanel extends View {
         if (!same(roots, this.rootInfo)) this.treeVersion++;
         this.rootInfo = roots;
         // Drop entries for folders removed on disk so their budget can be reused.
-        const queue = [...(options.paths || this.folders)];
+        const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
+        let readError = null;
         await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
           while (queue.length && generation === this.generation) {
             const path = queue.shift(), root = rootOf(path, roots);
@@ -168,8 +170,9 @@ export class FilesPanel extends View {
             try { await this.loadFolder(path, context); }
             catch (error) {
               if (generation !== this.generation) return;
-              this.dropFolder(path); this.treeVersion++;
-              if (path === root.path) this.error = error.message || String(error); else this.folders.delete(path);
+              if (this.dropFolder(path)) this.treeVersion++;
+              if (path === root.path) readError = error.message || String(error);
+              else if (this.folders.delete(path)) this.treeVersion++;
             }
           }
         }));
@@ -198,7 +201,7 @@ export class FilesPanel extends View {
         }
         if (!this.current(context) || generation !== this.generation) return;
         if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
-        if (oldError === this.error) this.error = null;
+        if (listing) this.error = readError;
         for (const root of roots) if (root.exists) this.watch(root.path, cx);
         if (this.file) this.show(this.file, cx);
       } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }

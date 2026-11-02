@@ -56,3 +56,16 @@ test("parallel listing is bounded at four and hidden local safety polls do no wo
   find(panel.render(r.cx), "files-plus").handlers.on_size_change({ width: 0, height: 0 }, r.cx);
   r.calls = []; r.timers.find(timer => timer.repeat && timer.ms === 60000).fn(r.cx); await r.drain(); assert.equal(r.calls.length, 0);
 });
+
+test("an unchanged root read failure remains visible without repeated redraws and clears on recovery", async t => {
+  const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.hooks.exec = async (command, args) => command === "sh" && args[1]?.startsWith("n=0") ? { code: 1, stdout: "", stderr: "Access denied" } : null;
+  const panel = new Files(); panel.init({}, r.cx); await r.drain();
+  assert.equal(panel.error, "Access denied");
+  const notifications = r.notifications;
+  panel.refresh(r.cx); await r.drain();
+  assert.equal(panel.error, "Access denied"); assert.equal(r.notifications, notifications);
+  r.hooks.exec = null;
+  panel.refresh(r.cx); await r.drain(); assert.equal(panel.error, null);
+  assert.ok(panel.entries.get(r.dir).some(entry => entry.name === "home"));
+});
