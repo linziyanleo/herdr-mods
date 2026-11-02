@@ -14,7 +14,7 @@ const env = { ...process.env, HERDR_APP_HOME: app, XDG_STATE_HOME: path.join(bas
 const cli = (await execute("which", ["herdr-app"])).stdout.trim();
 const binary = await fs.realpath(cli);
 const installedBundle = path.dirname(path.dirname(path.dirname(binary)));
-const bundle = process.argv.includes("--distinct-bundle") ? path.join(base, "Herdr Files Plus Test.app") : installedBundle;
+const bundle = process.argv.includes("--distinct-bundle") ? path.join(base, "Herdr.app") : installedBundle;
 if (bundle !== installedBundle) await fs.cp(installedBundle, bundle, { recursive: true });
 await fs.mkdir(path.join(app, "mods"), { recursive: true });
 const runtimeFile = entry => !["jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts"].includes(path.basename(entry));

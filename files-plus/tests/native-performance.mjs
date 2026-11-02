@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile), info = JSON.parse(await fs.readFile(process.argv[2], "utf8"));
 assert.ok(info.base.startsWith("/tmp/fp."));
+assert.equal(path.resolve(info.app), path.resolve(info.base, "app"), "Native verification requires a disposable Herdr home");
+assert.equal(path.resolve(info.env.HERDR_APP_HOME), path.resolve(info.app));
 const env = { ...process.env, ...info.env }, base = info.base;
 const command = (name, args = {}) => execute("herdr-app", ["do", name, JSON.stringify(args)], { env });
 async function until(read, accept) {
@@ -32,7 +34,10 @@ for (let n = 0; n < 11; n++) {
 await send({ type: "workspace", workspace: { name: "Large fixture", file: null, folders: roots } });
 await command("window.maximize");
 const state = () => fs.readFile(path.join(base, "performance-state.json"), "utf8").then(JSON.parse);
-await until(state, value => value.entryCount === 5000 && !value.error && value.visible === true);
+const settled = value => value.entryCount === 5000 && !value.error && value.visible === true && !value.loading && !value.pending && !value.gitPending && !value.changePending;
+await until(state, settled);
+await new Promise(resolve => setTimeout(resolve, 1000));
+await until(state, settled);
 await send({ type: "reset" });
 console.log(`Measuring 60 seconds in ${base}`);
 await new Promise(resolve => setTimeout(resolve, 30000));

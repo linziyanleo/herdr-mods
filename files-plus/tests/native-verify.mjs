@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const execute = promisify(execFile), info = JSON.parse(await fs.readFile(process.argv[2], "utf8"));
 assert.ok(info.base.startsWith("/tmp/fp."), "Use a session created by native-session.mjs");
+assert.equal(path.resolve(info.app), path.resolve(info.base, "app"), "Native verification requires a disposable Herdr home");
+assert.equal(path.resolve(info.env.HERDR_APP_HOME), path.resolve(info.app));
 const env = { ...process.env, ...info.env }, base = info.base, app = info.app;
 const source = fileURLToPath(new URL("../mods/files-plus", import.meta.url));
 const runtimeFile = entry => !["jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts"].includes(path.basename(entry));
@@ -156,7 +158,7 @@ try {
     await shot("root-menu"); await closeOverlays();
   });
   await check("native workspace writes preserve unknown fields and reject conflicts", async () => {
-    const extra = path.dirname(info.workspace) + "/extra"; await fs.mkdir(extra);
+    const extra = path.dirname(info.workspace) + "/extra"; await fs.mkdir(extra, { recursive: true });
     await request({ type: "change-roots", action: "add-root", path: extra, root: web });
     const raw = JSON.parse(await fs.readFile(info.workspace, "utf8"));
     assert.equal(raw.custom, "preserved"); assert.equal(raw.folders[0].keep, true); assert.equal(raw.folders[0].path, "web"); assert.equal(raw.folders[2].path, "extra");

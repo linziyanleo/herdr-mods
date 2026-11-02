@@ -33,10 +33,12 @@ export default class PerformanceDriver extends FilesPlus {
     if (this.recording) return;
     this.recording = true;
     const value = { stats: globalThis.__fpStats || {}, visible: this.visible, folders: this.folders?.size,
-      entryCount: [...(this.entries?.values() || [])].reduce((n, rows) => n + rows.length, 0), error: this.error || null, at: Date.now() };
+      entryCount: [...(this.entries?.values() || [])].reduce((n, rows) => n + rows.length, 0), error: this.error || null,
+      loading: Boolean(this.loading), pending: this.pending?.size || 0, gitPending: Boolean(this.gitTimer), changePending: Boolean(this.changeTimer) || Boolean(this.changedPaths?.size), at: Date.now() };
     cx.spawn(async () => {
       const file = `${base}/performance-state.json`;
-      await writeTextFile(file, JSON.stringify(value), await readTextFile(file)); this.recording = false;
+      try { await writeTextFile(file, JSON.stringify(value), await readTextFile(file)); }
+      finally { this.recording = false; }
     });
   }
 }

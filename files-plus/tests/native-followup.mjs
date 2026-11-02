@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 const execute = promisify(execFile), info = JSON.parse(await fs.readFile(process.argv[2], "utf8"));
 assert.ok(info.base.startsWith("/tmp/fp."));
 const env = { ...process.env, ...info.env }, base = info.base, web = path.join(base, "width", "web"), api = path.join(base, "width", "api");
+assert.equal(path.resolve(info.app), path.resolve(base, "app"), "Native verification requires a disposable Herdr home");
+assert.equal(path.resolve(info.env.HERDR_APP_HOME), path.resolve(info.app));
 const driverMod = info.driverMod || "files-plus-driver";
 await fs.mkdir(web, { recursive: true }); await fs.mkdir(api, { recursive: true });
 const workspace = path.join(base, "fit.herdr-workspace.json");
@@ -32,14 +34,20 @@ async function request(value) {
 const shots = [], checks = [];
 async function shot(name) { const file = path.join(base, `${name}.png`); await execute("herdr-app", ["shot", file], { env }); shots.push(file); }
 async function close() { for (const overlay of JSON.parse((await execute("herdr-app", ["status"], { env })).stdout).overlays) await command("overlay.close"); }
-const settingsPath = path.join(info.app, "settings.json"), originalSettings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+const settingsPath = path.join(info.app, "settings.json"), originalSettingsText = await fs.readFile(settingsPath, "utf8"), originalSettings = JSON.parse(originalSettingsText);
+const originalZoom = JSON.parse((await execute("herdr-app", ["status"], { env })).stdout).zoom;
+async function setZoom(target) {
+  await command("app.zoom_reset");
+  for (let n = 0; n < Math.round(Math.abs(target - 1) * 10); n++) await command(target > 1 ? "app.zoom_in" : "app.zoom_out");
+}
 const layout = { id: "root", type: "column", children: [{ id: "tabs", type: "block", size: { px: 38 }, content: { mod: "tabs" } }, { id: "body", type: "row", children: [
   { id: "terminal", type: "block", content: { tab: "active" } },
-  { id: "panel", type: "column", min: 280, max: 900, size: { px: 420 }, children: [{ id: "files", type: "block", content: { mod: driverMod, props: { base, owner: !info.driverMod, fit: { node: "panel", min: 280, max: 0.38 } } } }] }
+  { id: "panel", type: "column", min: 280, max: 900, size: { px: 420 }, children: [{ id: "files", type: "block", content: { mod: driverMod, props: { base, owner: !info.driverMod, driverMod, fit: { node: "panel", min: 280, max: 0.38 } } } }] }
 ] }] };
+await request({ type: "activate" });
 await close(); await command("layout.set", { layout });
 await request({ type: "workspace", file: workspace });
-await command("window.maximize");
+if (!info.driverMod) await command("window.maximize");
 const initial = await until(panel, value => value.visible && value.lastRequestedWidth > 0 && value.panelSize && Math.abs(value.panelSize.width / (value.zoom || 1) - value.lastRequestedWidth) <= 4, "initial fitted width");
 assert.ok(initial.metrics.unit13 > 0 && initial.metrics.samples13?.length === 2);
 checks.push({ name: "calibrated panel fitting", width: initial.lastRequestedWidth, metrics: initial.metrics });
@@ -78,10 +86,13 @@ await until(panel, value => value.file === source && value.preview, "source prev
 await request({ type: "back" });
 assert.equal((await until(panel, value => value.file === null, "Back to tree")).selectedFile, source);
 checks.push({ name: "selection retained after preview Back" });
+await fs.writeFile(path.join(base, "followup-report.json"), JSON.stringify({ checks, screenshots: shots, stage: "sizing passed; theme/zoom checks pending" }, null, 2));
+console.log("passed: calibration, user/background fitting, manual override, context reset and preview selection");
 
 try {
 for (const appearance of ["dark", "light"]) for (const scale of [1, 1.2]) {
-  await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, "utf8")), appearance, zoom: scale }));
+  await fs.writeFile(settingsPath, JSON.stringify({ ...JSON.parse(await fs.readFile(settingsPath, "utf8")), appearance }));
+  await setZoom(scale);
   const state = await until(panel, value => value.zoom === scale && value.metrics.samples13?.length === 2, "zoom calibration");
   const view = state.viewport;
   for (const kind of ["file", "root"]) {
@@ -95,11 +106,12 @@ for (const appearance of ["dark", "light"]) for (const scale of [1, 1.2]) {
   await request({ type: "dialog", action: "rename", path: source, root: web }); await shot(`dialog-${appearance}-${scale}`); await close();
 }
 } finally {
+  await setZoom(originalZoom);
   const restored = JSON.parse(await fs.readFile(settingsPath, "utf8"));
   for (const key of ["appearance", "zoom"]) {
     if (Object.hasOwn(originalSettings, key)) restored[key] = originalSettings[key]; else delete restored[key];
   }
-  await fs.writeFile(settingsPath, JSON.stringify(restored));
+  await fs.writeFile(settingsPath, JSON.stringify(restored) === JSON.stringify(originalSettings) ? originalSettingsText : JSON.stringify(restored));
 }
 const status = JSON.parse((await execute("herdr-app", ["status"], { env })).stdout); assert.deepEqual(status.errors, []);
 await fs.writeFile(path.join(base, "followup-report.json"), JSON.stringify({ checks, screenshots: shots, errors: status.errors, drag: "Continuous mouse drag is a separate native check" }, null, 2));
