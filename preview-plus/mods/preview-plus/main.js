@@ -2,7 +2,7 @@ import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, TextView, Editor, EditorState } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
-import { palette } from "./palette.js";
+import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
 import { Tree } from "./tree.js";
@@ -67,7 +67,14 @@ export default class PreviewPlus extends View {
     return !this.closed && this.request === request && this.owner === request.owner && contextKey() === request.owner.key;
   }
 
-  releaseEditor() { this.code?.release(); this.code = null; }
+  releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; }
+
+  updateEditor() {
+    const style = sourceStyle(), ext = extension(this.selected.file);
+    this.releaseEditor();
+    this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: true, value: this.text, ...style });
+    this.codeStyle = JSON.stringify(style);
+  }
 
   show(value, cx, remember = false, notify = true) {
     const next = target(value);
@@ -103,10 +110,7 @@ export default class PreviewPlus extends View {
             this.watchTargets(selected.on ? [] : [selected.file, ...staged.files], cx);
           }
           if (!this.current(request)) return;
-          const colors = palette(), ext = extension(selected.file);
-          this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: true, value: this.text,
-            font_family: settings().font_family, font_size: 12,
-            syntax: { keyword: colors.purple, string: colors.green, comment: colors.muted, function: colors.blue, type: colors.amber, number: colors.red, constant: colors.blue } });
+          this.updateEditor();
         }
       } catch (error) { if (this.current(request)) this.error = String(error.message || error); }
       finally {
@@ -203,10 +207,17 @@ export default class PreviewPlus extends View {
 
   render(cx) {
     this.sync(cx);
-    const colors = palette(), file = this.selected?.file, type = file ? kind(file) : null, media = type === "image" || type === "pdf";
+    if (this.code && this.codeStyle !== JSON.stringify(sourceStyle())) {
+      const previous = this.code;
+      cx.spawn(async cx => {
+        if (this.closed || this.code !== previous) return;
+        this.updateEditor(); cx.notify();
+      });
+    }
+    const { colors, font } = appearance(), file = this.selected?.file, type = file ? kind(file) : null, media = type === "image" || type === "pdf";
     const canBack = this.history.length > 0 || this.owner.mode !== "pane";
-    return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background).text_color(colors.foreground).text_size(13)
-      .child(h_flex().h(44).flex_none().px(8).gap(4).items_center().border_b(0.5).border_color(colors.border)
+    return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).rounded(10).overflow_hidden().bg(colors.background).border_1().border_color(colors.border).text_color(colors.foreground).font_family(font).text_size(13)
+      .child(h_flex().h(42).flex_none().px(10).gap(4).items_center().border_b_1().border_color(colors.border)
         .when(Boolean(file), el => el.child(button("preview-back", "←", colors, cx => this.back(cx), canBack)))
         .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().child(file ? basename(file) : "Files"))
         .when(type === "markdown", el => el
@@ -215,7 +226,7 @@ export default class PreviewPlus extends View {
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
         .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx)))))
       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
-      .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b(0.5).border_color(colors.border)
+      .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
         .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), true, this.zoom === null))
         .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media)))
         .child(button("preview-zoom-actual", "100%", colors, cx => this.setZoom(1, cx), true, this.zoom === 1))
@@ -225,7 +236,7 @@ export default class PreviewPlus extends View {
           .child(button("preview-previous", "Previous", colors, cx => this.turnPage(-1, cx), this.total > 0 && this.page > 1))
           .child(div().px(6).text_size(12).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
           .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), this.page < this.total)))))
-      .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.red).child(this.actionError)))
+      .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
       .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
       .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file in Files Plus.")))

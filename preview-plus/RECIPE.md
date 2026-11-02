@@ -8,13 +8,13 @@ The preview is an unedited `herdr-app shot` of a disposable Herdr window using s
 
 ## What you see
 
-The 44px header shows Back (`←`, 28px height, 12px text with hover state), the file name or “Files” (13px semibold, truncated), Markdown's Preview and Source mode toggle controls, an Open control for launching local files in the system application, and a Refresh control when viewing the standalone folder tree. A 28px path row below the header displays the containing directory of the active file or the workspace cwd in 12px muted text.
+The 42px header shows Back (`←`, 28px height, 12px text with hover state), the file name or “Files” (13px semibold, truncated), Markdown's Preview and Source mode toggle controls, an Open control for launching local files in the system application, and a Refresh control when viewing the standalone folder tree. A 28px path row below the header displays the containing directory of the active file or the workspace cwd in 12px muted text.
 
-An image or PDF adds a wrapping toolbar (minimum 36px high with a 0.5px bottom separator) holding Fit, −, 100% and + zoom controls. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. The image canvas scrolls in both directions when zoomed past the viewport. Fit centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
+An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, 100% and + zoom controls. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. The image canvas scrolls in both directions when zoomed past the viewport. Fit centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
-Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor with 12px text. The standalone Files tree features 30px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
+Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. The standalone Files tree features 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
-Use 13px interface text and 12px secondary text, 0.5px separators, no shadows and no animations. Colors follow [Radix Colors scale roles](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale): Gray 1–3 backgrounds, Gray 4 hover, Gray 5 selection, Gray 6 separators and Gray 11–12 text. Red, Green, Amber, Blue and Purple 11 carry errors, Git states and source syntax. Choose the light or dark palette using `settings().dark`. Native editor and rich-text internals use Herdr's theme.
+Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI/code font families from resolved `settings()`. Preserve color alpha, custom color overrides and same-appearance theme changes. Unexposed fields use the actual Herdr 0.1.11 Files/Changes defaults: a 1px theme-colored border, 10px panel corners, a semibold title, 13px interface text, 12px secondary text and 1px separators. Rows use 7px corners, 18px indentation and 6px tree padding. There is no separate Preview Plus palette or type/spacing/radius scale. The generic `cx.theme()` scale is not Herdr's shipped panel styling. Native editor and rich-text internals retain Herdr's theme. UI and code sizes receive zoom exactly once; version upgrades require rechecking unexposed control defaults.
 
 ## How it behaves
 
@@ -62,13 +62,13 @@ Agent working, blocked, done and idle displays remain the surrounding Herdr UI's
 preview-plus/
   RECIPE.md, README.md, preview.png, licenses/
   mods/preview-plus/
-    main.js, tree.js, paths.js, markdown.js, media.js, palette.js, mod.json
+    main.js, tree.js, paths.js, markdown.js, media.js, appearance.js, mod.json
   tests/
 ```
 
-Default-export a class extending `View`. `main.js` owns mode selection, request identity, source state, history, watchers, page/zoom controls and rendering. `tree.js` owns lazy enumeration and Git marks. `paths.js` normalizes paths and resolves links. `markdown.js` extracts local image references without rewriting code examples. `media.js` stages images and renders a single PDF page through argument-separated external calls. `palette.js` owns the Radix colors.
+Default-export a class extending `View`. `main.js` owns mode selection, request identity, source state, history, watchers, page/zoom controls and rendering. `tree.js` owns lazy enumeration and Git marks. `paths.js` normalizes paths and resolves links. `markdown.js` extracts local image references without rewriting code examples. `media.js` stages images and renders a single PDF page through argument-separated external calls. `appearance.js` reads Herdr colors and configured fonts directly. Retained source editors update their font and syntax from cached text on a theme/font change without rereading the file.
 
-Use GPUI `div`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `window`, `appHome`, `exec`, `readTextFile`, `watchFolder`, `nextCommand` and `run`. Only paired Back runs `layout.select`; it never writes the shared target.
+Use GPUI `div`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `watchFolder`, `nextCommand` and `run`. Only paired Back runs `layout.select`; it never writes the shared target.
 
 The mod manifest is `{ "place": "none" }`. Supported layout setups include:
 
@@ -115,7 +115,7 @@ The cache contains copies of viewed files. It is local, disposable and excluded 
 
 ### Attribution
 
-Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Palette values come from [Radix Colors](https://github.com/radix-ui/colors); see its [MIT notice](licenses/Radix-MIT.txt). Test landscapes, diagrams and PDFs are original generated fixtures. No repository license is selected or changed.
+Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Earlier releases used a Radix palette; its [MIT notice](licenses/Radix-MIT.txt) is retained. The current mod reads Herdr's theme instead. [Git Graph](https://github.com/rabeeh-ta/herdr-git-graph) is a reference for the integration pattern; no third-party source is imported. Test landscapes, diagrams and PDFs are original generated fixtures. No repository license is selected or changed.
 
 ## Watch out
 
@@ -127,7 +127,7 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 
 ## Done when
 
-Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/preview.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
+Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/*.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
 
 Build and verify these observable behaviors using disposable files:
 

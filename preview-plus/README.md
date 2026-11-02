@@ -70,7 +70,7 @@ Development fixtures require Node 22+; the installed mod does not use Node.
 
 ```sh
 herdr-app check preview-plus/mods/preview-plus
-node --experimental-vm-modules --test preview-plus/tests/preview.test.mjs
+node --experimental-vm-modules --test preview-plus/tests/*.test.mjs
 node preview-plus/tests/native-session.mjs
 node preview-plus/tests/native-verify.mjs /tmp/pp.<session>/session.json
 ```

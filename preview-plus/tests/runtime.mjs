@@ -11,10 +11,12 @@ export async function runtime(t) {
   const dir = await fs.mkdtemp("/tmp/pp-test.");
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], tasks: [], timers: [], hooks: {}, watches: new Map() };
+  state.settings = { dark: true, ui_font_family: "Geist", font_family: "JetBrains Mono", font_size: 14 };
+  state.theme = { background: "#111113", surface: "#18191b", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#ffffff18", input: "#ffffff24", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#70b8ff", accent_foreground: "#111113", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
   state.spaces = [{ id: "s1", active: true, folder: dir, machine: null }];
   state.panes = [{ pane: "p1", cwd: dir }]; state.focus = { space: "s1", pane: "p1", cwd: dir, terminal: "t1" };
   const host = {
-    appHome: () => path.join(dir, "app"), window: () => ({ platform: state.platform }), settings: () => ({ dark: true, zoom: state.zoom || 1 }),
+    appHome: () => path.join(dir, "app"), window: () => ({ platform: state.platform }), settings: () => ({ ...state.settings, zoom: state.zoom || 1 }), theme: () => state.theme,
     props: () => state.props, shared: key => state.shared[key], spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
     readTextFile: async (file, options) => {
       if (state.hooks.read) return state.hooks.read(file, options);

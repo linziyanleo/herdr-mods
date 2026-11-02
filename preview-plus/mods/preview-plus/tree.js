@@ -105,18 +105,18 @@ export class Tree {
     for (const entry of this.entries.get(prefix) || []) {
       if (out.length >= TOTAL) break;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[normalize(join(this.location.cwd, path))];
-      out.push(h_flex().id(`preview-file-${path}`).h(30).flex_none().pl(12 + depth * 18).pr(12).gap(8).items_center().cursor_pointer().hover(s => s.bg(colors.hover))
+      out.push(h_flex().id(`preview-file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(colors.hover))
         .on_click((_event, cx) => entry.dir ? this.toggle(path, cx) : openFile({ file: join(this.location.cwd, path), root: this.location.cwd, on: this.location.on }, cx))
         .child(div().w(12).flex_none().text_color(colors.muted).child(entry.dir ? open ? "⌄" : "›" : ""))
-        .child(div().flex_1().min_w(0).truncate().text_color(entry.dir ? colors.foreground : colors.muted).child(entry.name))
-        .when(Boolean(mark), el => el.child(div().text_size(12).text_color(mark === "A" ? colors.green : mark === "D" || mark === "U" ? colors.red : colors.amber).child(mark))));
+        .child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(entry.name))
+        .when(Boolean(mark), el => el.child(div().text_size(12).text_color(mark === "A" ? colors.ansi2 : mark === "D" || mark === "U" ? colors.ansi1 : colors.ansi3).child(mark))));
       if (entry.dir && open) this.rows(path, depth + 1, out, colors, openFile);
     }
     return out;
   }
 
   render(colors, openFile) {
-    return v_flex().id("preview-tree").flex_1().min_h(0).overflow_y_scrollbar().py(6).children(this.rows("", 0, [], colors, openFile))
+    return v_flex().id("preview-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], colors, openFile))
       .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.error || (this.loading ? "Loading files…" : this.location.cwd ? "No files" : "No folder"))))
       .when(this.limited, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child("File list limited to 500 entries per folder and 5,000 total.")));
   }

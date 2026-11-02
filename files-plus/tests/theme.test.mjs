@@ -100,7 +100,7 @@ test("generic GPUI tokens cannot replace Herdr native panel or menu defaults", a
   assert.equal(r.calls.some(call => call.command === "openOverlay"), false);
 });
 
-test("Herdr color alpha and configured fonts are used directly and code zoom is applied once", async t => {
+test("Herdr colors, configured fonts and unzoomed code sizes are used directly", async t => {
   const r = await runtime(t), { appearance, sourceStyle } = await r.load("appearance.js");
   r.theme.border = "#ffffff18"; r.theme.input = "#ffffff24";
   const look = appearance();
@@ -108,5 +108,5 @@ test("Herdr color alpha and configured fonts are used directly and code zoom is 
   assert.equal(look.font, r.settings.ui_font_family);
   assert.equal(look.typography, undefined); assert.equal(look.radius, undefined); assert.equal(look.spacing, undefined);
   r.settings.zoom = 1.2; r.settings.font_size = 18;
-  assert.equal(sourceStyle().font_size, 15);
+  assert.equal(sourceStyle().font_size, 18);
 });

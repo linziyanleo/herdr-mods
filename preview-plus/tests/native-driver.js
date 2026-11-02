@@ -1,6 +1,6 @@
 // Test-only subclass: exercise production handlers and record native state.
 import PreviewPlus from "./panel.js";
-import { props, readTextFile, writeTextFile, watchFolder, shared, setShared, closeOverlay } from "herdr";
+import { props, readTextFile, writeTextFile, watchFolder, shared, setShared, closeOverlay, settings, theme } from "herdr";
 
 export default class NativeDriver extends PreviewPlus {
   init(p, cx) {
@@ -16,7 +16,8 @@ export default class NativeDriver extends PreviewPlus {
           if (request && request.id !== this.handled) {
             this.handled = request.id;
             try {
-              if (request.action === "show") this.show({ file: request.file, root: request.root, on: request.on }, cx);
+              if (request.action === "activate") { globalThis.window.activate_window(); globalThis.window.refresh(); cx.notify(); }
+              else if (request.action === "show") this.show({ file: request.file, root: request.root, on: request.on }, cx);
               else if (request.action === "follow") this.follow(request.href, cx);
               else if (request.action === "back") this.back(cx);
               else if (request.action === "source") { this.source = request.value; cx.notify(); }
@@ -45,6 +46,7 @@ export default class NativeDriver extends PreviewPlus {
     const value = { owner: this.owner, selected: this.selected, loading: this.loading, error: this.error, actionError: this.actionError,
       imageWarning: this.imageWarning, text: this.text, markdownBlocks: this.markdownBlocks, source: this.source, media: this.media,
       page: this.page, total: this.total, zoom: this.zoom, history: this.history, viewport: this.viewport,
+      uiFont: settings().ui_font_family, codeFontSize: settings().font_size, appZoom: settings().zoom, codeStyle: this.codeStyle, colors: theme(), windowActive: globalThis.window?.is_window_active?.(),
       tree: this.tree ? { folders: [...this.tree.folders], entries: Object.fromEntries(this.tree.entries), error: this.tree.error, loading: this.tree.loading } : null };
     const text = JSON.stringify(value);
     if (this.base && this.recorded !== text && !this.recording) {

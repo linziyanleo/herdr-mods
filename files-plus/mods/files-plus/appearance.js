@@ -7,6 +7,6 @@ export function appearance() {
 
 export function sourceStyle() {
   const s = settings(), t = theme();
-  return { font_family: s.font_family, font_size: s.font_size / (s.zoom || 1),
+  return { font_family: s.font_family, font_size: s.font_size,
     syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } };
 }
