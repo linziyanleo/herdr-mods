@@ -25,7 +25,9 @@ test("short movement preserves clicks while drag threshold opens a full-window o
   root.handlers.on_mouse_down({ bounds }, r.cx);
   root.handlers.on_mouse_move({ position: { x: 1105, y: 100 } }, r.cx);
   assert.equal(r.calls.some(c => c.command === "openOverlay"), false);
-  root.handlers.on_mouse_up({}, r.cx); row.handlers.on_click({}, r.cx); await r.drain(); assert.equal(panel.file, file);
+  const childCx = { stop_propagation() {}, spawn() { throw Error("A child cannot start a parent-owned task"); } };
+  root.handlers.on_mouse_up({}, r.cx); row.handlers.on_click({}, childCx); root.handlers.on_click({}, r.cx);
+  await r.drain(); assert.equal(panel.file, file);
   panel.show(null);
   row.handlers["on_mouse_down:left"]({ position: { x: 1100, y: 100 } }, r.cx);
   root.handlers.on_mouse_move({ position: { x: 1106, y: 100 } }, r.cx);

@@ -46,7 +46,7 @@ export class RowChunk extends View {
         .on_mouse_down("left", (event) => { panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
         .on_click((_event, cx) => {
           if (panel.suppressClick) { panel.suppressClick = false; cx.stop_propagation(); return; }
-          if (!row.missing) cx.spawn(cx => folder ? panel.toggle(row.path, cx) : panel.openFile(row.path, row.root, cx), { owner: panel });
+          if (!row.missing) panel.clickedRow = row;
         })
         .on_mouse_down("right", (event, cx) => panel.menu(row.path, row.kind, row.root, event, cx))
         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())

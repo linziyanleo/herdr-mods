@@ -365,7 +365,7 @@ export class FilesPanel extends View {
     if (!this.visible) return;
     const width = size.width / zoom();
     if (this.resizePending && Math.abs(width - this.lastRequestedWidth) <= 4) this.resizePending = null;
-    else if (previous?.width > 0 && this.sizeViewport === view && this.lastRequestedWidth !== null && this.lastRequestedWidth !== undefined && !this.resizePending && Math.abs(width - this.lastRequestedWidth) > 4) this.manualWidthSpace = this.spaceId;
+    else if (previous?.width > 0 && Math.abs(size.width - previous.width) / zoom() > 4 && this.sizeViewport === view && this.lastRequestedWidth !== null && this.lastRequestedWidth !== undefined && !this.resizePending && Math.abs(width - this.lastRequestedWidth) > 4) this.manualWidthSpace = this.spaceId;
     this.sizeViewport = view;
     this.scheduleFit(cx, previous ? "background" : "user");
   }
@@ -392,6 +392,10 @@ export class FilesPanel extends View {
       .on_size_change((size, cx) => this.panelResized(size, cx))
       .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
       .on_mouse_up("left", () => { this.dragCandidate = null; })
+      .on_click((_event, cx) => {
+        const row = this.clickedRow; this.clickedRow = null;
+        if (row) { if (row.kind === "file") this.openFile(row.path, row.root, cx); else this.toggle(row.path, cx); }
+      })
       .on_mouse_move((event, cx) => dragMove(this, event, cx))
       .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
       .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().bg(t.background).border_b(0.5).border_color(t.border)

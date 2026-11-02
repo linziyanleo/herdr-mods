@@ -30,6 +30,8 @@ test("auto-fit debounces, grows only in background and pauses after manual resiz
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   panel.panelResized({ width: 600, height: 800 }, r.cx); await r.advance(250);
   const first = r.calls.find(c => c.command === "layout.resize"); assert.ok(first.args.px < 600);
+  panel.resizePending = null;
+  panel.panelResized({ width: 600, height: 780 }, r.cx); assert.equal(panel.manualWidthSpace, null);
   panel.panelResized({ width: first.args.px, height: 800 }, r.cx); r.calls = [];
   panel.panelResized({ width: 500, height: 800 }, r.cx);
   assert.equal(panel.manualWidthSpace, "s1");
