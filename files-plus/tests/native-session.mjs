@@ -25,6 +25,11 @@ await fs.cp(path.join(app, "mods/files-plus"), driver, { recursive: true });
 await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
 await fs.copyFile(fileURLToPath(new URL(process.argv.includes("--performance") ? "native-performance-driver.js" : "native-driver.js", import.meta.url)), path.join(driver, "main.js"));
 await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
+if (process.argv.includes("--motion")) {
+  const file = path.join(driver, "tree.js");
+  const code = await fs.readFile(file, "utf8");
+  await fs.writeFile(file, code.replaceAll('.id(row.id)', '.id(row.id).on_size_change(size => { if (globalThis.__fpMotion) globalThis.__fpMotion.push({ key: row.key, height: size.height, at: Date.now() }); })'));
+}
 if (!process.argv.includes("--performance")) {
   const canonical = path.join(app, "mods/files-plus");
   await fs.rename(path.join(canonical, "main.js"), path.join(canonical, "panel.js"));

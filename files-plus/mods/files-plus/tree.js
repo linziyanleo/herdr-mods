@@ -47,17 +47,36 @@ export function visibleRows(state) {
 
 export class RowChunk extends View {
   init(p) { this.update(p); }
-  update(p) { this.data = p; }
+  update(p) {
+    const previous = new Set((this.data?.rows || []).map(row => row.key));
+    this.entering = new Set(p.rows.filter(row => !row.leaving && (this.entering?.has(row.key) || row.fresh && !previous.has(row.key))).map(row => row.key));
+    this.mounted ||= new Set();
+    this.data = p;
+  }
+  reveal(key, cx) {
+    this.mounted.add(key);
+    if (this.revealTimer) return;
+    this.revealTimer = true;
+    // A target change can animate only after native layout has seen height 0.
+    cx.timer.after(0, cx => {
+      this.revealTimer = false;
+      for (const key of this.mounted) this.entering.delete(key);
+      this.mounted.clear(); cx.notify();
+    });
+  }
   render() {
     const { rows, panel, look } = this.data;
     const { colors: t, font } = look, height = 28;
     return v_flex().w_full().min_w(0).font_family(font).text_size(13).text_color(t.foreground).children(rows.map(row => {
-      if (row.kind === "status") return h_flex().id(row.id).h(row.fresh || row.leaving ? 0 : height).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(12).text_color(row.error ? t.ansi1 : t.muted)
-        .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
+      const entering = this.entering.has(row.key), hidden = entering || row.leaving;
+      if (row.kind === "status") return h_flex().id(row.id).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(12).text_color(row.error ? t.ansi1 : t.muted)
+        .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
+        .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .child(div().truncate().tooltip(row.name).when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
       const folder = row.kind !== "file";
-      return h_flex().id(row.id).w_full().min_w(0).h(row.fresh || row.leaving ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().disabled(Boolean(row.leaving))
-        .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
+      return h_flex().id(row.id).w_full().min_w(0).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().disabled(Boolean(row.leaving))
+        .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
+        .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
         .on_mouse_down("left", (event) => { if (row.leaving) return; panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
         .on_click((_event, cx) => {

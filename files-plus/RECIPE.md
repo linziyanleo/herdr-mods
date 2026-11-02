@@ -34,7 +34,7 @@ When paired with Preview Plus via `props.previewStack` in a layout stack, clicki
 
 Folder children expand from 0px to the native 28px row height and collapse back to 0px with native height and opacity transitions, using 250ms `ease-out`. Closing rows stay mounted for the transition and reject clicks and drags, while their directory state is released immediately. Reopening a folder retargets its existing rows; old cleanup callbacks cannot remove reopened children or affect another workspace. Loading and empty-folder placeholders use the same row motion.
 
-Menus, dialogs, the drag pill and tree/source previews appear without custom entrance effects. Loading labels pulse natively. Folder motion keeps its explicitly requested behavior: a single deferred callback changes each entrance target, and one cleanup callback releases outgoing rows after 250ms. Timers never animate individual frames. Motion uses Herdr's native GPUI engine; GSAP's `requestAnimationFrame`/`setTimeout` ticker is unavailable in this runtime. Panel resizing has no animated reflow.
+Menus, dialogs, the drag pill and tree/source previews appear without custom entrance effects. Loading labels pulse natively. Each retained row chunk waits for the new rows' initial native size callbacks before changing their entrance targets. It coalesces mounted rows into one deferred update; a loading placeholder cannot start the entrance of replacement file rows before those rows have mounted. One cleanup callback releases outgoing rows after 250ms. Timers never animate individual frames. Motion uses Herdr's native GPUI engine; GSAP's `requestAnimationFrame`/`setTimeout` ticker is unavailable in this runtime. Panel resizing has no animated reflow.
 
 ### Right-click file manager menu
 

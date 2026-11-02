@@ -150,7 +150,7 @@ export class FilesPanel extends View {
       this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
-      this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.freshTimer = null; this.revealPath = null;
+      this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
     }
     this.watchConfig(loc.space, loc.entry?.file, cx);
@@ -321,10 +321,6 @@ export class FilesPanel extends View {
       const previous = new Set((this.rowModel || []).map(row => row.key));
       this.fresh = new Set(rows.filter(row => (row.path && contains(this.revealPath, row.path) || row.key === `empty-${this.revealPath}`) && !previous.has(row.key)).map(row => row.key));
       rows = visibleRows(this);
-      if (this.fresh.size && !this.freshTimer) {
-        const token = this.freshTimer = {}, generation = this.generation;
-        cx.timer.after(0, cx => { if (this.freshTimer !== token || this.generation !== generation) return; this.freshTimer = null; this.fresh.clear(); this.treeVersion++; this.syncTree(cx); });
-      }
     }
     rows = retainClosingRows(this.rowModel || [], rows, this.closingKeys);
     this.rowModel = rows;
@@ -341,6 +337,7 @@ export class FilesPanel extends View {
     }
     for (const chunk of retained.values()) chunk.entity.release();
     this.chunks = chunks;
+    this.fresh.clear();
     if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
     this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
   }
@@ -427,7 +424,7 @@ export class FilesPanel extends View {
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
   close() {
-    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null; this.freshTimer = null;
+    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
     this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
   }
 }

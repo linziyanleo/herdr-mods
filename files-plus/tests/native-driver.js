@@ -67,7 +67,10 @@ export default class NativeDriver extends FilesPlus {
             this.nativeSnapshot = null;
           } else if (request.type === "preview") this.openFile(request.path, request.root, cx);
           else if (request.type === "back") { this.show(null); cx.notify(); }
-          else if (request.type === "toggle") this.toggle(request.path, cx);
+          else if (request.type === "toggle") {
+            if (request.motion) { globalThis.window.activate_window(); globalThis.__fpMotion = []; }
+            this.toggle(request.path, cx);
+          }
           else if (request.type === "refresh") this.refresh(cx);
           else if (request.type === "activate") { globalThis.window.activate_window(); globalThis.window.refresh(); cx.notify(); }
           else if (request.type === "frame") globalThis.window.refresh();
@@ -94,7 +97,7 @@ export default class NativeDriver extends FilesPlus {
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
       selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
       treeLook: this.chunks[0] ? JSON.parse(this.chunks[0].key).slice(1) : null, previewStyle: this.previewStyle,
-      dragStarts: shared("files-plus.native-drag") });
+      dragStarts: shared("files-plus.native-drag"), motion: globalThis.__fpMotion });
     if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, look: settings(), colors: theme(), semantic: cx.theme(), windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
     else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: Boolean(this.nativeRendered) });
     const text = JSON.stringify(value);
