@@ -43,7 +43,11 @@ export class RowChunk extends View {
       return h_flex().id(row.id).h(28).flex_none().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer()
         .opacity(row.fresh ? 0 : 1).transition("opacity", { duration: 250, easing: "ease-out" })
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
-        .on_click((_event, cx) => { if (!row.missing) folder ? panel.toggle(row.path, cx) : panel.openFile(row.path, row.root, cx); })
+        .on_mouse_down("left", (event) => { panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
+        .on_click((_event, cx) => {
+          if (panel.suppressClick) { panel.suppressClick = false; cx.stop_propagation(); return; }
+          if (!row.missing) cx.spawn(cx => folder ? panel.toggle(row.path, cx) : panel.openFile(row.path, row.root, cx), { owner: panel });
+        })
         .on_mouse_down("right", (event, cx) => panel.menu(row.path, row.kind, row.root, event, cx))
         .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
         .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))

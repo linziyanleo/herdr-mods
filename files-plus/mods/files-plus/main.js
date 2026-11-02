@@ -7,6 +7,7 @@ import { workspaceSnapshot, changeRoots } from "./config.js";
 import { palette } from "./palette.js";
 import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
+import { renderDrag } from "./drag.js";
 
 const NAME_ACTIONS = new Set(["new-file", "new-folder", "rename"]);
 
@@ -22,6 +23,8 @@ export default class FilesPlus extends FilesPanel {
       this.error = p.error; this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(), viewport(), p.pointer, zoom());
       this.at = menuItems(this.targetEntry).findIndex(item => item.enabled);
       this.handle.focus();
+    } else if (this.role === "drag") {
+      this.cursor = p.cursor; this.handle.focus();
     } else if (this.role === "dialog") {
       if (NAME_ACTIONS.has(this.action)) {
         const value = this.action === "rename" ? basename(this.targetEntry.path) : "";
@@ -142,6 +145,7 @@ export default class FilesPlus extends FilesPanel {
         .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
   }
   render(cx) {
+    if (this.role === "drag") return renderDrag(this);
     if (this.role === "menu") return this.renderMenu();
     if (this.role === "dialog") return this.renderDialog();
     prune();

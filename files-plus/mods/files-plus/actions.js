@@ -27,7 +27,14 @@ const powershell = (script, args) => checked("powershell", ["-NoProfile", "-NonI
 
 export function captureTarget(space, path, kind, root, on, physicalRoot = root) {
   const f = focused();
-  const active = f?.space === space && f.terminal ? { pane: f.pane, terminal: f.shown || f.terminal, cwd: f.cwd } : null;
+  let active = null;
+  if (f?.space === space && f.terminal) active = { pane: f.pane, terminal: f.shown || f.terminal, cwd: f.cwd };
+  else if (!f || f.space === space) {
+    const tab = spaces().find(s => s.id === space)?.tabs.find(t => t.active);
+    const candidates = panes().filter(p => p.tab === tab?.id && p.terminal);
+    const pane = candidates.find(p => p.focused) || candidates.find(p => p.program?.agent) || candidates[0];
+    if (pane) active = { pane: pane.pane, terminal: pane.terminal, cwd: pane.cwd };
+  }
   return { space, path, kind, root, physicalRoot, on: on ?? null, active };
 }
 export function ensureTarget(target) {

@@ -59,7 +59,7 @@ export async function runtime(t) {
       if (key === "when") return (condition, fn) => { if (condition) fn(el); return el; };
       if (key === "child") return child => { target.nodes.push(child); return el; };
       if (key === "children") return children => { target.nodes.push(...children); return el; };
-      if (String(key).startsWith("on_")) return (...args) => { target.handlers[key] = args.at(-1); return el; };
+      if (String(key).startsWith("on_")) return (...args) => { target.handlers[key] = args.at(-1); if (args.length > 1) target.handlers[`${key}:${args[0]}`] = args.at(-1); return el; };
       return (...args) => { target.attributes[key] = args; return el; };
     } });
     return el;
@@ -74,15 +74,15 @@ export async function runtime(t) {
     if (cache.has(file)) return cache.get(file);
     const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file });
     cache.set(file, result);
-    await result.link(async (specifier, parent) => {
+    return result;
+  }
+  async function link(specifier, parent) {
       const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : null;
       if (!exports) return module(path.resolve(path.dirname(parent.identifier), specifier));
       const synthetic = new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
       return synthetic;
-    });
-    return result;
   }
-  state.load = async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
+  state.load = async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status === "unlinked") await mod.link(link); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
   state.cx = { notify(entity) { if (entity) entity.dirty = true; else state.notifications++; }, stop_propagation() {}, sleep: async () => {},
     new(Class, props) {
       const view = new Class(), entity = { view, dirty: true, released: false,

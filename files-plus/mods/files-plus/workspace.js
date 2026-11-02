@@ -8,6 +8,7 @@ import { palette } from "./palette.js";
 import { visibleRows, TreeView, RowChunk, CHUNK_SIZE } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
+import { dragMove } from "./drag.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -83,9 +84,10 @@ export class FilesPanel extends View {
     this.changedPaths ||= new Set();
     for (const path of paths) this.changedPaths.add(path);
     if (this.changeTimer) return;
-    const generation = this.generation;
-    this.changeTimer = true;
+    const generation = this.generation, token = {};
+    this.changeTimer = token;
     cx.timer.after(200, cx => {
+      if (this.changeTimer !== token) return;
       this.changeTimer = false;
       if (generation !== this.generation) return;
       const changes = changedDirectories(this.changedPaths, this.rootInfo || [], this.folders);
@@ -135,7 +137,7 @@ export class FilesPanel extends View {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
       this.pending = new Set(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
-      this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false;
+      this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
       this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
     }
@@ -182,8 +184,8 @@ export class FilesPanel extends View {
             cached = { at: Date.now(), text: status?.code === 0 ? status.stdout : cached?.text || "" };
             this.gitCache.set(cwd, cached);
           } else if (!this.gitTimer) {
-            this.gitTimer = true;
-            cx.timer.after(remaining, cx => { this.gitTimer = false; if (generation === this.generation) this.refresh(cx, { paths: new Set(), git: true }); });
+            const token = this.gitTimer = {};
+            cx.timer.after(remaining, cx => { if (this.gitTimer !== token) return; this.gitTimer = null; if (generation === this.generation) this.refresh(cx, { paths: new Set(), git: true }); });
           }
           for (const item of cached.text.split("\0").filter(Boolean).slice(0, TOTAL)) {
             const xy = item.slice(0, 2), absolute = joinPath(cwd, item.slice(3));
@@ -247,6 +249,8 @@ export class FilesPanel extends View {
   }
   show(path, cx) {
     const same = path && this.file === path;
+    const previousError = this.fileError;
+    let changed = !same;
     if (!same) { this.code?.release(); this.code = null; this.previewText = null; }
     this.file = path; this.fileError = null; this.openRequest = null;
     if (!same && cx) {
@@ -260,6 +264,7 @@ export class FilesPanel extends View {
       });
     }
     const request = this.previewRequest = {};
+    if (!same && cx) cx.notify();
     if (!path || !cx) return;
     const context = this.context, on = this.on;
     cx.spawn(async cx => {
@@ -267,17 +272,18 @@ export class FilesPanel extends View {
         const text = await readTextFile(path, { on });
         if (this.previewRequest !== request || !this.current(context)) return;
         if (text === null || text.includes("\0")) {
+          changed = Boolean(this.code);
           this.code?.release(); this.code = null;
-          this.fileError = text === null ? "This file is no longer available" : "Binary file, no text preview"; return;
+          this.fileError = text === null ? "This file is no longer available" : "Binary file, no text preview"; changed ||= this.fileError !== previousError; return;
         }
         const value = text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text;
         if (this.code && this.previewText === value) return;
-        this.code?.release(); this.previewText = value;
+        this.code?.release(); this.previewText = value; changed = true;
         const t = palette(), ext = path.split(".").pop().toLowerCase();
         this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true, value,
           font_family: settings().font_family, font_size: 12, syntax: { keyword: t.purple, string: t.green, comment: t.muted, function: t.blue, type: t.amber, number: t.red, constant: t.blue } });
-      } catch { if (this.previewRequest === request && this.current(context)) { this.code?.release(); this.code = null; this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; } }
-      finally { cx.notify(); }
+      } catch { if (this.previewRequest === request && this.current(context)) { changed = Boolean(this.code); this.code?.release(); this.code = null; this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; changed ||= this.fileError !== previousError; } }
+      finally { if (changed && this.previewRequest === request && this.current(context)) cx.notify(); }
     });
   }
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
@@ -367,6 +373,9 @@ export class FilesPanel extends View {
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
     return v_flex().id("files-plus").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
       .on_size_change((size, cx) => this.panelResized(size, cx))
+      .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
+      .on_mouse_up("left", () => { this.dragCandidate = null; })
+      .on_mouse_move((event, cx) => dragMove(this, event, cx))
       .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
       .child(h_flex().h(42).flex_none().px(12).gap(8).items_center().border_b(0.5).border_color(t.border)
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
