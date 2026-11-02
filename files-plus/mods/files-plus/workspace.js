@@ -405,11 +405,12 @@ export class FilesPanel extends View {
       .on_mouse_move((event, cx) => dragMove(this, event, cx))
       .child(calibrationProbe(cx => { this.scheduleFit(cx); cx.notify(); }))
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
-        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().cursor_pointer().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click((_event, cx) => { this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
+        .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
+          .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+          .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().font_semibold().child("Files"))
-        .child(h_flex().id("add-folder").size(24).items_center().justify_center().text_color(t.muted).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
-          .when(add, el => el.cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))).on_click((_event, cx) => {
+        .child(h_flex().id("add-folder").size(24).items_center().justify_center().rounded(6).cursor_default().text_color(add ? t.muted : t.dim).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
+          .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
             if (!add) return;
             const root = entry?.folders[0]?.path || this.root;
             const target = this.target(root, "root", root);

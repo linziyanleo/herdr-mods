@@ -105,7 +105,7 @@ export class Tree {
     for (const entry of this.entries.get(prefix) || []) {
       if (out.length >= TOTAL) break;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[normalize(join(this.location.cwd, path))];
-      out.push(h_flex().id(`preview-file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(colors.hover))
+      out.push(h_flex().id(`preview-file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_default().hover(s => s.bg(colors.hover))
         .on_click((_event, cx) => entry.dir ? this.toggle(path, cx) : openFile({ file: join(this.location.cwd, path), root: this.location.cwd, on: this.location.on }, cx))
         .child(div().w(12).flex_none().text_color(colors.muted).child(entry.dir ? open ? "⌄" : "›" : ""))
         .child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(entry.name))

@@ -74,10 +74,10 @@ export class RowChunk extends View {
         .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .child(div().truncate().tooltip(row.name).when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
       const folder = row.kind !== "file";
-      return h_flex().id(row.id).w_full().min_w(0).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().disabled(Boolean(row.leaving))
+      return h_flex().id(row.id).w_full().min_w(0).h(hidden ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_default().disabled(Boolean(row.leaving))
         .when(entering, el => el.on_size_change((_size, cx) => this.reveal(row.key, cx)))
         .opacity(hidden ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
-        .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
+        .when(row.selected, el => el.bg(t.selected)).when(!row.leaving, el => el.hover(s => s.bg(t.hover)))
         .on_mouse_down("left", (event) => { if (row.leaving) return; panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
         .on_click((_event, cx) => {
           if (row.leaving || panel.suppressClick) { panel.suppressClick = false; cx.stop_propagation(); return; }

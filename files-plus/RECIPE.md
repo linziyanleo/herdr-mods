@@ -4,7 +4,7 @@ Browse a single folder or every folder in a workspace in the Files panel. Right-
 
 ![Files Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` from a disposable native Herdr window. From left to right it compares native Files, Files Plus, Changes and Git Graph at the same theme and zoom; this package ships only Files Plus. All shown folders are test fixtures. Preserve the capture's sRGB metadata.
+The preview is an unedited `herdr-app shot` from a disposable native Herdr window showing the personal workspace sidebar, Files Plus, and Preview Plus Markdown/PDF panes. This package ships only Files Plus. All shown folders and documents are test fixtures. Preserve the capture's sRGB metadata.
 
 ## What you see
 
@@ -15,6 +15,10 @@ Dragging any file, folder or workspace root row at least 6px shows a floating `@
 Pointer menus fit their longest label or status text using ASCII/CJK calibration probes in the native body and secondary text styles, with a 188px minimum and window-width cap. Measurement uses the same 13px body and 12px secondary sizes as rendering. Following Git Graph's integration approach, Herdr draws the standard popup/dialog border, corners and shadow. Menu rows use the native 30px height and 7px corners; dialog inputs are 36px high, buttons 32px high and both use 8px corners. Internal borders use the native 1px primitive and Herdr border/input colors. Menus clamp inside window edges in zoom-normalized coordinates. Errors widen and reopen the menu when needed. Name and confirmation dialogs fit the action and path, between 420px and 560px wide within the viewport, with room for native input, status and action controls. Disabled actions use Herdr's muted text; errors and progress stay visible.
 
 Use theme-provided fields directly for their control roles; retain Herdr's shipped control defaults where no field exists. Herdr 0.1.11's `theme()` exposes colors, not a complete control stylesheet. The general `cx.theme()` typography, spacing and radius scale is not the style used by Herdr's Files/Changes/Graph panels and must not replace their defaults. `appearance.js` only reads colors from `theme()` and the UI font family from resolved `settings()`; it defines no palette or type/spacing/radius scale. All colors preserve transparency and user overrides. Source previews use Herdr's resolved code font/size and syntax colors. UI and code sizes receive zoom exactly once. Retained rows and open previews follow same-appearance color changes and configured font changes without rereading files. Herdr version changes require rechecking the shipped defaults; unexposed style constants cannot be synchronized automatically.
+
+Buttons, menu entries and tree rows retain the default arrow pointer. Header controls have 6px corners and use Herdr hover/selected surfaces. Hover only changes the target's own styles; menu hover does not change keyboard selection through JavaScript. Disabled controls use `theme().dim`, keep the default pointer and have no hover action. Dialog primary buttons retain their fill/contrast colors and use 0.88 hover / 0.8 pressed opacity, like native Herdr prompts; destructive confirmations use the theme error color. Secondary buttons use hover/selected surfaces. Presses stop propagation to their container. Drag gestures retain their existing copy/no-drop/grabbing feedback.
+
+The optional [sidebar pointer patch](patches/sidebar-default-pointer.patch) changes the existing personal `multi-root-spaces` clone's New multi-folder workspace button to the default pointer while preserving its native hover style. Apply it only to an already installed matching clone; the package does not reinstall that retired component or modify a bundled Spaces mod.
 
 ## How it behaves
 

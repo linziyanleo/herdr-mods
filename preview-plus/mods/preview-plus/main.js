@@ -21,10 +21,17 @@ function context() {
 const contextKey = () => JSON.stringify(context());
 
 function button(id, label, colors, action, enabled = true, selected = false) {
-  return div().id(id).h(28).px(8).flex_none().flex().items_center().justify_center().text_size(12)
-    .text_color(enabled ? selected ? colors.foreground : colors.muted : colors.border)
-    .when(selected, el => el.bg(colors.selected))
-    .when(enabled, el => el.cursor_pointer().hover(s => s.bg(colors.hover)).on_click((_event, cx) => action(cx))).child(label);
+  const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size" }[label] || label;
+  return div().id(id).h(28).px(8).flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
+    .role("button").accessibility_label(title).disabled(!enabled).cursor_default()
+    .text_color(enabled ? selected ? colors.foreground : colors.muted : colors.dim)
+    .when(title !== label, el => el.tooltip(title))
+    .when(selected, el => el.bg(colors.selected).font_medium())
+    .when(enabled, el => el
+      .hover(s => s.bg(selected ? colors.selected : colors.hover).text_color(colors.foreground))
+      .active(s => s.bg(colors.selected).text_color(colors.foreground))
+      .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+      .on_click((_event, cx) => { cx.stop_propagation(); action(cx); })).child(label);
 }
 
 export default class PreviewPlus extends View {
@@ -224,18 +231,18 @@ export default class PreviewPlus extends View {
           .child(button("preview-formatted", "Preview", colors, cx => { this.source = false; cx.notify(); }, true, !this.source))
           .child(button("preview-source", "Source", colors, cx => { this.source = true; cx.notify(); }, true, this.source)))
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
-        .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx)))))
+        .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
-        .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), true, this.zoom === null))
-        .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media)))
-        .child(button("preview-zoom-actual", "100%", colors, cx => this.setZoom(1, cx), true, this.zoom === 1))
-        .child(button("preview-zoom-in", "+", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx), Boolean(this.media)))
+        .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
+        .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) > 0.05))
+        .child(button("preview-zoom-actual", "100%", colors, cx => this.setZoom(1, cx), Boolean(this.media), this.zoom === 1))
+        .child(button("preview-zoom-in", "+", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) < 8))
         .child(div().flex_1())
         .when(type === "pdf", el => el
-          .child(button("preview-previous", "Previous", colors, cx => this.turnPage(-1, cx), this.total > 0 && this.page > 1))
+          .child(button("preview-previous", "Previous", colors, cx => this.turnPage(-1, cx), !this.loading && this.total > 0 && this.page > 1))
           .child(div().px(6).text_size(12).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
-          .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), this.page < this.total)))))
+          .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
       .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
       .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
@@ -258,7 +265,7 @@ export default class PreviewPlus extends View {
         if (!block.media) return TextView.markdown(`preview-markdown-${this.selected.file}-${index}`, block.text)
           .selectable(true).scrollable(false).w_full().flex_none().text_size(13).text_color(colors.foreground).on_link_click((url, cx) => this.follow(url, cx));
         const width = Math.min(block.media.width, Math.max(1, this.viewport.width - 32));
-        return div().id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_pointer()
+        return div().id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_default()
           .on_click((_event, cx) => this.follow(block.href, cx)).child(image(block.media.path).size_full());
       }));
     return this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1();

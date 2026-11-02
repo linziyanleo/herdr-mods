@@ -1,0 +1,11 @@
+--- a/mods/multi-root-spaces/main.js
++++ b/mods/multi-root-spaces/main.js
+@@ -378,7 +378,7 @@
+             .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14)))
+           .when(workspaceSupported, el => el.child(div().id("space-new-workspace").size(26).flex_none().flex().items_center().justify_center().rounded(6)
+             .tooltip("New multi-folder workspace").role("button").accessibility_label("New multi-folder workspace")
+-            .cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
++            .cursor_default().hover(s => s.bg(t.hover).text_color(t.foreground))
+             .on_click(() => openOverlay({ mod: "multi-root", kind: "dialog", width: 560, height: 440, props: { role: "create" } }))
+             .child(svg("mods/multi-root-spaces/folders-plus.svg").size(16))))))
+       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")

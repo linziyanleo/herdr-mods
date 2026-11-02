@@ -115,11 +115,10 @@ export default class FilesPlus extends FilesPanel {
       })
       .children(list.map((item, index) => v_flex().flex_none()
         .when(item.group, el => el.child(div().mx(7).my(4).border_b_1().border_color(t.border)))
-        .child(h_flex().id(`action-${item.id}`).h(30).px(8).rounded(7).items_center().flex_none().disabled(!item.enabled || this.busy).role("button").accessibility_label(item.label)
-          .text_color(!item.enabled || this.busy ? t.muted : item.danger ? t.ansi1 : t.foreground)
+        .child(h_flex().id(`action-${item.id}`).h(30).px(8).rounded(7).items_center().flex_none().disabled(!item.enabled || this.busy).cursor_default().role("button").accessibility_label(item.label)
+          .text_color(!item.enabled || this.busy ? t.dim : item.danger ? t.ansi1 : t.foreground)
           .when(index === this.at && item.enabled, el => el.bg(t.selected))
-          .when(item.enabled && !this.busy, el => el.cursor_pointer().hover(s => s.bg(t.hover)))
-          .on_hover((hovered, cx) => { if (hovered && item.enabled && !this.busy) { this.at = index; cx.notify(); } })
+          .when(item.enabled && !this.busy, el => el.hover(s => s.bg(t.hover)).active(s => s.bg(t.selected)))
           .on_click((_event, cx) => this.choose(index, cx)).child(item.label))))
       .child(h_flex().h(24).flex_none().px(8).items_center().text_size(12).text_color(this.error ? t.ansi1 : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
   }
@@ -127,9 +126,14 @@ export default class FilesPlus extends FilesPanel {
     const { colors: t, font } = appearance(), action = this.action, target = this.targetEntry;
     const rootAction = action === "add-root" || action === "remove-root";
     const enabled = !this.busy && !this.preparing && (!this.input || Boolean(this.input.value().trim())) && (!rootAction || Boolean(this.captured));
-    const button = (id, text, primary, active, fn) => h_flex().id(id).h(32).px(14).items_center().justify_center().rounded(8).border_1().border_color(primary ? t.solid : t.input).role("button").accessibility_label(text).disabled(!active)
-      .bg(primary ? t.solid : t.raised).text_color(!active ? t.muted : primary ? t.solid_foreground : t.foreground)
-      .when(active, el => el.cursor_pointer().hover(el => primary ? el.bg(t.accent).text_color(t.accent_foreground) : el.bg(t.hover))).on_click((_event, cx) => { if (active) fn(cx); }).child(text);
+    const fill = action === "trash" ? t.ansi1 : t.solid, ink = action === "trash" ? t.background : t.solid_foreground;
+    const button = (id, text, primary, active, fn) => h_flex().id(id).h(32).px(14).items_center().justify_center().rounded(8).border_1().border_color(primary && active ? fill : t.input).font_medium().cursor_default().role("button").accessibility_label(text).disabled(!active)
+      .bg(primary && active ? fill : t.raised).text_color(!active ? t.dim : primary ? ink : t.foreground)
+      .when(active, el => el
+        .hover(s => primary ? s.opacity(0.88) : s.bg(t.hover).text_color(t.foreground))
+        .active(s => primary ? s.opacity(0.8) : s.bg(t.selected))
+        .on_mouse_down("left", (_event, cx) => cx.stop_propagation()))
+      .on_click((_event, cx) => { cx.stop_propagation(); if (active) fn(cx); }).child(text);
     return v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_color(t.foreground).font_family(font).text_size(13)
       .on_key_down((event, cx) => {
         if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }

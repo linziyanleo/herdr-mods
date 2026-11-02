@@ -63,7 +63,7 @@ export async function runtime(t) {
     return result;
   }
   state.load = async name => { const loaded = await module(path.join(runtimeDir, name)); if (loaded.status !== "evaluated") await loaded.evaluate(); return loaded.namespace; };
-  state.cx = { notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
+  state.cx = { stop_propagation() {}, notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
     spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; }, timer: { every: (ms, fn) => state.timers.push({ ms, fn }) } };
   // Watchers and nextCommand deliberately remain pending. Drain only finite work.
   state.settle = async () => {

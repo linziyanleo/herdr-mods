@@ -4,7 +4,7 @@ Preview Markdown, inspect images and browse PDF pages inside Herdr. Operate as a
 
 ![Preview Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` of a disposable Herdr window using synthetic documents. Preserve its sRGB metadata.
+The preview is an unedited `herdr-app shot` of a disposable Herdr window showing the personal workspace sidebar, Files Plus, and Preview Plus Markdown/PDF panes. Each package ships its own runtime. All documents are synthetic. Preserve the capture's sRGB metadata.
 
 ## What you see
 
@@ -15,6 +15,8 @@ An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom sep
 Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. The standalone Files tree features 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
 Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI/code font families from resolved `settings()`. Preserve color alpha, custom color overrides and same-appearance theme changes. Unexposed fields use the actual Herdr 0.1.11 Files/Changes defaults: a 1px theme-colored border, 10px panel corners, a semibold title, 13px interface text, 12px secondary text and 1px separators. Rows use 7px corners, 18px indentation and 6px tree padding. There is no separate Preview Plus palette or type/spacing/radius scale. The generic `cx.theme()` scale is not Herdr's shipped panel styling. Native editor and rich-text internals retain Herdr's theme. UI and code sizes receive zoom exactly once; version upgrades require rechecking unexposed control defaults.
+
+Buttons retain the default arrow pointer. Hover changes only the control's own background and text color; selected modes retain their selection background, and pressed controls use the theme selection surface. Toolbar buttons have 6px corners. Disabled controls use `theme().dim`, have no hover/click action, and remain on the default pointer. Symbol controls have accessible names/tooltips. Media controls are disabled while unavailable, zoom steps disable at 5%/800%, PDF navigation disables at page bounds or while loading, and Refresh disables during a tree refresh. Button presses stop propagation to their container.
 
 ## How it behaves
 
