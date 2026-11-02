@@ -6,12 +6,13 @@ import { runtime } from "./runtime.mjs";
 
 test("panel fitting measures the header and top-level rows independently of expansion", async t => {
   const r = await runtime(t), f = await r.load("fit.js"), m = { unit13: 8, unit12: 7 };
-  const short = f.panelWidth([{ kind: "file", depth: 0, name: "a" }], "Project", m);
-  assert.ok(f.panelWidth([], "Workspace ".repeat(20), m) > short);
-  assert.ok(f.panelWidth([{ kind: "root", name: "Root", detail: "/long".repeat(20) }], "Project", m) > short);
+  const look = (await r.load("appearance.js")).appearance(r.cx);
+  const short = f.panelWidth([{ kind: "file", depth: 0, name: "a" }], "Project", m, look);
+  assert.ok(f.panelWidth([], "Workspace ".repeat(20), m, look) > short);
+  assert.ok(f.panelWidth([{ kind: "root", name: "Root", detail: "/long".repeat(20) }], "Project", m, look) > short);
   const entry = { kind: "file", depth: 5, name: "中文文件名".repeat(5), mark: "M" };
-  assert.equal(f.panelWidth([entry], "Project", m), f.panelWidth([], "Project", m));
-  assert.ok(f.panelWidth([{ ...entry, depth: 0 }], "Project", m) > f.panelWidth([{ ...entry, depth: 0, name: "x".repeat(25) }], "Project", m));
+  assert.equal(f.panelWidth([entry], "Project", m, look), f.panelWidth([], "Project", m, look));
+  assert.ok(f.panelWidth([{ ...entry, depth: 0 }], "Project", m, look) > f.panelWidth([{ ...entry, depth: 0, name: "x".repeat(25) }], "Project", m, look));
 });
 
 test("expanding and collapsing nested folders never resize the fitted panel", async t => {

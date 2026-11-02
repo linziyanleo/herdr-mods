@@ -15,6 +15,9 @@ export async function runtime(t) {
   await fs.mkdir(path.join(dir, "home"));
   const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true, ui_font_family: "Geist", ui_font_size: 13, font_family: "JetBrains Mono", font_size: 14 }, layout: {}, rebuiltRows: 0, notifications: 0 };
   state.theme = { background: "#111113", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#363a3f", input: "#43484e", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#b0b4ba", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
+  state.semantic = { colors: { border: "#ffffff" }, appearance: "dark", is_dark: true,
+    spacing: { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 }, radius: { none: 0, sm: 3, md: 6, lg: 8, xl: 12, full: 9999 },
+    typography: { sans: ".SystemUIFont", mono: "Menlo", xs: { size: 12, line_height: 16, weight: 400 }, sm: { size: 14, line_height: 20, weight: 400 }, md: { size: 16, line_height: 24, weight: 400 }, lg: { size: 18, line_height: 28, weight: 400 }, xl: { size: 20, line_height: 28, weight: 400 }, mono_md: { size: 13, line_height: 20, weight: 400 } } };
   state.spaces = [{ id: "s1", name: "Product", folder: dir, machine: null, active: true, tabs: [{ id: "tab1", active: true }] }];
   state.panes = [{ pane: "p1", terminal: "t1", cwd: dir, tab: "tab1" }];
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
@@ -84,7 +87,7 @@ export async function runtime(t) {
       return synthetic;
   }
   state.load = async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status === "unlinked") await mod.link(link); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
-  state.cx = { notify(entity) { if (entity) entity.dirty = true; else state.notifications++; }, stop_propagation() {}, sleep: async () => {},
+  state.cx = { theme: () => state.semantic, notify(entity) { if (entity) entity.dirty = true; else state.notifications++; }, stop_propagation() {}, sleep: async () => {},
     new(Class, props) {
       const view = new Class(), entity = { view, dirty: true, released: false,
         set_props(props) { view.update?.(props); this.dirty = true; },

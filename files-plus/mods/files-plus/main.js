@@ -4,7 +4,7 @@ import { props, setShared, run, openOverlay, closeOverlay, pickFolder, window as
 import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
-import { palette, typography } from "./palette.js";
+import { appearance, textStyle } from "./appearance.js";
 import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { renderDrag } from "./drag.js";
@@ -16,11 +16,10 @@ export default class FilesPlus extends FilesPanel {
     const p = props() || {};
     this.role = p.role; this.targetEntry = p.target; this.action = p.action; this.busy = false; this.at = 0;
     if (!this.role) { this.initPanel(cx); return; }
-    this.entered = false;
-    cx.timer.after(0, cx => { this.entered = true; cx.notify(); });
     this.handle = cx.focus_handle();
     if (this.role === "menu") {
-      this.error = p.error; this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(), viewport(), p.pointer, zoom());
+      this.error = p.error; this.menuLook = JSON.stringify(appearance(cx));
+      this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(cx), viewport(), p.pointer, zoom(), appearance(cx));
       this.at = menuItems(this.targetEntry).findIndex(item => item.enabled);
       this.handle.focus();
     } else if (this.role === "drag") {
@@ -44,8 +43,8 @@ export default class FilesPlus extends FilesPanel {
       }
     }
   }
-  openDialog(action) {
-    openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout(action, this.targetEntry),
+  openDialog(action, cx) {
+    openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout(action, this.targetEntry, cx),
       props: { role: "dialog", action, target: this.targetEntry } });
     closeOverlay(props().overlay);
   }
@@ -53,7 +52,7 @@ export default class FilesPlus extends FilesPanel {
     if (this.busy) return;
     const item = menuItems(this.targetEntry)[index], target = this.targetEntry;
     if (!item?.enabled) return;
-    if (TITLES[item.id]) { this.openDialog(item.id); return; }
+    if (TITLES[item.id]) { this.openDialog(item.id, cx); return; }
     this.busy = true; this.error = null; cx.notify();
     cx.spawn(async cx => {
       try {
@@ -69,13 +68,17 @@ export default class FilesPlus extends FilesPanel {
         closeOverlay(props().overlay);
       } catch (error) {
         this.error = error.message || String(error); this.busy = false; cx.notify();
-        const p = props(), geometry = menuLayout(menuItems(target), this.error, metrics(), viewport(), p.pointer, zoom());
-        if (geometry.width !== this.geometry.width || geometry.height !== this.geometry.height) {
-          openOverlay({ mod: "files-plus", kind: "popup", frame: "none", ...geometry, props: { role: "menu", target, geometry, pointer: p.pointer, error: this.error } });
-          closeOverlay(p.overlay);
-        }
+        this.resizeMenu(cx);
       }
     });
+  }
+  resizeMenu(cx) {
+    if (this.busy) return;
+    const p = props(), target = this.targetEntry;
+    const geometry = menuLayout(menuItems(target), this.error, metrics(cx), viewport(), p.pointer, zoom(), appearance(cx));
+    if (geometry.width === this.geometry.width && geometry.height === this.geometry.height) return;
+    openOverlay({ mod: "files-plus", kind: "popup", ...geometry, props: { role: "menu", target, geometry, pointer: p.pointer, error: this.error } });
+    closeOverlay(p.overlay);
   }
   submit(cx) {
     if (this.busy || this.preparing || ((this.action === "add-root" || this.action === "remove-root") && !this.captured)) return;
@@ -94,12 +97,12 @@ export default class FilesPlus extends FilesPanel {
       } catch (error) { this.error = error.message || String(error); this.busy = false; cx.notify(); }
     });
   }
-  renderMenu() {
-    const t = palette(), type = typography(), list = menuItems(this.targetEntry);
-    const { width, height } = this.geometry;
+  renderMenu(cx) {
+    const look = appearance(cx), { colors: t, typography: type, spacing: s, radius: r } = look, list = menuItems(this.targetEntry);
+    const signature = JSON.stringify(look);
+    if (this.menuLook !== signature) { this.menuLook = signature; cx.timer.after(0, cx => this.resizeMenu(cx)); }
     if (!list[this.at]?.enabled) this.at = list.findIndex(item => item.enabled);
-    return v_flex().id("files-menu").track_focus(this.handle).w(width).h(height).min_h(0).overflow_y_scrollbar().p(4.5).rounded(10).border(0.5).border_color(t.border).bg(t.popover).font_family(type.font).text_size(type.body).text_color(t.foreground)
-      .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
+    return textStyle(v_flex().id("files-menu").track_focus(this.handle).w_full().h(this.geometry.height).min_h(0).overflow_y_scrollbar().p(s.xs).bg(t.popover).text_color(t.foreground), type.md, type.sans)
       .on_key_down((event, cx) => {
         if (this.busy) { cx.stop_propagation(); return; }
         if (event.key === "up" || event.key === "down") {
@@ -111,43 +114,42 @@ export default class FilesPlus extends FilesPanel {
         cx.stop_propagation(); cx.notify();
       })
       .children(list.map((item, index) => v_flex().flex_none()
-        .when(item.group, el => el.child(div().mx(7).my(4).h(0.5).bg(t.border)))
-        .child(h_flex().id(`action-${item.id}`).h(32).px(10).rounded(5).items_center().flex_none().disabled(!item.enabled || this.busy).role("button").accessibility_label(item.label)
-          .text_color(!item.enabled || this.busy ? t.muted : item.danger ? t.red : t.foreground)
+        .when(item.group, el => el.child(div().mx(s.sm).my(s.xs).border_b_1().border_color(t.border)))
+        .child(h_flex().id(`action-${item.id}`).h(type.md.line_height + s.sm).px(s.md).rounded(r.sm).items_center().flex_none().disabled(!item.enabled || this.busy).role("button").accessibility_label(item.label)
+          .text_color(!item.enabled || this.busy ? t.muted : item.danger ? t.ansi1 : t.foreground)
           .when(index === this.at && item.enabled, el => el.bg(t.selected))
           .when(item.enabled && !this.busy, el => el.cursor_pointer().hover(s => s.bg(t.hover)))
           .on_hover((hovered, cx) => { if (hovered && item.enabled && !this.busy) { this.at = index; cx.notify(); } })
           .on_click((_event, cx) => this.choose(index, cx)).child(item.label))))
-      .child(h_flex().h(24).flex_none().px(8).items_center().text_size(type.secondary).text_color(this.error ? t.red : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
+      .child(textStyle(h_flex().h(type.sm.line_height + s.xs).flex_none().px(s.sm).items_center().text_color(this.error ? t.ansi1 : t.muted), type.sm, type.sans).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
   }
-  renderDialog() {
-    const t = palette(), type = typography(), action = this.action, target = this.targetEntry;
+  renderDialog(cx) {
+    const { colors: t, typography: type, spacing: s, radius: r } = appearance(cx), action = this.action, target = this.targetEntry;
     const rootAction = action === "add-root" || action === "remove-root";
     const enabled = !this.busy && !this.preparing && (!this.input || Boolean(this.input.value().trim())) && (!rootAction || Boolean(this.captured));
-    const button = (id, text, primary, active, fn) => h_flex().id(id).h(32).px(12).items_center().justify_center().rounded(4).role("button").accessibility_label(text).disabled(!active)
-      .bg(primary ? t.solid : t.raised).text_color(primary ? t.solidText : t.foreground).when(!active, el => el.opacity(0.5))
-      .when(active, el => el.cursor_pointer().hover(s => s.opacity(0.88))).on_click((_event, cx) => { if (active) fn(cx); }).child(text);
-    return v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_color(t.foreground).font_family(type.font).text_size(type.body)
-      .opacity(this.entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
+    const button = (id, text, primary, active, fn) => h_flex().id(id).h(type.md.line_height + s.sm).px(s.md).items_center().justify_center().rounded(r.md).role("button").accessibility_label(text).disabled(!active)
+      .bg(primary ? t.solid : t.raised).text_color(!active ? t.muted : primary ? t.solid_foreground : t.foreground)
+      .when(active, el => el.cursor_pointer().hover(el => primary ? el.bg(t.accent).text_color(t.accent_foreground) : el.bg(t.hover))).on_click((_event, cx) => { if (active) fn(cx); }).child(text);
+    return textStyle(v_flex().id("files-dialog").track_focus(this.handle).w_full().h_full().min_h(0).p(s.lg).gap(s.md).bg(t.popover).text_color(t.foreground), type.md, type.sans)
       .on_key_down((event, cx) => {
         if (event.key === "escape") { if (!this.busy) closeOverlay(props().overlay); cx.stop_propagation(); }
         else if (event.key === "enter" && !this.input) { this.submit(cx); cx.stop_propagation(); }
       })
-      .child(div().text_size(type.heading).font_semibold().child(TITLES[action] || "File action"))
-      .child(div().text_size(type.secondary).text_color(t.muted).truncate().child(target.path))
-      .when(Boolean(this.input), el => el.child(Input.new(this.input).h(34).px(10).rounded(4).border(0.5).border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Name")))
+      .child(textStyle(div(), type.lg, type.sans).child(TITLES[action] || "File action"))
+      .child(textStyle(div().text_color(t.muted).truncate(), type.sm, type.sans).child(target.path))
+      .when(Boolean(this.input), el => el.child(Input.new(this.input).h(type.md.line_height + 2 * s.sm).px(s.md).rounded(r.md).border_1().border_color(t.input).bg(t.background).text_color(t.foreground).accessibility_label("Name")))
       .when(action === "trash", el => el.child(div().child(target.on === null && appWindow().platform === "macos" ? `Move “${basename(target.path)}” to Trash?` : `Permanently delete “${basename(target.path)}”? This cannot be undone.`)))
       .when(action === "remove-root", el => el.child(div().child("Remove this folder from the workspace? Files on disk are kept.")))
-      .when(Boolean(this.error) || this.preparing, el => el.child(div().text_size(type.secondary).text_color(this.error ? t.red : t.muted).child(this.error || "Loading workspace…")))
+      .when(Boolean(this.error) || this.preparing, el => el.child(textStyle(div().text_color(this.error ? t.ansi1 : t.muted), type.sm, type.sans).child(this.error || "Loading workspace…")))
       .child(div().flex_1())
-      .child(h_flex().justify_end().gap(8)
+      .child(h_flex().justify_end().gap(s.sm)
         .child(button("dialog-cancel", "Cancel", false, !this.busy, () => closeOverlay(props().overlay)))
         .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
   }
   render(cx) {
-    if (this.role === "drag") return renderDrag(this);
-    if (this.role === "menu") return this.renderMenu();
-    if (this.role === "dialog") return this.renderDialog();
+    if (this.role === "drag") return renderDrag(this, cx);
+    if (this.role === "menu") return this.renderMenu(cx);
+    if (this.role === "dialog") return this.renderDialog(cx);
     prune();
     return this.renderPanel(cx);
   }

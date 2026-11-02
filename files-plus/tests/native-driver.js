@@ -8,6 +8,7 @@ import { menuItems, menuLayout } from "./actions.js";
 import { metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
+import { appearance } from "./appearance.js";
 
 export default class NativeDriver extends FilesPlus {
   close(cx) {
@@ -21,6 +22,7 @@ export default class NativeDriver extends FilesPlus {
   render(cx) {
     this.renderCount = (this.renderCount || 0) + 1; this.renderedLayout = layout();
     const content = super.render(cx);
+    this.nativeRendered = true;
     return this.role ? content : div().relative().size_full().child(content).when(this.fps, el => el.child(fps_monitor()));
   }
   init(p, cx) {
@@ -56,8 +58,8 @@ export default class NativeDriver extends FilesPlus {
             this.refresh(cx);
           } else if (request.type === "menu" || request.type === "dialog") {
             const target = request.target || this.target(request.path, request.kind || "file", request.root);
-            const pointer = request.pointer || { x: 520, y: 110 }, geometry = request.type === "menu" ? menuLayout(menuItems(target), request.error, metrics(), viewport(), pointer, zoom()) : dialogLayout(request.action, target);
-            this.requestOverlay = openOverlay({ mod: this.nativeMod, kind: request.type === "menu" ? "popup" : "dialog", modal: true, ...(request.type === "menu" ? { frame: "none" } : {}), ...geometry,
+            const pointer = request.pointer || { x: 520, y: 110 }, geometry = request.type === "menu" ? menuLayout(menuItems(target), request.error, metrics(cx), viewport(), pointer, zoom(), appearance(cx)) : dialogLayout(request.action, target, cx);
+            this.requestOverlay = openOverlay({ mod: this.nativeMod, kind: request.type === "menu" ? "popup" : "dialog", modal: true, ...geometry,
               props: { role: request.type, target, geometry, pointer, error: request.error, choose: request.choose, action: request.action, submit: request.submit, name: request.name, base: spec.base, driverMod: this.nativeMod, owner: this.nativeOwnerEnabled } });
           } else if (request.type === "roots-snapshot") this.nativeSnapshot = await workspaceSnapshot(this.target(request.root, "root", request.root));
           else if (request.type === "change-roots") {
@@ -94,8 +96,8 @@ export default class NativeDriver extends FilesPlus {
       selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
       treeLook: this.chunks[0] ? JSON.parse(this.chunks[0].key).slice(1) : null, previewStyle: this.previewStyle,
       dragStarts: shared("files-plus.native-drag") });
-    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, look: settings(), colors: theme(), windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
-    else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: this.entered });
+    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(cx), dark: settings().dark, look: settings(), colors: theme(), semantic: cx.theme(), windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
+    else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: Boolean(this.nativeRendered) });
     const text = JSON.stringify(value);
     if (this.recording || text === this.recorded) return;
     this.recording = true;

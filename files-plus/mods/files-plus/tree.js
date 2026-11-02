@@ -1,6 +1,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { joinPath, label, shortPath } from "./roots.js";
+import { textStyle } from "./appearance.js";
 
 export const CHUNK_SIZE = 100;
 export const FOLDER_MOTION = { duration: 250, easing: "ease-out" };
@@ -49,13 +50,14 @@ export class RowChunk extends View {
   init(p) { this.update(p); }
   update(p) { this.data = p; }
   render() {
-    const { rows, panel, t, type } = this.data;
-    return v_flex().w_full().min_w(0).font_family(type.font).text_size(type.body).text_color(t.foreground).children(rows.map(row => {
-      if (row.kind === "status") return h_flex().id(row.id).h(row.fresh || row.leaving ? 0 : 28).min_h(0).flex_none().overflow_hidden().items_center().pl(8 + row.depth * 18).text_size(type.secondary).text_color(row.error ? t.red : t.muted)
+    const { rows, panel, look } = this.data;
+    const { colors: t, typography: type, spacing: s, radius: r } = look, height = type.md.line_height + s.xs;
+    return textStyle(v_flex().w_full().min_w(0).text_color(t.foreground), type.md, type.sans).children(rows.map(row => {
+      if (row.kind === "status") return textStyle(h_flex().id(row.id).h(row.fresh || row.leaving ? 0 : height).min_h(0).flex_none().overflow_hidden().items_center().pl(s.sm + row.depth * s.lg).text_color(row.error ? t.ansi1 : t.muted), type.sm, type.sans)
         .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .child(div().truncate().tooltip(row.name).when(row.name === "Loading files…", el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(row.name));
       const folder = row.kind !== "file";
-      return h_flex().id(row.id).w_full().min_w(0).h(row.fresh || row.leaving ? 0 : 28).min_h(0).flex_none().overflow_hidden().pl(8 + row.depth * 18).pr(8).gap(7).items_center().rounded(4).cursor_pointer().disabled(Boolean(row.leaving))
+      return h_flex().id(row.id).w_full().min_w(0).h(row.fresh || row.leaving ? 0 : height).min_h(0).flex_none().overflow_hidden().pl(s.sm + row.depth * s.lg).pr(s.sm).gap(s.sm).items_center().rounded(r.sm).cursor_pointer().disabled(Boolean(row.leaving))
         .opacity(row.fresh || row.leaving ? 0 : 1).transition("height", FOLDER_MOTION).transition("opacity", FOLDER_MOTION)
         .when(row.selected, el => el.bg(t.selected)).hover(s => s.bg(t.hover))
         .on_mouse_down("left", (event) => { if (row.leaving) return; panel.suppressClick = false; panel.dragCandidate = { target: panel.target(row.path, row.kind, row.root), start: event.position }; })
@@ -64,11 +66,11 @@ export class RowChunk extends View {
           if (!row.missing) panel.clickedRow = row;
         })
         .on_mouse_down("right", (event, cx) => { if (row.leaving) cx.stop_propagation(); else panel.menu(row.path, row.kind, row.root, event, cx); })
-        .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.muted) : div().w(12).flex_none())
-        .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
-        .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).when(row.kind === "root", el => el.font_medium()).child(row.name))
-        .when(Boolean(row.detail), el => el.child(div().flex_1().min_w(0).truncate().text_size(type.secondary).text_color(t.muted).child(row.detail)))
-        .when(Boolean(row.mark), el => el.child(div().text_size(type.secondary).text_color(row.mark === "A" ? t.green : row.mark === "D" || row.mark === "U" ? t.red : t.amber).child(row.mark)));
+        .child(folder ? svg(`mods/files-plus/chevron-${row.open ? "down" : "right"}.svg`).size(type.xs.size).flex_none().text_color(t.muted) : div().w(type.xs.size).flex_none())
+        .child(svg(`mods/files-plus/${folder ? "folder" : "file"}.svg`).size(type.sm.size).flex_none().text_color(t.muted))
+        .child(div().min_w(0).truncate().when(!row.detail, el => el.flex_1()).child(row.name))
+        .when(Boolean(row.detail), el => el.child(textStyle(div().flex_1().min_w(0).truncate().text_color(t.muted), type.sm, type.sans).child(row.detail)))
+        .when(Boolean(row.mark), el => el.child(textStyle(div().text_color(row.mark === "A" ? t.ansi2 : row.mark === "D" || row.mark === "U" ? t.ansi1 : t.ansi3), type.sm, type.sans).child(row.mark)));
     }));
   }
 }
@@ -77,9 +79,8 @@ export class TreeView extends View {
   init(p) { this.update(p); }
   update(p) { this.data = p; }
   render() {
-    const { chunks, panel, entered = true } = this.data;
-    return v_flex().id("files-tree").w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(6)
-      .opacity(entered ? 1 : 0).transition("opacity", { duration: 250, easing: "ease-out" })
+    const { chunks, panel, look } = this.data;
+    return v_flex().id("files-tree").w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(look.spacing.sm)
       .on_mouse_down("right", (event, cx) => { if (!panel.workspace && panel.root) panel.menu(panel.root, "dir", panel.root, event, cx); })
       .children(chunks);
   }
