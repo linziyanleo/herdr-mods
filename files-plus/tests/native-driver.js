@@ -10,6 +10,10 @@ import { fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 
 export default class NativeDriver extends FilesPlus {
+  close(cx) {
+    if (this.clipboardBefore !== undefined && cx.read_from_clipboard() === "files-plus clipboard baseline") cx.write_to_clipboard(this.clipboardBefore);
+    super.close(cx);
+  }
   panelResized(size, cx) {
     this.sizeEvents = [...(this.sizeEvents || []), { size, at: Date.now(), requested: this.lastRequestedWidth, pending: Boolean(this.resizePending), viewport: viewport() }].slice(-20);
     super.panelResized(size, cx);
@@ -27,6 +31,7 @@ export default class NativeDriver extends FilesPlus {
     this.nativeStateId = spec.overlay || (spec.fit ? "panel-fit" : "panel");
     this.nativeIdentity = `${Date.now()}-${Math.random()}`;
     this.nativeOwnerEnabled = spec.owner !== false;
+    if (spec.role === "drag") setShared("files-plus.native-drag", { starts: (shared("files-plus.native-drag")?.starts || 0) + 1, path: spec.target.path, at: Date.now() });
     if (!spec.role && this.nativeOwnerEnabled) setShared("files-plus.native-driver-owner", { ...(shared("files-plus.native-driver-owner") || {}), [this.nativeStateId]: this.nativeIdentity });
     if (spec.base) cx.timer.every(100, cx => this.record(cx));
     if (spec.role === "menu" && spec.choose) cx.timer.after(150, cx => this.choose(menuItems(this.targetEntry).findIndex(item => item.id === spec.choose), cx));
@@ -86,7 +91,8 @@ export default class NativeDriver extends FilesPlus {
       folders: [...(this.folders || [])], entries: Object.fromEntries(this.entries || []), marks: this.marks || {}, preview: this.code ? { readonly: true } : null, workspaces: shared("multi-root.spaces") || {} };
     if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
-      selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents });
+      selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
+      dragStarts: shared("files-plus.native-drag") });
     if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });
     else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: this.entered });
     const text = JSON.stringify(value);
