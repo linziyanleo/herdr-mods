@@ -45,12 +45,13 @@ files-plus/
   preview.png
   licenses/
   mods/files-plus/
-    main.js, workspace.js, roots.js, config.js, actions.js, palette.js
-    mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg
+    main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
+    roots.js, config.js, actions.js, palette.js
+    mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg
   tests/
 ```
 
-Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, and `dialog` for a modal name, confirmation or root action. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
+Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name, confirmation or root action, and `drag` for the transparent full-window drag surface. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
 
 Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and the two Radix palettes in `palette.js`. There are no cross-mod code imports. The package manifest is:
 
@@ -137,7 +138,7 @@ The mod reads workspace directories and text files, writes only requested filesy
 
 ### Optional Preview Plus pairing
 
-Files Plus works alone. Preview Plus is a separate planned package; installing Files Plus does not install or implement it. When it becomes available, preserve the existing outer Files id and turn that node into this stack:
+Files Plus works alone. Preview Plus is an available separate package; installing Files Plus does not install it. To pair them, preserve the existing outer Files id and turn that node into this stack:
 
 ```json
 {
@@ -175,5 +176,8 @@ Build and exercise these observable behaviors using disposable folders:
 8. Root actions retain one root, leave removed roots' files intact, and launch a terminal in the captured root and space.
 9. With a compatible Preview Plus receiver and stack, rich targets switch the panel and Back restores the existing tree. Ordinary text stays in the source editor. Missing receivers fall back to source; stale requests cannot replace a later selection. Rich rendering itself belongs to Preview Plus.
 10. `herdr-app status` reports no mod or layout errors. Capture the running panel with `herdr-app shot preview.png`. Use disposable content and retain the native PNG color metadata. Ship this folder without a `layouts/` directory or unused key bindings.
+11. Unrelated live updates rebuild no retained rows. Watches reload only expanded affected parents, lock churn does no work, unchanged data does not redraw, and loaded entries never exceed the budget.
+12. Both menu kinds fit their text and remain inside window edges at 100% and zoomed scale in light and dark themes. Selection persists after Back. Opt-in fitting respects user/background direction, ratio/pixel caps and manual divider overrides.
+13. A short press remains a click. Dragging outside inserts one reference without Enter and restores clipboard text; inside, Escape and right-click cancel. Verify a continuous held drag through the overlay boundary on the installed Herdr version.
 
 The committed package also includes automated and isolated native test drivers. Their commands are in [README.md](README.md); they are development tools, not runtime dependencies. Actual results and remaining platform/manual checks are in the [implementation plan](../docs/plans/files-plus.md#implementation-and-acceptance).

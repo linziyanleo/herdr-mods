@@ -1,14 +1,23 @@
 // Test-only wrapper. Copied beside the real runtime with main.js renamed panel.js.
 import FilesPlus from "./panel.js";
-import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setShared, openOverlay, focused } from "herdr";
+import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setShared, openOverlay, focused, layout, settings, closeOverlay, appHome } from "herdr";
+import { location } from "./workspace.js";
 import { parseConfig, setWorkspace } from "./roots.js";
-import { menuItems } from "./actions.js";
+import { menuItems, menuLayout } from "./actions.js";
+import { metrics, viewport, zoom, dialogLayout } from "./metrics.js";
+import { show_fps_monitor, hide_fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 
 export default class NativeDriver extends FilesPlus {
+  render(cx) { this.renderCount = (this.renderCount || 0) + 1; this.renderedLayout = layout(); return super.render(cx); }
   init(p, cx) {
     super.init(p, cx);
-    const spec = props() || {};
+    const spec = { base: appHome().replace(/\/app$/, ""), ...props() };
+    this.nativeBase = spec.base;
+    this.nativeSnapshot = spec.overlay || (spec.fit ? "panel-fit" : "panel");
+    this.nativeIdentity = `${Date.now()}-${Math.random()}`;
+    this.nativeOwnerEnabled = spec.owner !== false;
+    if (!spec.role && this.nativeOwnerEnabled) setShared("files-plus.native-driver-owner", { ...(shared("files-plus.native-driver-owner") || {}), [this.nativeSnapshot]: this.nativeIdentity });
     if (spec.base) cx.timer.every(100, cx => this.record(cx));
     if (spec.role === "menu" && spec.choose) cx.timer.after(150, cx => this.choose(menuItems(this.targetEntry).findIndex(item => item.id === spec.choose), cx));
     if (spec.role === "dialog" && spec.submit) cx.timer.after(150, cx => {
@@ -29,10 +38,12 @@ export default class NativeDriver extends FilesPlus {
             } else {
               const values = { ...(shared("multi-root.spaces") || {}) }; delete values[id]; setShared("multi-root.spaces", values);
             }
+            this.refresh(cx);
           } else if (request.type === "menu" || request.type === "dialog") {
             const target = request.target || this.target(request.path, request.kind || "file", request.root);
-            this.requestOverlay = openOverlay({ mod: "files-plus-driver", kind: request.type === "menu" ? "popup" : "dialog", modal: true, width: request.type === "menu" ? 272 : 440, height: request.type === "menu" ? 450 : 240, ...(request.type === "menu" ? { at: { x: 520, y: 110 } } : {}),
-              props: { role: request.type, target, choose: request.choose, action: request.action, submit: request.submit, name: request.name, base: spec.base } });
+            const pointer = request.pointer || { x: 520, y: 110 }, geometry = request.type === "menu" ? menuLayout(menuItems(target), request.error, metrics(), viewport(), pointer, zoom()) : dialogLayout(request.action, target);
+            this.requestOverlay = openOverlay({ mod: "files-plus-driver", kind: request.type === "menu" ? "popup" : "dialog", modal: true, ...(request.type === "menu" ? { frame: "none" } : {}), ...geometry,
+              props: { role: request.type, target, geometry, pointer, error: request.error, choose: request.choose, action: request.action, submit: request.submit, name: request.name, base: spec.base } });
           } else if (request.type === "roots-snapshot") this.nativeSnapshot = await workspaceSnapshot(this.target(request.root, "root", request.root));
           else if (request.type === "change-roots") {
             const target = this.target(request.root, "root", request.root);
@@ -41,6 +52,9 @@ export default class NativeDriver extends FilesPlus {
           } else if (request.type === "preview") this.openFile(request.path, request.root, cx);
           else if (request.type === "back") { this.show(null); cx.notify(); }
           else if (request.type === "toggle") this.toggle(request.path, cx);
+          else if (request.type === "refresh") this.refresh(cx);
+          else if (request.type === "fps") request.show === false ? hide_fps_monitor() : show_fps_monitor();
+          else if (request.type === "welcome-dismiss") { setShared("frame.welcomed", "skipped"); closeOverlay("frame-welcome"); }
           else if (request.type === "clipboard-start") { this.clipboardBefore = cx.read_from_clipboard(); cx.write_to_clipboard("files-plus clipboard baseline"); }
           else if (request.type === "clipboard-restore") { if (this.clipboardBefore !== undefined) cx.write_to_clipboard(this.clipboardBefore); }
           const value = { ok: true, overlay: ["menu", "dialog"].includes(request.type) ? this.requestOverlay : undefined, focused: focused(), clipboard: request.type === "snapshot" ? cx.read_from_clipboard() : undefined };
@@ -53,16 +67,23 @@ export default class NativeDriver extends FilesPlus {
     });
   }
   record(cx) {
-    const p = props() || {}, id = p.overlay || "panel";
+    const p = props() || {}, id = this.nativeSnapshot;
+    if (!this.role && this.nativeOwnerEnabled && shared("files-plus.native-driver-owner")?.[id] !== this.nativeIdentity) return;
     const value = { role: this.role || "panel", file: this.file || null, fileError: this.fileError || null, error: this.error || null, busy: Boolean(this.busy),
       folders: [...(this.folders || [])], entries: Object.fromEntries(this.entries || []), marks: this.marks || {}, preview: this.code ? { readonly: true } : null, workspaces: shared("multi-root.spaces") || {} };
+    if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
+      visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
+      selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats });
+    if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics() });
+    else Object.assign(value, { geometry: this.geometry, cursor: this.cursor, target: this.targetEntry, entered: this.entered });
     const text = JSON.stringify(value);
     if (this.recording || text === this.recorded) return;
     this.recording = true;
     cx.spawn(async () => {
-      const file = `${p.base}/native-state-${id}.json`;
-      await writeTextFile(file, text, await readTextFile(file));
-      this.recorded = text; this.recording = false;
+      try {
+        const file = `${this.nativeBase}/native-state-${id}.json`;
+        await writeTextFile(file, text, await readTextFile(file)); this.recorded = text;
+      } finally { this.recording = false; }
     });
   }
 }

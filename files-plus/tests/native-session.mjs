@@ -13,17 +13,41 @@ const app = path.join(base, "app"), project = path.join(base, "project");
 const env = { ...process.env, HERDR_APP_HOME: app, XDG_STATE_HOME: path.join(base, "s"), XDG_CONFIG_HOME: path.join(base, "c"), HC_SESSION: "fp", HERDR_TELEMETRY: "0" };
 const cli = (await execute("which", ["herdr-app"])).stdout.trim();
 const binary = await fs.realpath(cli);
-const bundle = path.dirname(path.dirname(path.dirname(binary)));
+const installedBundle = path.dirname(path.dirname(path.dirname(binary)));
+const bundle = process.argv.includes("--distinct-bundle") ? path.join(base, "Herdr Files Plus Test.app") : installedBundle;
+if (bundle !== installedBundle) await fs.cp(installedBundle, bundle, { recursive: true });
 await fs.mkdir(path.join(app, "mods"), { recursive: true });
 const runtimeFile = entry => !["jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts"].includes(path.basename(entry));
-await fs.cp(fileURLToPath(new URL("../mods/files-plus", import.meta.url)), path.join(app, "mods/files-plus"), { recursive: true, filter: runtimeFile });
+await fs.cp(process.env.FILES_PLUS_RUNTIME || fileURLToPath(new URL("../mods/files-plus", import.meta.url)), path.join(app, "mods/files-plus"), { recursive: true, filter: runtimeFile });
+await fs.writeFile(path.join(app, "mods/files-plus/mod.json"), '{"place":"none"}');
 const driver = path.join(app, "mods/files-plus-driver");
 await fs.cp(path.join(app, "mods/files-plus"), driver, { recursive: true });
 await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
-await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
+await fs.copyFile(fileURLToPath(new URL(process.argv.includes("--performance") ? "native-performance-driver.js" : "native-driver.js", import.meta.url)), path.join(driver, "main.js"));
 await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
+if (!process.argv.includes("--performance")) {
+  const canonical = path.join(app, "mods/files-plus");
+  await fs.rename(path.join(canonical, "main.js"), path.join(canonical, "panel.js"));
+  await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(canonical, "main.js"));
+}
+if (process.argv.includes("--performance")) {
+  const file = path.join(driver, "workspace.js");
+  let code = (await fs.readFile(file, "utf8")).replace(/\bexec,/, "exec as rawExec,");
+  code += '\nfunction exec(command, ...args) { const s = globalThis.__fpStats ||= { exec: 0, rows: 0, programs: {} }; s.exec++; s.programs[command] = (s.programs[command] || 0) + 1; return rawExec(command, ...args); }\n';
+  if (code.includes("out.push(h_flex()")) code = code.replace("out.push(h_flex()", "globalThis.__fpStats.rows++; out.push(h_flex()").replace("roots.map(folder => {", "roots.map(folder => { globalThis.__fpStats.rows++;");
+  await fs.writeFile(file, code);
+  const roots = path.join(driver, "roots.js");
+  const rootCode = (await fs.readFile(roots, "utf8")).replace(/\bexec,/, "exec as rawExec,");
+  await fs.writeFile(roots, rootCode + '\nfunction exec(command, ...args) { const s = globalThis.__fpStats ||= { exec: 0, rows: 0, programs: {} }; s.exec++; s.programs[command] = (s.programs[command] || 0) + 1; return rawExec(command, ...args); }\n');
+  const tree = path.join(driver, "tree.js");
+  try {
+    const code = await fs.readFile(tree, "utf8");
+    await fs.writeFile(tree, code.replace("const { rows, panel, t } = this.data;", "const { rows, panel, t } = this.data; const stats = globalThis.__fpStats ||= { exec: 0, rows: 0, programs: {} }; stats.rows += rows.filter(row => row.path).length;"));
+  } catch (error) { if (error.code !== "ENOENT") throw error; }
+}
 await fs.mkdir(path.join(app, "layouts"));
 await fs.writeFile(path.join(app, "settings.json"), JSON.stringify({ telemetry: false, sounds: { enabled: false }, appearance: "dark", core: (await execute("which", ["hc"])).stdout.trim() }));
+await fs.writeFile(path.join(app, "shared.json"), JSON.stringify({ "frame.welcomed": "skipped" }));
 const layout = { id: "root", type: "column", children: [
   { id: "tabs", type: "block", size: { px: 38 }, content: { mod: "tabs" } },
   { id: "body", type: "row", children: [

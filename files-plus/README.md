@@ -16,3 +16,7 @@ herdr-app check files-plus/mods/files-plus
 ```
 
 For native macOS acceptance in an isolated app home and core, run `node files-plus/tests/native-session.mjs`, then pass the printed `session.json` path to `node files-plus/tests/native-verify.mjs`. See the recipe for the remaining manual picker check and session cleanup.
+
+Reuse one native test window for follow-up checks. Close each test window as soon as it is no longer needed with `HERDR_APP_HOME=<session-app-home> herdr-app do app.quit`; keep the person's normal window open. `native-verify.mjs <session.json> --installed` uses an already prepared runtime. `native-followup.mjs <session.json>` checks calibration, panel fitting, manual override, menus and dialogs in the foreground window. Continuous mouse drags remain a separate native interaction check.
+
+For a render comparison, extract the baseline runtime to a temporary directory and run `node --experimental-vm-modules files-plus/tests/benchmark.mjs <baseline-runtime>`. It alternates 20 samples per side, checks the 5,000-entry fixture and reports render work separately from native layout/GPU cost. `native-session.mjs --performance` and `native-performance.mjs <session.json>` collect real idle program calls over 60 seconds and expose the native FPS monitor. The root-owned `show_fps_monitor` API requires a ShellRoot unavailable in Herdr 0.1.11; the driver uses the documented inline `fps_monitor` instead.

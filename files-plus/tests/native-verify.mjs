@@ -12,12 +12,17 @@ assert.ok(info.base.startsWith("/tmp/fp."), "Use a session created by native-ses
 const env = { ...process.env, ...info.env }, base = info.base, app = info.app;
 const source = fileURLToPath(new URL("../mods/files-plus", import.meta.url));
 const runtimeFile = entry => !["jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts"].includes(path.basename(entry));
-await fs.cp(source, path.join(app, "mods/files-plus"), { recursive: true, filter: runtimeFile });
 const driver = path.join(app, "mods/files-plus-driver");
-await fs.cp(source, driver, { recursive: true, filter: runtimeFile });
-await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
-await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
-await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
+if (!process.argv.includes("--installed")) {
+  await fs.cp(source, path.join(app, "mods/files-plus"), { recursive: true, filter: runtimeFile });
+  await fs.writeFile(path.join(app, "mods/files-plus/mod.json"), '{"place":"none"}');
+  await fs.cp(source, driver, { recursive: true, filter: runtimeFile });
+  await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
+  await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
+  await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
+  await fs.rename(path.join(app, "mods/files-plus/main.js"), path.join(app, "mods/files-plus/panel.js"));
+  await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(app, "mods/files-plus/main.js"));
+}
 const command = async (name, args = {}) => JSON.parse((await execute("herdr-app", ["do", name, JSON.stringify(args)], { env })).stdout);
 const status = async () => JSON.parse((await execute("herdr-app", ["status"], { env })).stdout);
 const model = async () => JSON.parse((await execute("herdr-app", ["ls"], { env })).stdout);
@@ -50,8 +55,10 @@ async function request(value, expectError = false) {
 async function overlaysClosed() { return until(status, value => !value.overlays.length, "overlay completion"); }
 async function closeOverlays() { for (const _ of (await status()).overlays) await command("overlay.close"); }
 async function failure() {
-  const current = await until(shared, value => value["files-plus.test"]?.[opened]?.error && !value["files-plus.test"][opened].busy, "action error");
-  const value = current["files-plus.test"][opened];
+  const since = Number(opened.slice(1));
+  const latest = values => Object.entries(values["files-plus.test"] || {}).filter(([id, value]) => /^o\d+$/.test(id) && Number(id.slice(1)) >= since && value.error && !value.busy).sort(([a], [b]) => Number(b.slice(1)) - Number(a.slice(1)))[0]?.[1];
+  const current = await until(shared, value => Boolean(latest(value)), "action error");
+  const value = latest(current);
   assert.ok(value, "The active dialog must show its error");
   return value.error;
 }
@@ -76,6 +83,7 @@ for (const [name, folder] of [["web", web], ["api", api]]) {
   await until(() => fs.stat(file), () => true, `${name} recorder ready`);
 }
 await command("tab.select", { id: recordings.web.tab });
+await request({ type: "refresh" });
 await request({ type: "workspace", file: null });
 await request({ type: "clipboard-start" });
 
@@ -122,6 +130,7 @@ try {
     await until(shared, value => value["files-plus.test"].panel.entries[api]?.length > 0, "both roots loaded");
     await request({ type: "toggle", path: web + "/src" });
     await command("tab.select", { id: recordings.api.tab });
+    await request({ type: "refresh" });
     const state = await until(shared, value => value["files-plus.test"].panel.folders.includes(web + "/src"), "expanded folder retained");
     assert.equal(state["multi-root.spaces"][info.first.space].file, info.workspace);
     await shot("workspace-tree");
@@ -131,6 +140,7 @@ try {
     await request({ type: "clipboard-restore" }); await request({ type: "clipboard-start" });
     for (const [name, expected] of [["web", '@"docs/notes with spaces.md" '], ["api", `@"${web}/docs/notes with spaces.md" `]]) {
       await command("tab.select", { id: recordings[name].tab });
+      await request({ type: "refresh" });
       await request({ type: "menu", choose: "agent", path: web + "/docs/notes with spaces.md", root: web }); await overlaysClosed();
       const bytes = await until(() => fs.readFile(recordings[name].file, "utf8"), value => value.length > 0, "terminal received reference");
       assert.equal(bytes, expected); assert.ok(!/[\r\n]/.test(bytes));
