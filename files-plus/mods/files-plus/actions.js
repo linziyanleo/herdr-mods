@@ -4,8 +4,8 @@ import { textWidth } from "./metrics.js";
 
 export function menuLayout(items, statusText, metrics, viewport, pointer, zoom = 1) {
   const width = Math.min(Math.floor(Math.max(188, viewport ? viewport.width / zoom - 16 : 10000)), Math.ceil(Math.max(188,
-    Math.max(...items.map(item => textWidth(item.label, 13, metrics) + 20), textWidth(statusText, 12, metrics) + 16) + 10)));
-  const intrinsicHeight = items.length * 30 + items.filter(item => item.group).length * 9 + 10 + 24;
+    Math.max(...items.map(item => textWidth(item.label, 13, metrics) + 20), statusText ? textWidth(statusText, 12, metrics) + 16 : 0) + 10)));
+  const intrinsicHeight = items.length * 30 + items.filter(item => item.group).length * 9 + 10 + (statusText ? 24 : 0);
   const height = Math.min(intrinsicHeight, viewport ? Math.max(30, viewport.height / zoom - 16) : intrinsicHeight);
   const at = viewport && pointer ? {
     x: Math.max(8 * zoom, Math.min(pointer.x, viewport.width - width * zoom - 8 * zoom)),

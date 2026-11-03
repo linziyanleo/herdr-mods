@@ -10,10 +10,10 @@ test("text widths count CJK and emoji and menu sizing includes every label and e
   const view = { width: 1600, height: 1000 };
   const normal = a.menuLayout(items, "", metrics, view, { x: 1598, y: 998 }, 1);
   assert.equal(normal.width, m.textWidth(items[1].label, 13, metrics) + 30);
-  assert.equal(normal.height, 60 + 9 + 10 + 24);
+  assert.equal(normal.height, 60 + 9 + 10);
   assert.equal(normal.at.x + normal.width, 1592); assert.equal(normal.at.y + normal.height, 992);
   const error = a.menuLayout(items, "Error ".repeat(30), metrics, view, { x: 1598, y: 998 }, 1);
-  assert.ok(error.width > normal.width); assert.equal(error.height, normal.height);
+  assert.ok(error.width > normal.width); assert.equal(error.height, normal.height + 24);
   const capped = a.menuLayout(items, "Error ".repeat(100), metrics, { width: 600, height: 900 }, { x: 599, y: 899 }, 1.2);
   assert.equal(capped.width, 484); assert.ok(capped.at.x + capped.width * 1.2 <= 600 - 8 * 1.2);
   assert.equal(a.menuLayout([{ label: "x" }], "", metrics, view, null, 1).width, 188);

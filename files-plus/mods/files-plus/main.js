@@ -120,7 +120,7 @@ export default class FilesPlus extends FilesPanel {
           .when(index === this.at && item.enabled, el => el.bg(t.selected))
           .when(item.enabled && !this.busy, el => el.hover(s => s.bg(t.hover)).active(s => s.bg(t.selected)))
           .on_click((_event, cx) => this.choose(index, cx)).child(item.label))))
-      .child(h_flex().h(24).flex_none().px(8).items_center().text_size(12).text_color(this.error ? t.ansi1 : t.muted).child(div().truncate().tooltip(this.error || "").child(this.error || (this.busy ? "Working…" : ""))));
+      .when(Boolean(this.error), el => el.child(h_flex().h(24).flex_none().px(8).items_center().text_size(12).text_color(t.ansi1).child(div().truncate().tooltip(this.error).child(this.error))));
   }
   renderDialog(cx) {
     const { colors: t, font } = appearance(), action = this.action, target = this.targetEntry;
