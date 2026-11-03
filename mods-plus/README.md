@@ -15,7 +15,7 @@ See [the recipe](RECIPE.md) for detailed UI specifications, interactions, safety
 - **Protected Updates**: Manual updates by default, with configurable background checks (1h, 6h, 12h, 24h). Update candidates are staged and checked first without modifying running files. Three-way merge protects local edits.
 - **Details**: Large previews, descriptions, author information, a copyable installation prompt, source links, package actions and the rendered recipe.
 - **Agent Integration Actions**: **Copy** copies the displayed installation prompt; **Open Agent tab** passes the fuller activation context to the configured agent.
-- **Sidebar Plugins Entry**: A native icon-and-label row above Settings, matching the footer spacing and hover style. A collapsed sidebar keeps the icon.
+- **Sidebar Plugins Entry**: A native icon-and-label row above Settings, with a synchronized update count on the right. A collapsed sidebar shows the count when updates are available and the icon otherwise.
 - **Universal Shortcut**: Global shortcut (`Cmd+Shift+X` on macOS) to open the dialog from any layout.
 
 ## Installation
@@ -45,6 +45,10 @@ Run the automated test suites:
 # Unit tests
 python3 mods-plus/tests/helper.test.py
 python3 mods-plus/tests/catalog.test.py
+python3 mods-plus/tests/updates.test.py
+
+# Async UI event tests (Node.js 18+, no dependencies)
+node --test mods-plus/tests/ui.test.cjs
 
 # Acceptance test suite
 python3 mods-plus/tests/acceptance.test.py

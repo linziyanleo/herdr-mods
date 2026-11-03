@@ -11,7 +11,8 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
 - Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Images load in batches of 24 as more cards are requested.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
-- Settings retains automatic checks, interval choices and a manual update check.
+- Settings retains automatic checks, interval choices and a manual update check. Saving disables repeated clicks, preserves the selected value on failure and displays the error. Loading and checking use native rotating indicators; the check button shows Checking until the refresh finishes.
+- Plugins shows a right-aligned count of verified update candidates. The count refreshes after automatic or manual checks, application and removal. In the collapsed rail the count replaces the Plugins icon when updates are available.
 
 ## How it behaves
 
@@ -36,13 +37,15 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - **Scheduled Background Checks**:
   - While the layout with the Plugins entry is active, overdue update checks are triggered via `cx.timer`.
   - Switching layouts or quitting Herdr pauses scheduling without background daemon services.
+  - Up to four upstream lookups or package preparations run concurrently; packages sharing a source use one fresh tree lookup. Checks bypass the catalog's cached tree. Failed packages are reported separately and never treated as up to date.
+  - Package mutations remain locked across helper processes. A lock timeout returns an error; it never proceeds unlocked. Settings reads and image downloads do not wait for package mutations.
 - **Prompt Actions**:
   - The agent-tab activation prompt includes repository source, revision, installed paths, target app home, active layout name, recipe text, and validation instructions (`herdr-app check`).
 
 ## Built from
 
 - **GPUI Elements**: `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `TextView` from `gpui-base`.
-- **Herdr APIs**: `exec`, `appHome`, `props`, `closeOverlay`, `notify`, `theme`, `window`, `run`, `knownAgents`.
+- **Herdr APIs**: `exec`, `appHome`, `props`, `closeOverlay`, `notify`, `theme`, `window`, `run`, `knownAgents`, `shared`, `setShared`. Async settings and update actions receive the context from `cx.spawn`; native `spin` and opacity transitions provide feedback without animation timers.
 - **Official Gallery**: `https://assets.herdr.dev/mods/index.json` and `https://assets.herdr.dev/layouts/index.json`. Examples use the cards embedded in `https://herdr.dev/mods/` and `https://herdr.dev/layouts/`, enriched with identities from those same indexes. Community previews use only the official moderated URLs; avatars use GitHub. Metadata is cached for one hour with stale-cache warnings on refresh failure. Search, status filters and sorting run locally.
 - **Backend Helper**: `helper.py` and `catalog.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `difflib`, `shutil`, `fcntl`).
 - **Network transport**: `curl` is required for official catalog, preview and avatar requests. GitHub file evidence uses the existing GitHub API client. No credentials are sent to the gallery or avatar endpoints.
@@ -67,7 +70,10 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 8. Enable and Use layout integrate the package correctly.
 9. Prompt copy and Agent tab launch functions work as expected.
 10. Mod removal is protected when layouts still reference the mod.
+11. `python3 mods-plus/tests/updates.test.py` and `node --test mods-plus/tests/ui.test.cjs` pass (Node.js 18+ is needed only for the UI event tests).
 
 ## Repair verification
 
 On 2026-11-03, Herdr 0.1.12 passed the source and installed runtime checks. All 15 Python tests passed. Live catalog and local installation readbacks were checked, and native gallery/details renders were inspected. The preview image was updated by the user. Full pointer/keyboard acceptance remains pending; see the [repair record](../docs/plans/mods-plus.md#gallery-repair-verification-2026-11-03). No real user package was installed, removed or updated during these checks.
+
+The subsequent update-check repair passes 20 Python tests and four JavaScript event tests, including parallel preparation with a failed source, stale candidate cleanup, lock exclusion, expiring click contexts, settings refresh and automatic/manual badge synchronization. Source and installed runtime checks pass on Herdr 0.1.12. Live pointer and animation acceptance remains unverified: the window capture returned a stale frame and native clicks returned `noWindowsAvailable`. The existing preview is retained because that capture does not show the repaired UI. See the [update repair record](../docs/plans/mods-plus.md#update-check-repair-2026-11-03).
