@@ -637,17 +637,23 @@ export default class ModsPlus extends View {
       .when(pkg.installed && pkg.kind === "mod" && !pkg.enabled, el => el.child(this.button(t, "enable", "Enable",
         cx => cx.spawn(cx => this.enablePackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed && pkg.kind === "layout", el => el.child(this.button(t, "use", "Use layout",
-        cx => cx.spawn(cx => this.useLayout(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+        cx => cx.spawn(cx => this.useLayout(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})));
+    const titleActions = h_flex().gap(8).flex_none()
       .when(pkg.has_update, el => el.child(this.button(t, "update", "Apply update",
-        cx => cx.spawn(cx => this.applyUpdate(pkg, cx)), {disabled: Boolean(this.busy)})))
+        cx => cx.spawn(cx => this.applyUpdate(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed, el => el.child(this.button(t, "remove",
         this.confirmRemove === pkg.id ? "Confirm removal" : "Remove",
-        cx => cx.spawn(cx => this.removePackage(pkg, cx)), {disabled: Boolean(this.busy), destructive: this.confirmRemove === pkg.id})));
+        cx => cx.spawn(cx => this.removePackage(pkg, cx)), {
+          primary: this.confirmRemove !== pkg.id, disabled: Boolean(this.busy), destructive: this.confirmRemove === pkg.id,
+        })));
     const summary = v_flex().flex_1().min_w(0).gap(16)
-      .child(div().text_size(28).font_medium().child(pkg.name))
+      .child(h_flex().gap(12).items_center().flex_wrap()
+        .child(div().min_w(0).text_size(28).font_medium().child(pkg.name))
+        .when(pkg.has_update || pkg.installed, el => el.child(titleActions)))
       .child(h_flex().gap(16).items_center().child(this.author(t, pkg)).child(this.stars(t, pkg)))
       .child(div().text_size(16).text_color(t.muted).child(pkg.description))
-      .child(actions);
+      .when((pkg.installed === false && !pkg.collision)
+        || (pkg.installed && (pkg.kind === "layout" || (pkg.kind === "mod" && !pkg.enabled))), el => el.child(actions));
     const prompt = v_flex().flex_1().min_w(0).gap(12)
       .child(v_flex().p(18).gap(16).rounded(12).border(0.5).border_color(t.border)
         .child(h_flex().items_center().justify_between().child(div().text_color(t.muted).child("Tell your agent"))
