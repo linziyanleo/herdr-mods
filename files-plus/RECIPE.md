@@ -1,6 +1,6 @@
 # Files Plus
 
-Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy an absolute or relative path, reveal it in Finder or File Explorer, or create, rename and remove files. A persistent + adds workspace folders, and root entries offer a dedicated root menu to launch terminals or remove folders. Drag any file or folder to insert an agent reference into the active terminal or agent. Adaptive fitting sizes the panel to content, context menus fit their text within window edges, and folders expand and collapse through native transitions. High-performance retained row chunking and incremental change tracking keep scrolling and tree updates fast. Text and Markdown open as read-only source in the same panel with a back button, or hand off rich media seamlessly to Preview Plus.
+Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy an absolute or relative path, reveal it in Finder or File Explorer, or create, rename and remove files. A persistent + adds workspace folders, and root entries offer a dedicated root menu to launch terminals or remove folders. Drag any file or folder to insert an agent reference into the active terminal or agent. Adaptive fitting sizes the panel to content, context menus fit their text within window edges, and folders expand and collapse through native transitions. High-performance retained row chunking and incremental change tracking keep scrolling and tree updates fast. Files open in a center Tab by default; the header settings offer a center Pane or the right panel instead. Text uses the built-in read-only source viewer, with optional rich rendering through Preview Plus.
 
 ![Files Plus](preview.png)
 
@@ -8,7 +8,7 @@ The preview is an unedited `herdr-app shot` from a disposable native Herdr windo
 
 ## What you see
 
-The panel defaults to 320px wide; its actual size belongs to the layout. The header holds Files, an Add folder control (`plus.svg`) and a shortened folder, workspace or preview path. A preview adds a back control (`arrow-left.svg`). Controls use Lucide SVGs with Herdr hover colors. The panel uses the shipped Files/Changes defaults: a 1px theme-colored border, 10px corners, a 42px header with a semibold title, 28px rows, 18px indentation per level and 6px tree padding. Body text is 13px; secondary labels are 12px. Icons are 12px chevrons and 14px file/folder glyphs. Roots show their display name and path, highlight the focused terminal's root, and show “Not found” for missing directories. The last activated file stays selected with a highlighted background after returning from preview. Git letters appear at the right of changed entries.
+The panel defaults to 320px wide; its actual size belongs to the layout. The header shows the current directory basename, an Add folder control (`plus.svg`) and a settings button (`settings.svg`) at the far right. Long directory names truncate and expose their path in a tooltip; without a directory the title is Files. An internal preview adds a back control (`arrow-left.svg`) and a shortened preview path. Controls use SVGs with Herdr hover colors. The panel uses the shipped Files/Changes defaults: a 1px theme-colored border, 10px corners, a 42px header with a semibold title, 28px rows, 18px indentation per level and 6px tree padding. Body text is 13px; secondary labels are 12px. Icons are 12px chevrons and 14px file/folder glyphs. Roots show their display name and path, highlight the focused terminal's root, and show “Not found” for missing directories. The last activated file stays selected with a highlighted background after returning from preview. Git letters appear at the right of changed entries.
 
 Dragging any file, folder or workspace root row at least 6px shows a floating `@` drag pill with the file or folder icon, entry basename and an `@` badge. When the pointer moves outside the Files panel, the pill updates its text to “Click to add @” with a copy cursor when a drop target is available, or a no-drop cursor when no terminal exists. The frameless floating overlay remains inside the Herdr window.
 
@@ -30,9 +30,13 @@ Local safety polls run every 60 seconds while visible; remote folders poll every
 
 ### Built-in source preview and Preview Plus handoff
 
-Opening text replaces the tree with a read-only syntax-highlighted source editor (`EditorState` with `readonly: true`). Back returns to the existing expanded tree and restores row selection. File changes refresh the tree, Git marks and an open preview. An unchanged file and look keep the existing editor and scroll state. A code-font or syntax-color change recreates the read-only editor from its cached text because Herdr exposes these options only at construction. Switching terminal focus within a workspace preserves expansions and previews.
+The settings button opens a 360×264px dialog with three choices: Tab in center panel (default), Pane in center panel, and Inside right panel. Selection saves immediately across panel copies and restarts. Up/down changes the selection; Done or Escape closes the dialog. The choice applies to subsequent file clicks.
 
-When paired with Preview Plus via `props.previewStack` in a layout stack, clicking `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` or `.pdf` publishes the target `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and selects `preview-plus` in that stack. Ordinary text stays in Files Plus's built-in source editor. If Preview Plus is absent or not installed, rich files gracefully fall back to the built-in source editor.
+Tab opens a mod-only tab named after the file in the captured space. Pane splits the captured center pane to the right; without a center pane, a notification asks the user to select one. Both keep the file and machine fixed even when focus changes. Ordinary text uses `files-plus` with `role: "preview"` and `{file, root, on}`; its read-only source view refreshes every ten seconds. Rich file types use Preview Plus with the same target props when installed, without requiring a layout stack. An unavailable receiver falls back to source.
+
+Inside right panel replaces the tree with a read-only syntax-highlighted source editor (`EditorState` with `readonly: true`). Back returns to the existing expanded tree and restores row selection. File changes refresh the tree, Git marks and an open preview. An unchanged file and look keep the existing editor and scroll state. A code-font or syntax-color change recreates the read-only editor from its cached text because Herdr exposes these options only at construction. Switching terminal focus within a workspace preserves expansions and previews.
+
+In Inside right panel mode, when paired with Preview Plus via `props.previewStack` in a layout stack, clicking `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` or `.pdf` publishes the target `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and selects `preview-plus` in that stack. Ordinary text stays in Files Plus's built-in source editor. If Preview Plus is absent or not installed, rich files gracefully fall back to the built-in source editor.
 
 ### Native motion and transitions
 
@@ -83,12 +87,12 @@ files-plus/
   licenses/
   mods/files-plus/
     main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
-    roots.js, config.js, actions.js, appearance.js
-    mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg
+    roots.js, config.js, actions.js, appearance.js, preferences.js
+    mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
   tests/
 ```
 
-Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name, confirmation or root action, and `drag` for the transparent full-window drag surface. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
+Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name, confirmation or root action, `settings` for the open-location dialog, `preview` for a fixed file viewer, and `drag` for the transparent full-window drag surface. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
 
 Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and direct Herdr appearance reads in `appearance.js`. Do not call `set_theme` or change the shared theme from this mod. There are no cross-mod code imports. The package manifest is:
 
@@ -143,6 +147,7 @@ Use these persisted shared contracts. Compare values before writing, because a s
 "multi-root.recent": string[]
 "files-plus.clipboard": { path: string; kind: "file" | "dir" | "root"; on: string | null }
 "files-plus.revision": number
+"files-plus.open-location": "tab" | "pane" | "internal" // missing/invalid defaults to tab
 "preview-plus.target": Record<SpaceId, { file: string; root: string; on: string | null }>
 ```
 
@@ -187,11 +192,11 @@ Files Plus works alone. Preview Plus is an available separate package; installin
 }
 ```
 
-With both the prop and installed receiver, `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` and `.pdf` publish the captured target and select `preview-plus`. Ordinary text stays in Files Plus. The receiver returns with `layout.select {stack:"files",child:"files-plus-tree"}`. Files Plus retains its expansions while hidden. Without the receiver, fall back to source preview. Stale asynchronous reads and receiver checks cannot replace a newer selection or another space.
+With Inside right panel selected, both the prop and installed receiver, `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` and `.pdf` publish the captured target and select `preview-plus`. Ordinary text stays in Files Plus. The receiver returns with `layout.select {stack:"files",child:"files-plus-tree"}`. Files Plus retains its expansions while hidden. Without the receiver, fall back to source preview. Stale asynchronous reads and receiver checks cannot replace a newer selection or another space.
 
 ### Attribution
 
-The Files tree, editor and SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
+The Files tree, editor and original SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). The settings SVG comes from Herdr 0.1.12's workspace-chrome Lucide icon. Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
 
 ## Watch out
 
@@ -204,7 +209,7 @@ Workspace management supports local POSIX spaces; Windows and remote spaces reta
 Build and exercise these observable behaviors using disposable folders:
 
 1. `herdr-app check <app-home>/mods/files-plus` passes. The single-folder tree handles loading, empty, unreadable and missing states, hidden names and symlinks. Expanded directories respect the per-folder and total limits.
-2. Text and Markdown open as read-only source. Back returns to the same tree. Binary, absent and oversized files show their own states. A file edit refreshes the preview; unchanged bytes retain the editor state.
+2. A directory name replaces the Files title, with settings at the far right. The settings dialog remembers Tab, Pane or Inside right panel. Default clicks open a center Tab; Pane splits the captured pane. Text and Markdown open as read-only source without Preview Plus. In internal mode, Back returns to the same tree. Binary, absent and oversized files show their own states. A file edit refreshes the preview; unchanged bytes retain the editor state.
 3. A two-root saved workspace shows both trees, root names, Git marks and missing roots. Focus changes retain expansion and previews. An invalid config keeps the last valid roots with a visible error.
 4. Same-root and cross-root agent references reach the captured terminal with the correct quoting and trailing space, without Enter. Previous clipboard text is restored. A closed terminal is refused.
 5. Copy and Paste preserve the source and choose available copy names. A directory cannot be pasted into itself or through a symlink into a descendant. Cross-machine paste is disabled. Absolute and relative path copying uses the clicked entry's owning root.

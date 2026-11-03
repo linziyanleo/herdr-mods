@@ -4,6 +4,22 @@ Status: the original package was implemented, installed locally and published to
 
 The workspace launcher update below is verified locally and awaits installation and publication.
 
+## Open-location settings (2026-11-03)
+
+Requested behavior: replace the Files heading with the current directory name, place settings at the far right, and let file clicks open in a center Tab (default), a center Pane, or inside the right panel. The app-wide persisted preference and viewer props are defined in the [recipe](../../files-plus/RECIPE.md#built-in-source-preview-and-preview-plus-handoff).
+
+The implementation reuses Files Plus's source editor for independent Tab/Pane viewers and Preview Plus's existing fixed-file props for rich files. Internal mode keeps the existing optional stack handoff. Opening a preview retains the sidebar's browsing directory instead of falling back to the space's original folder. No new runtime package, layout changes, or shortcuts are needed.
+
+The user authorized commit, push, and installation into the working Herdr on 2026-11-03. Runtime and tests are committed as `6a95fa80bf44aea02938b8aa22d0ee6d019f2f07` on `agent/files-plus-open-settings`, based on `e18789d794643a54735889af29cf0d36c1f5f5b5`. Documentation is delivered separately. Unrelated mods-plus files are excluded.
+
+Verification on macOS with Herdr 0.1.12: all 61 automated tests passed, including default/invalid preferences, persisted selection, captured Pane targets, optional rich viewers, retained sidebar context, and fixed-file preview across focus changes. `herdr-app check` passed for the runtime and disposable wrappers that materialize the settings and source-preview roles. `git diff --check` passed. In the isolated native session `/tmp/fp.PUhQtI`, commands created a README.md Tab and changed focus to a new split Pane in the original API tab; status reported no errors. These command results do not establish painted content or real pointer interactions.
+
+Visual acceptance remains incomplete: native screenshot capture initially stayed on the startup frame; a later capture showed the directory heading and rightmost settings control but an older rendered frame. CUA pointer input returned `noWindowsAvailable`. The package preview remains the earlier accepted capture until a current screenshot and real settings clicks can be verified.
+
+Working installation: five runtime files were updated in `~/.config/herdr-app/mods/files-plus`, with the previous runtime backed up under `~/.config/herdr-app/backups/files-plus-open-settings-20261103-174221`. Every packaged runtime file was compared byte-for-byte with the committed source. The installed mod passed `herdr-app check`; `herdr-app status` reported no errors in the existing `fanghu` layout. The absent saved preference correctly resolves to Tab. Layouts, key bindings, other mods, and the user's terminals were left intact. A private `herdr-app shot` was captured at `/tmp/files-plus-installed-20261103.png`; Files was hidden behind the current Changes panel. Further pointer validation stopped when CUA detected the user changing the window, so no complete live interaction acceptance is claimed.
+
+The disposable space and app were closed after verification. Herdr 0.1.12's copied test bundle had redirected `~/.local/bin/herdr-app` to itself; cleanup restored the symlink to the running installed bundle under `~/Applications/Herdr.app` after verifying identical executable hashes.
+
 The [Files Plus recipe](../../files-plus/RECIPE.md#folder-context-and-saved-workspaces) defines the workspace config format and persisted shared-state contracts. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
 
 ## Goal
@@ -14,13 +30,15 @@ Provide one Files panel (`files-plus`) that combines single-folder browsing, wor
 
 - Keep the file tree, workspace helpers and config handling in `files-plus/mods/files-plus/`. Retain lazy loading (500 per folder, 5,000 total), Git status marks, symlink handling, `watchFolder` plus 10-second refresh, and read-only `Editor` text preview.
 - Keep `files-plus` and `preview-plus` independently installable:
-  - **Installed alone**: `files-plus` replaces the Files block (`"mod": "files-plus"`). Clicking any text or Markdown file opens `files-plus`'s built-in read-only `Editor` preview.
-  - **Installed with `preview-plus`**: when given `props.previewStack` (for example `{ "previewStack": "files" }` in a 2-child stack `files-plus-tree` + `preview-plus`), clicking `.md`, `.markdown`, supported images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`), or `.pdf` writes `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and calls `run("layout.select", { stack: props().previewStack, child: "preview-plus" })` to replace the panel view. Other text files stay in `files-plus`'s built-in `Editor` preview.
+  - **Installed alone**: `files-plus` replaces the Files block (`"mod": "files-plus"`). Text and Markdown use the built-in read-only `Editor` in the configured location: a Tab by default, a split Pane, or inside the panel.
+  - **Installed with `preview-plus`**: Tab and Pane pass fixed `{file, root, on}` props directly to Preview Plus for rich files. Inside right panel uses `props.previewStack` (for example `{ "previewStack": "files" }` in a 2-child stack `files-plus-tree` + `preview-plus`): rich files write `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and call `run("layout.select", { stack: props().previewStack, child: "preview-plus" })`. Other text files use Files Plus's source viewer.
 - Keep workspace actions (`+` Add folder in the header, and root right-click actions) directly in `files-plus`, using the persisted shared-state contract. No additional runtime mod is required for workspace browsing and root actions.
 - Keep the context menu and action dialogs inside the `files-plus` runtime, selected by `props().role`:
   - default (no `role`): the Files panel (`place: "right"`, `size: 320`)
   - `role: "menu"`: pointer popup context menu with keyboard navigation (`↑`, `↓`, `Enter`, `Esc`)
   - `role: "dialog"`: centered modal dialog for name prompts (`New file…`, `New folder…`, `Rename…`) and `Move to Trash` confirmation
+  - `role: "settings"`: persisted open-location choices
+  - `role: "preview"`: independent read-only source viewer for one captured file and machine
 
 ## Context menu and file actions
 
