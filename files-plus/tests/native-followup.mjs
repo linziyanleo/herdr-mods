@@ -92,6 +92,7 @@ await request({ type: "workspace", file: workspace });
 checks.push({ name: "manual override and context reset", width: manualWidth });
 
 const source = path.join(web, "source-fixture.txt"); await fs.writeFile(source, "const ready = true;\n");
+await request({ type: "open-location", value: "internal" });
 await request({ type: "preview", path: source, root: web });
 await until(panel, value => value.file === source && value.preview, "source preview"); await shot("source-preview-selected");
 await request({ type: "back" });

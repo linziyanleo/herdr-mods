@@ -17,7 +17,7 @@ test("retained rows follow Herdr colors and UI fonts with native panel defaults"
   assert.equal(root.attributes.border_color[0], r.theme.border);
   assert.ok(root.attributes.border_1); assert.equal(root.attributes.rounded[0], 10);
   assert.equal(root.attributes.text_size[0], 13);
-  const header = root.nodes[1], title = header.nodes.find(n => n.nodes?.includes("Files"));
+  const header = root.nodes[1], title = find(header, "files-title");
   assert.equal(header.attributes.h[0], 42); assert.ok(title.attributes.font_semibold);
   assert.equal(chunk, panel.chunks[0].entity);
   assert.equal(chunk.snapshot().attributes.font_family[0], "Geist Mono");
@@ -34,6 +34,7 @@ test("retained rows follow Herdr colors and UI fonts with native panel defaults"
 
 test("an open source preview updates its code font and syntax without a file reread", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.shared["files-plus.open-location"] = "internal";
   const file = path.join(r.dir, "app.ts"); await fs.writeFile(file, "export const ready = true;\n");
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   panel.openFile(file, r.dir, r.cx); await r.drain(); const previous = panel.code;

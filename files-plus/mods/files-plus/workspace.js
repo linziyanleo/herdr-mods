@@ -1,14 +1,15 @@
 // Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout } from "herdr";
-import { workspaceOf, describeRoots, reloadWorkspace, dirname, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify } from "herdr";
+import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
 import { dragMove } from "./drag.js";
+import { OPEN_LOCATION, openLocation } from "./preferences.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -33,10 +34,11 @@ export function changedDirectories(paths, roots, expanded) {
   return { paths: directories, git };
 }
 
-export function location() {
+export function location(previous) {
   const space = spaces().find(s => s.active), f = focused();
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
-  const cwd = (f?.space === space?.id ? pane?.cwd || f?.cwd : null) || space?.folder;
+  const preview = ["files-plus", "preview-plus"].includes(pane?.mod);
+  const cwd = (f?.space === space?.id ? pane?.cwd || f?.cwd || (preview && previous?.space === space.id ? previous.cwd : null) : null) || space?.folder;
   const on = f && space && f.space === space.id && f.pane === null && f.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
   const entry = workspaceOf(space?.id);
   return { space: space?.id, cwd, on, entry, key: entry ? JSON.stringify([space.id, entry.folders]) : JSON.stringify([space?.id, cwd, on]) };
@@ -58,6 +60,11 @@ export async function directory(path, on) {
 }
 
 export class FilesPanel extends View {
+  location() {
+    const loc = location(this.browsingLocation);
+    this.browsingLocation = loc;
+    return loc;
+  }
   initPanel(cx) {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
     this.entryCount = 0; this.limits = new Set(); this.treeVersion = 0; this.chunks = []; this.gitCache = new Map();
@@ -114,7 +121,7 @@ export class FilesPanel extends View {
       } catch { if (this.configWatch === token) this.configWatch = null; }
     });
   }
-  current(context, loc = location()) { return this.context === context && loc.key === context; }
+  current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
   dropFolder(path) {
     this.entryCount -= this.entries.get(path)?.length || 0;
     const removed = this.entries.delete(path), limited = this.limits.delete(path);
@@ -143,7 +150,7 @@ export class FilesPanel extends View {
     } finally { if (pending.get(path) === request) pending.delete(path); }
   }
   refresh(cx, options = {}) {
-    const loc = location(), context = loc.key;
+    const loc = this.location(), context = loc.key;
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
@@ -258,6 +265,22 @@ export class FilesPanel extends View {
     this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
     const request = this.openRequest = {};
     const stack = props()?.previewStack, context = this.context, space = this.spaceId, on = this.on;
+    const destination = openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
+    if (destination !== "internal") {
+      if (destination === "pane" && !pane) {
+        notify({ title: "Select a center pane before opening a file", level: "info" });
+        return;
+      }
+      cx.spawn(async cx => {
+        const rich = RICH.test(path) && await installed("preview-plus").catch(() => false);
+        if (!this.current(context) || this.openRequest !== request) return;
+        const mod = rich ? "preview-plus" : "files-plus";
+        const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
+        if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
+        else run("pane.split", { pane, direction: "right", mod, props: previewProps });
+      });
+      return;
+    }
     if (!stack || !RICH.test(path)) { this.show(path, cx); return; }
     cx.spawn(async cx => {
       try {
@@ -301,13 +324,30 @@ export class FilesPanel extends View {
     this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true, value: this.previewText, ...style });
     this.previewStyle = JSON.stringify(style);
   }
+  initPreview(cx) {
+    const p = props();
+    this.context = JSON.stringify([p.file, p.on]);
+    this.on = p.on ?? null;
+    this.show(p.file, cx);
+    cx.timer.every(10000, cx => this.show(p.file, cx));
+  }
+  renderPreview(cx) {
+    const { colors: t, font } = appearance();
+    if (this.code && this.previewStyle !== JSON.stringify(sourceStyle())) {
+      cx.timer.after(0, cx => { this.updatePreview(); cx.notify(); });
+    }
+    return v_flex().id("file-viewer").size_full().min_w(0).min_h(0).bg(t.background).text_color(t.foreground).font_family(font).text_size(13)
+      .child(div().h(42).px(14).flex().items_center().flex_none().border_b(0.5).border_color(t.border)
+        .child(div().truncate().tooltip(this.file).font_semibold().child(basename(this.file))))
+      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted).child(this.fileError || "Loading file…"));
+  }
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
   menu(path, kind, root, event, cx) {
     cx.stop_propagation();
     const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
     openOverlay({ mod: "files-plus", kind: "popup", ...geometry, props: { role: "menu", target, geometry, pointer: event.position } });
   }
-  syncTree(cx, loc = location()) {
+  syncTree(cx, loc = this.location()) {
     const roots = this.rootInfo || this.workspace?.folders || [];
     this.activeRoot = rootOf(loc.cwd, roots)?.path;
     const look = appearance(), lookKey = JSON.stringify(look), lookChanged = this.lookKey !== lookKey;
@@ -341,7 +381,7 @@ export class FilesPanel extends View {
     if (lookChanged || chunks.length !== previous.length || chunks.some((chunk, i) => chunk !== previous[i])) this.treeView.set_props({ chunks: chunks.map(chunk => chunk.entity), panel: this, look });
     this.scheduleFit(cx, this.fitCause || "background"); this.fitCause = "background";
   }
-  panelTitle() { return this.workspace?.name || (this.root ? label({ path: this.root }) : ""); }
+  panelTitle() { const cwd = this.location().cwd || this.root; return cwd ? basename(cwd) : "Files"; }
   scheduleFit(cx, cause = "background") {
     const fit = props()?.fit;
     if (!fit?.node || this.file) return;
@@ -378,14 +418,14 @@ export class FilesPanel extends View {
     this.syncPending = true;
     cx.timer.after(0, cx => {
       this.syncPending = false;
-      const loc = location(), revision = shared(REVISION);
+      const loc = this.location(), revision = shared(REVISION);
       if (loc.key !== this.context || this.revision !== revision) { this.revision = revision; this.refresh(cx); }
       else this.syncTree(cx, loc);
       if (this.code && this.previewStyle !== JSON.stringify(sourceStyle())) { this.updatePreview(); cx.notify(); }
     });
   }
   renderPanel(cx) {
-    const loc = location();
+    const loc = this.location();
     this.scheduleFit(cx);
     const activeRoot = rootOf(loc.cwd, this.rootInfo || this.workspace?.folders || [])?.path;
     const look = appearance(), { colors: t, font } = look;
@@ -408,7 +448,7 @@ export class FilesPanel extends View {
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
           .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
           .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
-        .child(div().font_semibold().child("Files"))
+        .child(div().id("files-title").flex_1().min_w(0).truncate().font_semibold().tooltip(loc.cwd || this.root || "").child(this.panelTitle()))
         .child(h_flex().id("add-folder").size(24).items_center().justify_center().rounded(6).cursor_default().text_color(add ? t.muted : t.dim).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
           .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
             if (!add) return;
@@ -417,7 +457,13 @@ export class FilesPanel extends View {
             openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target), props: { role: "dialog", action: "add-root", target } });
             cx.stop_propagation();
           }).child(svg("mods/files-plus/plus.svg").size(14)))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(title)))
+        .when(Boolean(this.file), el => el.child(div().max_w(140).truncate().text_size(12).text_color(t.dim).tooltip(this.file).child(title)))
+        .child(h_flex().id("files-settings").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Files settings").tooltip("Files settings").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+          .on_click((_event, cx) => {
+            cx.stop_propagation();
+            openOverlay({ mod: "files-plus", kind: "dialog", modal: true, width: 360, height: 264, props: { role: "settings" } });
+          }).child(svg("mods/files-plus/settings.svg").size(14))))
       .when(Boolean(entry?.error), el => el.child(div().px(14).py(8).text_size(12).text_color(t.ansi1).child(entry.error)))
       .when(!this.file, el => el.child(this.treeView))
       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)

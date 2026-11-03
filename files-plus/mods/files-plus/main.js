@@ -1,6 +1,6 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { props, setShared, run, openOverlay, closeOverlay, pickFolder, window as appWindow } from "herdr";
+import { props, shared, setShared, run, openOverlay, closeOverlay, pickFolder, window as appWindow } from "herdr";
 import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
@@ -8,6 +8,7 @@ import { appearance } from "./appearance.js";
 import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { renderDrag } from "./drag.js";
+import { OPEN_LOCATION, OPEN_OPTIONS, openLocation } from "./preferences.js";
 
 const NAME_ACTIONS = new Set(["new-file", "new-folder", "rename"]);
 
@@ -16,8 +17,11 @@ export default class FilesPlus extends FilesPanel {
     const p = props() || {};
     this.role = p.role; this.targetEntry = p.target; this.action = p.action; this.busy = false; this.at = 0;
     if (!this.role) { this.initPanel(cx); return; }
+    if (this.role === "preview") { this.initPreview(cx); return; }
     this.handle = cx.focus_handle();
-    if (this.role === "menu") {
+    if (this.role === "settings") {
+      this.handle.focus();
+    } else if (this.role === "menu") {
       this.error = p.error; this.menuLook = JSON.stringify(appearance());
       this.geometry = p.geometry || menuLayout(menuItems(this.targetEntry), this.error, metrics(), viewport(), p.pointer, zoom());
       this.at = menuItems(this.targetEntry).findIndex(item => item.enabled);
@@ -150,7 +154,30 @@ export default class FilesPlus extends FilesPanel {
         .child(button("dialog-cancel", "Cancel", false, !this.busy, () => closeOverlay(props().overlay)))
         .child(button("dialog-submit", this.busy ? "Working…" : action === "add-root" ? "Choose folder…" : action === "trash" ? target.on === null && appWindow().platform === "macos" ? "Move to Trash" : "Delete" : action === "remove-root" ? "Remove" : action === "rename" ? "Rename" : "Create", true, enabled, cx => this.submit(cx))));
   }
+  renderSettings() {
+    const { colors: t, font } = appearance(), selected = openLocation(shared(OPEN_LOCATION));
+    return v_flex().id("files-settings-dialog").track_focus(this.handle).size_full().p(18).gap(12).bg(t.popover).text_color(t.foreground).font_family(font).text_size(13)
+      .on_key_down((event, cx) => {
+        if (event.key === "escape") closeOverlay(props().overlay);
+        else if (["up", "down"].includes(event.key)) {
+          const index = OPEN_OPTIONS.findIndex(option => option.value === selected);
+          setShared(OPEN_LOCATION, OPEN_OPTIONS[(index + (event.key === "down" ? 1 : 2)) % 3].value);
+        } else return;
+        cx.stop_propagation(); cx.notify();
+      })
+      .child(div().text_size(15).font_semibold().child("Files settings"))
+      .child(div().text_color(t.muted).child("Open files in"))
+      .child(v_flex().gap(4).role("radio_group").accessibility_label("Open files in").children(OPEN_OPTIONS.map(option =>
+        h_flex().id(`open-${option.value}`).h(32).px(10).gap(10).items_center().rounded(6).cursor_default().role("radio_button").checked(selected === option.value).accessibility_label(option.label)
+          .bg(selected === option.value ? t.selected : t.popover).hover(s => s.bg(t.hover))
+          .on_click((_event, cx) => { setShared(OPEN_LOCATION, option.value); cx.stop_propagation(); cx.notify(); })
+          .child(div().w(14).child(selected === option.value ? "●" : "○")).child(option.label))))
+      .child(h_flex().justify_end().child(div().id("settings-done").px(12).h(28).flex().items_center().rounded(6).role("button").accessibility_label("Done").cursor_default().hover(s => s.bg(t.hover))
+        .on_click(() => closeOverlay(props().overlay)).child("Done")));
+  }
   render(cx) {
+    if (this.role === "preview") return this.renderPreview(cx);
+    if (this.role === "settings") return this.renderSettings(cx);
     if (this.role === "drag") return renderDrag(this, cx);
     if (this.role === "menu") return this.renderMenu(cx);
     if (this.role === "dialog") return this.renderDialog(cx);

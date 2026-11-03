@@ -65,7 +65,10 @@ export default class NativeDriver extends FilesPlus {
             const target = this.target(request.root, "root", request.root);
             await changeRoots(target, request.action, request.path, this.nativeSnapshot || await workspaceSnapshot(target));
             this.nativeSnapshot = null;
-          } else if (request.type === "preview") this.openFile(request.path, request.root, cx);
+          } else if (request.type === "settings") {
+            this.requestOverlay = openOverlay({ mod: this.nativeMod, kind: "dialog", width: 360, height: 264, props: { role: "settings" } });
+          } else if (request.type === "open-location") setShared("files-plus.open-location", request.value);
+          else if (request.type === "preview") this.openFile(request.path, request.root, cx);
           else if (request.type === "back") { this.show(null); cx.notify(); }
           else if (request.type === "toggle") {
             if (request.motion) { globalThis.window.activate_window(); globalThis.__fpMotion = []; }

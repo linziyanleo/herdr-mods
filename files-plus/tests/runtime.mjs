@@ -51,6 +51,7 @@ export async function runtime(t) {
     },
     openOverlay: spec => { state.calls.push({ command: "openOverlay", spec }); return "overlay"; },
     closeOverlay: id => { state.calls.push({ command: "closeOverlay", id }); },
+    notify: spec => { state.calls.push({ command: "notify", spec }); },
     pickFolder: async () => state.picked ?? null
   };
   // Keep builders separate from their plain inspection data.
