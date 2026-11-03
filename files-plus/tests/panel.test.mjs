@@ -21,6 +21,7 @@ test("the tree includes hidden names, omits .git, and never follows directory sy
 
 test("single-folder text/Markdown previews are read-only, bounded and handle missing/binary files", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.shared["files-plus.open-location"] = "internal";
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   const file = path.join(r.dir, "README.md");
   await fs.writeFile(file, "# Heading\n"); panel.openFile(file, r.dir, r.cx); await r.drain();
@@ -36,6 +37,7 @@ test("single-folder text/Markdown previews are read-only, bounded and handle mis
 
 test("workspace focus changes retain expansion and preview; paired mode sends the owning root", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.shared["files-plus.open-location"] = "internal";
   const web = path.join(r.dir, "web"), api = path.join(r.dir, "api");
   await fs.mkdir(path.join(web, "src"), { recursive: true }); await fs.mkdir(api);
   const file = path.join(web, "README.md"); await fs.writeFile(file, "# Web\n");
@@ -58,6 +60,7 @@ test("workspace focus changes retain expansion and preview; paired mode sends th
 
 test("configured pairing falls back to source when Preview Plus is absent", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.shared["files-plus.open-location"] = "internal";
   r.props.previewStack = "files";
   const file = path.join(r.dir, "README.md"); await fs.writeFile(file, "# Alone\n");
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
@@ -88,6 +91,7 @@ test("refresh preserves an unchanged editor and reloads changed preview bytes", 
 
 test("a delayed rich-preview handoff cannot replace a later text selection", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
+  r.shared["files-plus.open-location"] = "internal";
   await fs.mkdir(path.join(r.dir, "app/mods/preview-plus"), { recursive: true });
   await fs.writeFile(path.join(r.dir, "app/mods/preview-plus/mod.json"), "{}");
   const text = path.join(r.dir, "a.txt"); await fs.writeFile(text, "Latest");

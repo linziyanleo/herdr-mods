@@ -1,6 +1,6 @@
 # Files Plus
 
-Enhance the Files panel by combining single-folder and workspace browsing with a complete right-click file manager menu (Add to agent `@`, Copy, Paste, Copy path, Copy relative path, Reveal in Finder/Explorer, and file/folder CRUD). Works standalone with built-in text previews, or pairs with [Preview Plus](../preview-plus/README.md) to replace the view when opening Markdown, images, and PDFs.
+Enhance the Files panel by combining single-folder and workspace browsing with a complete right-click file manager menu (Add to agent `@`, Copy, Paste, Copy path, Copy relative path, Reveal in Finder/Explorer, and file/folder CRUD). The header shows the current directory name. Its rightmost settings button chooses where file clicks open: a center Tab (default), a center Pane, or inside the right panel. Works standalone with built-in text previews, or uses [Preview Plus](../preview-plus/README.md) for Markdown, images, and PDFs.
 
 ![Files Plus](preview.png)
 

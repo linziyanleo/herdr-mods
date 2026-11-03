@@ -123,6 +123,7 @@ try {
     }
   });
   await check("standalone Markdown source preview and return", async () => {
+    await request({ type: "open-location", value: "internal" });
     await request({ type: "preview", path: webPhysical + "/README.md", root: webPhysical });
     await until(shared, value => Boolean(value["files-plus.test"].panel.preview), "native Editor preview");
     await shot("source-preview"); await request({ type: "back" });

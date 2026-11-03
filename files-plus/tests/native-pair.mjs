@@ -50,6 +50,7 @@ const web = path.dirname(info.workspace) + "/web", folder = web + "/src";
 await request({ type: "workspace", file: info.workspace });
 await until(async () => JSON.parse(await fs.readFile(path.join(base, "native-state-panel.json"), "utf8")), value => Boolean(value.entries[web]));
 await request({ type: "toggle", path: folder });
+await request({ type: "open-location", value: "internal" });
 for (const ext of ["md", "png", "pdf"]) {
   const file = `${web}/paired-target.${ext}`; await fs.writeFile(file, "Disposable target fixture\n");
   await fs.rm(path.join(base, "paired-target.json"), { force: true });
