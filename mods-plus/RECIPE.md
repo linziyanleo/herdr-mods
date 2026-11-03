@@ -13,6 +13,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
 - Settings has an automatic-check switch and a custom interval: a positive whole number followed by min / hr controls. Enter or leaving the number field saves the interval; clicking a unit saves the final number/unit pair. Existing hour settings are preserved. Saving disables repeated actions and displays failures. Loading and checking use native rotating indicators.
 - Plugins shows a right-aligned count of verified update candidates. The count refreshes after automatic or manual checks, application and removal. In the collapsed rail the count replaces the Plugins icon when updates are available.
+- Card status occupies one line: Need Update replaces Installed when a candidate is available. Settings uses an arrow-only Back button. The footer count uses a 16px-high badge and 11px text, reduced at the user's request.
 
 ## How it behaves
 

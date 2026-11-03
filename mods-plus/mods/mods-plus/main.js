@@ -498,8 +498,8 @@ export default class ModsPlus extends View {
   }
 
   updateBadge(t, count) {
-    return div().min_w(18).h(18).px(4).flex_none().rounded_full().flex().items_center().justify_center()
-      .text_size(12).font_medium().bg(t.accent).text_color(t.accent_foreground)
+    return div().min_w(16).h(16).px(3).flex_none().rounded_full().flex().items_center().justify_center()
+      .text_size(11).font_medium().bg(t.accent).text_color(t.accent_foreground)
       .child(String(count));
   }
 
@@ -621,10 +621,10 @@ export default class ModsPlus extends View {
         .child(v_flex().flex_1().min_w(0).gap(6)
           .child(div().text_size(16).truncate().child(pkg.name))
           .child(div().text_size(12).text_color(t.muted).truncate().child(pkg.author)))
-        .child(v_flex().gap(8).items_end().text_size(12)
+        .child(v_flex().flex_none().gap(8).items_end().text_size(12)
           .child(this.stars(t, pkg))
-          .when(pkg.installed === true, el => el.child(div().text_color(t.muted).child("Installed")))
-          .when(pkg.has_update, el => el.child(div().text_color(t.accent).child("Update")))));
+          .when(pkg.installed === true || pkg.has_update, el => el.child(div()
+            .text_color(pkg.has_update ? t.accent : t.muted).child(pkg.has_update ? "Need Update" : "Installed")))));
   }
 
   renderDetails(t) {
@@ -686,10 +686,10 @@ export default class ModsPlus extends View {
         .gap(10)
         .items_center()
         .child(
-          this.button(t, "btn-back-settings", "← Catalog", (cx) => {
+          this.button(t, "btn-back-settings", this.icon("chevron-left", 14), (cx) => {
             this.view = "catalog";
             cx.notify();
-          })
+          }).accessibility_label("Back").tooltip("Back")
         )
         .child(div().font_semibold().text_size(16).text_color(t.foreground).child("Settings")),
 
