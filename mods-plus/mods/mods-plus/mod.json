@@ -1,0 +1,9 @@
+{
+  "place": "none",
+  "title": "Plugins",
+  "overlay": {
+    "kind": "dialog",
+    "width": 0.85,
+    "height": 0.85
+  }
+}

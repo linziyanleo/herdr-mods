@@ -1,0 +1,780 @@
+// Mods Plus: Browse, install, enable, update, and remove community Herdr mods and layouts.
+// All package operations are handled through helper.py with validation and protection.
+
+import { View, div, image, svg } from "gpui-kit";
+import { h_flex, v_flex, Input, InputState, TextView, Select, Popup } from "gpui-base";
+import { exec, appHome, props, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates } from "herdr";
+
+const short = (sha) => (sha ? sha.slice(0, 7) : "?");
+const opener = () => (window()?.platform === "macos" ? "open" : window()?.platform === "windows" ? "explorer" : "xdg-open");
+
+export default class ModsPlus extends View {
+  init(_props, cx) {
+    this.entry = Boolean(props()?.entry);
+    this.hasUpdate = false;
+    this.preparedCount = 0;
+    this.checking = false;
+    this.busy = null;
+    this.message = null;
+
+    if (this.entry) {
+      // Entry button in layout header: manages scheduled background checks while layout is loaded
+      cx.spawn(cx => this.checkOverdue(cx));
+      cx.timer.every(10 * 60 * 1000, (cx) => cx.spawn(cx => this.checkOverdue(cx)));
+      return;
+    }
+
+    // Overlay dialog
+    this.view = "catalog"; // "catalog" | "details" | "settings"
+    this.tab = "mod"; // "mod" | "layout"
+    this.filter = "all"; // "all" | "installed" | "not_installed"
+    this.query = "";
+    this.collection = "community";
+    this.sort = "popular";
+    this.limit = 24;
+    this.width = 1000;
+    this.media = {};
+    this.loadingMedia = false;
+    this.packages = [];
+    this.selected = null;
+    this.settings = null;
+    this.confirmRemove = null;
+
+    this.handle = cx.focus_handle();
+    this.sortFocus = cx.focus_handle();
+    this.sortListFocus = cx.focus_handle();
+    this.search = InputState.new({ placeholder: "Search mods and layouts" });
+    this.search.on("change", (_e, cx) => {
+      this.query = this.search.value();
+      this.limit = 24;
+      this.loadMedia(cx);
+      cx.notify();
+    });
+    this.handle.focus();
+
+    cx.spawn(async (cx) => {
+      await this.loadCatalog(cx);
+      await this.loadSettings(cx);
+      // Check if scheduled checks are overdue on opening
+      if (this.settings?.overdue) {
+        await this.runUpdateCheck(cx, false);
+      }
+    });
+  }
+
+  // -------------------------------- Helper execution --------------------------------
+
+  async helper(args) {
+    const python = "python3";
+    const script = `${appHome()}/mods/mods-plus/helper.py`;
+    const res = await exec(python, ["-B", script, "--app-home", appHome(), "--json", ...args]);
+    if (res.code !== 0) {
+      const err = (res.stderr || res.stdout).trim().split("\n").pop();
+      throw new Error(err || "Helper operation failed");
+    }
+    return JSON.parse(res.stdout);
+  }
+
+  async work(cx, label, fn) {
+    this.busy = label;
+    this.message = null;
+    cx.notify();
+    try {
+      await fn();
+    } catch (e) {
+      this.message = String(e?.message ?? e);
+    }
+    this.busy = null;
+    cx.notify();
+  }
+
+  // -------------------------------- Data loading --------------------------------
+
+  async checkOverdue(cx) {
+    try {
+      const s = await this.helper(["settings"]);
+      this.preparedCount = s.prepared_updates_count || 0;
+      this.hasUpdate = this.preparedCount > 0;
+      if (s.overdue) {
+        const r = await this.helper(["check-updates"]);
+        this.preparedCount = r.count || 0;
+        this.hasUpdate = this.preparedCount > 0;
+      }
+      cx.notify();
+    } catch {
+      // Background checks fail silently without throwing in UI
+    }
+  }
+
+  async loadCatalog(cx) {
+    await this.work(cx, "Loading catalog…", async () => {
+      const res = await this.helper(["catalog"]);
+      this.packages = res.packages || [];
+      this.message = (res.warnings || []).join("\n") || null;
+    });
+    this.loadMedia(cx);
+  }
+
+  visiblePackages() {
+    const query = this.query.trim().toLowerCase();
+    return this.packages.filter(p =>
+      p.kind === this.tab && p.collection === this.collection &&
+      (this.filter === "all" || (this.filter === "installed" ? p.installed === true : p.installed === false)) &&
+      `${p.name} ${p.author} ${p.description}`.toLowerCase().includes(query)
+    ).sort((a, b) =>
+      Number(b.installed === true) - Number(a.installed === true) ||
+      Number(!a.preview_url) - Number(!b.preview_url) ||
+      (this.sort === "new" ? b.pushed.localeCompare(a.pushed) : b.stars - a.stars) ||
+      a.name.localeCompare(b.name));
+  }
+
+  loadMedia(cx) {
+    if (this.loadingMedia) return;
+    const ids = this.visiblePackages().slice(0, this.limit).filter(p => !this.media[p.id]).map(p => p.id);
+    if (!ids.length) return;
+    this.loadingMedia = true;
+    cx.spawn(async (cx) => {
+      try {
+        const res = await this.helper(["media", JSON.stringify(ids)]);
+        for (const item of res.media || []) this.media[item.id] = item;
+      } catch (e) {
+        this.message = String(e.message || e);
+      } finally {
+        this.loadingMedia = false;
+      }
+      cx.notify();
+      // A filter may have changed while the images were loading.
+      if (ids.some(id => !this.media[id])) return;
+      this.loadMedia(cx);
+    });
+  }
+
+  changeFilter(key, value, cx) {
+    this[key] = value;
+    this.limit = 24;
+    this.loadMedia(cx);
+    cx.notify();
+  }
+
+  async loadSettings(cx) {
+    try {
+      this.settings = await this.helper(["settings"]);
+      this.preparedCount = this.settings?.prepared_updates_count || 0;
+      cx.notify();
+    } catch (e) {
+      this.message = `Settings load error: ${e.message}`;
+    }
+  }
+
+  async showDetails(pkg, cx) {
+    this.view = "details";
+    this.selected = { ...pkg, ...this.media[pkg.id] };
+    this.confirmRemove = null;
+    cx.notify();
+    await this.work(cx, `Loading details for ${pkg.name}…`, async () => {
+      const details = await this.helper(["details", pkg.id]);
+      if (this.selected?.id === pkg.id) this.selected = details;
+    });
+  }
+
+  // -------------------------------- Actions --------------------------------
+
+  async installPackage(pkg, cx) {
+    await this.work(cx, `Installing ${pkg.name}…`, async () => {
+      const res = await this.helper(["install", pkg.repo, pkg.subdir || ""]);
+      if (!res.ok) throw new Error(res.error || "Installation failed");
+      notify({ title: "Installed", body: `${pkg.name} staged successfully. Use Enable to activate.`, level: "success" });
+      await this.showDetails(pkg, cx);
+      await this.loadCatalog(cx);
+    });
+  }
+
+  async enablePackage(pkg, cx) {
+    await this.work(cx, `Enabling ${pkg.name}…`, async () => {
+      const res = await this.helper(["enable", pkg.id]);
+      if (!res.ok) throw new Error(res.error || "Failed to enable mod");
+      notify({ title: "Enabled", body: `Enabled mod ${pkg.name}.`, level: "success" });
+      await this.showDetails(pkg, cx);
+      await this.loadCatalog(cx);
+    });
+  }
+
+  async useLayout(pkg, cx) {
+    await this.work(cx, `Applying layout ${pkg.name}…`, async () => {
+      const res = await this.helper(["use-layout", pkg.id]);
+      if (!res.ok) throw new Error(res.error || "Failed to switch layout");
+      notify({ title: "Layout Activated", body: `Switched to layout ${res.layout}.`, level: "success" });
+      await this.showDetails(pkg, cx);
+      await this.loadCatalog(cx);
+    });
+  }
+
+  async removePackage(pkg, cx) {
+    if (this.confirmRemove !== pkg.id) {
+      this.confirmRemove = pkg.id;
+      cx.notify();
+      return;
+    }
+    this.confirmRemove = null;
+    await this.work(cx, `Removing ${pkg.name}…`, async () => {
+      const res = await this.helper(["remove", pkg.id]);
+      if (!res.ok) {
+        throw new Error(res.error || "Could not remove package");
+      }
+      notify({ title: "Removed", body: `${pkg.name} removed. Backup retained in data/mods-plus/backups/`, level: "success" });
+      this.view = "catalog";
+      await this.loadCatalog(cx);
+    });
+  }
+
+  async runUpdateCheck(cx, userInitiated = true) {
+    await this.work(cx, "Checking for updates…", async () => {
+      const res = await this.helper(["check-updates"]);
+      this.preparedCount = res.count || 0;
+      this.hasUpdate = this.preparedCount > 0;
+      await this.loadSettings(cx);
+      await this.loadCatalog(cx);
+      if (userInitiated) {
+        this.message = res.count > 0 ? `Found ${res.count} update(s) ready to apply.` : "All installed packages are up to date.";
+      }
+    });
+  }
+
+  async applyUpdate(pkg, cx) {
+    await this.work(cx, `Updating ${pkg.name}…`, async () => {
+      const res = await this.helper(["apply-update", pkg.id]);
+      if (!res.ok) throw new Error(res.error || "Failed to apply update");
+      notify({ title: "Updated", body: `${pkg.name} updated.`, level: "success" });
+      await this.showDetails(pkg, cx);
+      await this.loadCatalog(cx);
+    });
+  }
+
+  async copyActivationPrompt(pkg, cx) {
+    await this.work(cx, "Copying prompt…", async () => {
+      const res = await this.helper(["copy-prompt", pkg.id, "--catalog"]);
+      if (res.ok) {
+        this.message = "Prompt copied to clipboard.";
+      } else {
+        throw new Error("Failed to copy to clipboard.");
+      }
+    });
+  }
+
+  async openAgentTab(pkg, cx) {
+    await this.work(cx, "Launching agent…", async () => {
+      let agentCli = this.settings?.default_agent;
+      if (!agentCli) {
+        try {
+          const agents = await knownAgents();
+          agentCli = agents?.[0]?.command || agents?.[0]?.name || "codex";
+        } catch {
+          agentCli = "codex";
+        }
+      }
+      const details = this.selected || await this.helper(["details", pkg.id]);
+      const promptText = details.prompt;
+
+      run("tab.new", {
+        name: `Activate ${pkg.name}`,
+        argv: [agentCli],
+        task: promptText,
+      });
+
+      this.message = `Started agent tab with ${agentCli}.`;
+    });
+  }
+
+  openUrl(url) {
+    exec(opener(), [url]).catch(() => {});
+  }
+
+  // -------------------------------- UI Components --------------------------------
+
+  button(t, id, label, action, options = {}) {
+    const { primary = false, destructive = false, disabled = false } = options;
+    return div()
+      .id(id)
+      .px(10)
+      .h(26)
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded(6)
+      .flex_none()
+      .text_size(12)
+      .border(0.5)
+      .border_color(primary ? t.accent : destructive ? t.blocked : t.border)
+      .when(primary, (el) => el.bg(t.accent).text_color(t.accent_foreground).font_medium())
+      .when(destructive, (el) => el.bg(t.blocked).text_color(t.background).font_medium())
+      .when(!primary && !destructive, (el) =>
+        el.bg(t.background).text_color(t.foreground).hover((s) => s.bg(t.hover))
+      )
+      .when(disabled, (el) => el.opacity(0.5).cursor_default())
+      .on_click((_e, cx) => {
+        if (!disabled) {
+          cx.stop_propagation();
+          action(cx);
+        }
+      })
+      .child(label);
+  }
+
+  tabPill(t, id, label, active, action) {
+    return div()
+      .id(id)
+      .role("button")
+      .accessibility_label(label)
+      .px(11)
+      .h(26)
+      .flex()
+      .items_center()
+      .rounded(6)
+      .text_size(12)
+      .cursor_pointer()
+      .when(active, (el) => el.bg(t.selected).text_color(t.foreground).font_medium())
+      .when(!active, (el) => el.text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
+      .on_click((_e, cx) => action(cx))
+      .child(label);
+  }
+
+  // -------------------------------- Entry View --------------------------------
+
+  renderEntry(t) {
+    if (props()?.footer) {
+      const nodes = [layout()];
+      let collapsed = false;
+      while (nodes.length) {
+        const node = nodes.pop();
+        if (node?.id === "sidebar") {
+          collapsed = (node.size?.px ?? Infinity) < 160;
+          break;
+        }
+        nodes.push(...(node?.children ?? []));
+      }
+      const row = (id, icon, label, dim, action, badge = false) =>
+        h_flex().id(id).role("button").accessibility_label(label).h(28).px(8).gap(9)
+          .items_center().rounded(8).text_color(dim ? t.dim : t.muted)
+          .hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().tooltip(label)
+          .on_click(action).child(this.icon(icon, 14))
+          .when(!collapsed, el => el.child(label))
+          .when(badge, el => el.child(div().size(6).rounded_full().bg(t.accent)));
+      return v_flex().size_full().bg(t.chrome).border_t(0.5).border_color(t.border)
+        .px(8).pt(4).pb(8).text_size(13)
+        .child(row("plugins", "layers", "Plugins", false,
+          () => run("mod.open", { name: "mods-plus" }), this.hasUpdate))
+        .child(row("settings", "settings", "Settings", false,
+          () => run("app.settings"), Boolean(updates().app.ready)))
+        .child(row("machine", "plus", "Add machine", true,
+          () => run("mod.open", { name: "machine-add" })));
+    }
+    return h_flex()
+      .id("plugins-entry-btn")
+      .size_full()
+      .items_center()
+      .justify_center()
+      .child(
+        div()
+          .id("plugins-btn")
+          .size(26)
+          .flex_none()
+          .flex()
+          .items_center()
+          .justify_center()
+          .rounded(6)
+          .text_color(t.muted)
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .cursor_pointer()
+          .tooltip("Plugins")
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click(() => run("mod.open", { name: "mods-plus" }))
+          .child(this.icon("layers", 16))
+          .when(this.hasUpdate, (el) =>
+            el.child(
+              div()
+                .size(6)
+                .rounded_full()
+                .bg(t.accent)
+                .absolute()
+                .top(2)
+                .right(2)
+            )
+          )
+      );
+  }
+
+  // -------------------------------- Catalog View --------------------------------
+
+  icon(name, size = 16) {
+    return svg(`mods/workspace-chrome/${name}.svg`).size(size).flex_none();
+  }
+
+  iconButton(t, id, name, label, action) {
+    return div().id(id).role("button").accessibility_label(label).size(32).flex_none().flex().items_center().justify_center()
+      .rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+      .cursor_pointer().tooltip(label).on_click((_e, cx) => action(cx)).child(this.icon(name));
+  }
+
+  avatar(t, pkg) {
+    const avatar = pkg.avatar_path || this.media[pkg.id]?.avatar_path;
+    return avatar ? image(avatar).size(32).rounded(7).flex_none() :
+      div().size(32).rounded(7).bg(t.selected).flex().items_center().justify_center().child(pkg.author.slice(0, 1));
+  }
+
+  author(t, pkg) {
+    return h_flex().gap(10).items_center().min_w(0)
+      .child(this.avatar(t, pkg))
+      .child(div().text_size(12).text_color(t.muted).truncate().child(pkg.author));
+  }
+
+  stars(t, pkg) {
+    return h_flex().gap(4).flex_none().items_center().text_color(t.muted)
+      .child(svg("mods/mods-plus/star.svg").size(14)).child(String(pkg.stars || 0));
+  }
+
+  preview(t, pkg, width, height, contain = false) {
+    const asset = pkg.preview_path ? pkg : this.media[pkg.id];
+    let picture;
+    if (asset?.preview_path) {
+      const iw = asset.preview_width || width, ih = asset.preview_height || height;
+      const scale = contain ? Math.min(width / iw, height / ih) : Math.max(width / iw, height / ih);
+      picture = image(asset.preview_path).w(iw * scale).h(ih * scale).flex_none();
+    } else {
+      picture = div().p(20).text_size(12).text_color(t.muted)
+        .child(pkg.preview_url ? (asset ? "Preview unavailable" : "Loading preview…") : pkg.description);
+    }
+    return div().w(width).h(height).flex_none().overflow_hidden().bg(t.background)
+      .flex().items_center().justify_center().child(picture);
+  }
+
+  sortPicker(t) {
+    const options = [["popular", "Popular"], ["new", "Newest"]];
+    const choose = (key, cx) => {
+      this.sortOpen = false;
+      this.changeFilter("sort", key, cx);
+      this.sortFocus.focus();
+    };
+    const trigger = this.button(t, "sort", h_flex().gap(8).items_center()
+      .child(this.sort === "popular" ? "Popular" : "Newest").child(this.icon("chevron-down", 12)),
+      cx => { this.sortOpen = !this.sortOpen; this.sortHighlight = this.sort === "new" ? 1 : 0; cx.notify(); });
+    const list = v_flex().w(124).p(4).gap(2).bg(t.popover).border(0.5).border_color(t.border).rounded(6)
+      .track_focus(this.sortListFocus)
+      .on_key_down((e, cx) => {
+        const key = e.key.toLowerCase();
+        if (key === "up" || key === "down") {
+          this.sortHighlight = this.sortHighlight === 1 ? 0 : 1;
+        } else if (key === "enter") {
+          choose(options[this.sortHighlight || 0][0], cx);
+        } else if (key === "escape") {
+          this.sortOpen = false; this.sortFocus.focus();
+        } else return;
+        cx.stop_propagation(); cx.notify();
+      })
+      .children(options.map(([key, label], index) => this.tabPill(t, "sort-" + key, label,
+        index === (this.sortHighlight || 0), cx => choose(key, cx)).role("list_box_option")));
+    return Select.new("catalog-sort").accessibility_label("Sort packages")
+      .open(Boolean(this.sortOpen)).track_focus(this.sortFocus).content_focus_handle(this.sortListFocus)
+      .on_open_change((open, cx) => { this.sortOpen = open; this.sortHighlight = this.sort === "new" ? 1 : 0; cx.notify(); })
+      .child(Popup.new("sort-popup", trigger).anchor("top_right").when(this.sortOpen, el => el.content(list)));
+  }
+
+  renderCatalog(t) {
+    const packages = this.visiblePackages();
+    const columns = Math.max(1, Math.min(3, Math.floor((this.width - 32) / 280)));
+    const cardWidth = (this.width - 32 - (columns - 1) * 16) / columns;
+    const counts = collection => this.packages.filter(p => p.kind === this.tab && p.collection === collection).length;
+    const controls = h_flex().w_full().gap(8).items_center().flex_wrap()
+      .child(this.tabPill(t, "tab-mod", "Mods", this.tab === "mod", cx => this.changeFilter("tab", "mod", cx)))
+      .child(this.tabPill(t, "tab-layout", "Layouts", this.tab === "layout", cx => this.changeFilter("tab", "layout", cx)))
+      .child(div().flex_1())
+      .children([["all", "All"], ["installed", "Installed"], ["not_installed", "Not installed"]].map(([key, label]) =>
+        this.tabPill(t, "filter-" + key, label, this.filter === key, cx => this.changeFilter("filter", key, cx))));
+    const galleryBar = h_flex().w_full().gap(8).items_center().flex_wrap().pb(12).border_b(0.5).border_color(t.border)
+      .child(this.tabPill(t, "community", `Community  ${counts("community")}`, this.collection === "community", cx => this.changeFilter("collection", "community", cx)))
+      .child(this.tabPill(t, "examples", `Examples  ${counts("example")}`, this.collection === "example", cx => this.changeFilter("collection", "example", cx)))
+      .child(div().flex_1())
+      .child(this.iconButton(t, "settings", "settings", "Settings", cx => {
+        this.view = "settings"; cx.spawn(cx => this.loadSettings(cx)); cx.notify();
+      }))
+      .child(h_flex().w(Math.min(220, this.width * 0.22)).h(32).px(8).gap(6).items_center()
+        .rounded(6).border(0.5).border_color(t.border)
+        .child(this.icon("search", 14)).child(Input.new(this.search).text_size(12)))
+      .child(this.sortPicker(t));
+    const rows = [];
+    const shown = packages.slice(0, this.limit);
+    for (let i = 0; i < shown.length; i += columns) {
+      rows.push(h_flex().gap(16).flex_none().items_start()
+        .children(shown.slice(i, i + columns).map(pkg => this.renderCard(t, pkg, cardWidth))));
+    }
+    const scroll = v_flex().id("catalog-scroll").flex_1().min_h(0).gap(16).overflow_y_scrollbar()
+      .children(rows)
+      .when(!packages.length && !this.busy, el => el.child(div().py(32).text_color(t.muted).child("No packages found.")))
+      .when(packages.length > this.limit, el => el.child(this.button(t, "more", "Show more", cx => {
+        this.limit += 24; this.loadMedia(cx); cx.notify();
+      })));
+    return [controls, galleryBar, scroll];
+  }
+
+  renderCard(t, pkg, width) {
+    return v_flex().id("pkg-" + pkg.id).w(width).flex_none().rounded(12).overflow_hidden()
+      .bg(t.chrome).border(0.5).border_color(t.border)
+      .hover(s => s.bg(t.hover)).cursor_pointer()
+      .on_click((_e, cx) => cx.spawn(cx => this.showDetails(pkg, cx)))
+      .child(this.preview(t, pkg, width, width * 0.625))
+      .child(h_flex().w_full().p(14).gap(10).items_center()
+        .child(this.avatar(t, pkg))
+        .child(v_flex().flex_1().min_w(0).gap(6)
+          .child(div().text_size(16).truncate().child(pkg.name))
+          .child(div().text_size(12).text_color(t.muted).truncate().child(pkg.author)))
+        .child(v_flex().gap(8).items_end().text_size(12)
+          .child(this.stars(t, pkg))
+          .when(pkg.installed === true, el => el.child(div().text_color(t.muted).child("Installed")))
+          .when(pkg.has_update, el => el.child(div().text_color(t.accent).child("Update")))));
+  }
+
+  renderDetails(t) {
+    const pkg = this.selected;
+    if (!pkg) return [div().child("Loading details…")];
+    const preview = pkg.preview_path || this.media[pkg.id]?.preview_path;
+    const actions = h_flex().gap(8).flex_wrap()
+      .when(pkg.installed === false && !pkg.collision, el => el.child(this.button(t, "install", "Install",
+        cx => cx.spawn(cx => this.installPackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+      .when(pkg.installed && pkg.kind === "mod" && !pkg.enabled, el => el.child(this.button(t, "enable", "Enable",
+        cx => cx.spawn(cx => this.enablePackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+      .when(pkg.installed && pkg.kind === "layout", el => el.child(this.button(t, "use", "Use layout",
+        cx => cx.spawn(cx => this.useLayout(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+      .when(pkg.has_update, el => el.child(this.button(t, "update", "Apply update",
+        cx => cx.spawn(cx => this.applyUpdate(pkg, cx)), {disabled: Boolean(this.busy)})))
+      .when(pkg.installed, el => el.child(this.button(t, "remove",
+        this.confirmRemove === pkg.id ? "Confirm removal" : "Remove",
+        cx => cx.spawn(cx => this.removePackage(pkg, cx)), {disabled: Boolean(this.busy), destructive: this.confirmRemove === pkg.id})));
+    const summary = v_flex().flex_1().min_w(0).gap(16)
+      .child(div().text_size(28).font_medium().child(pkg.name))
+      .child(h_flex().gap(16).items_center().child(this.author(t, pkg)).child(this.stars(t, pkg)))
+      .child(div().text_size(16).text_color(t.muted).child(pkg.description))
+      .child(actions);
+    const prompt = v_flex().flex_1().min_w(0).gap(12)
+      .child(v_flex().p(18).gap(16).rounded(12).border(0.5).border_color(t.border)
+        .child(h_flex().items_center().justify_between().child(div().text_color(t.muted).child("Tell your agent"))
+          .child(this.button(t, "copy", "Copy", cx => cx.spawn(cx => this.copyActivationPrompt(pkg, cx)), {disabled: Boolean(this.busy)})))
+        .child(div().text_size(12).child(pkg.install_prompt)))
+      .child(h_flex().gap(8).flex_wrap()
+        .child(this.button(t, "github", "View on GitHub", () => this.openUrl(pkg.source_url)))
+        .child(this.button(t, "agent", "Open Agent tab", cx => cx.spawn(cx => this.openAgentTab(pkg, cx)), {disabled: Boolean(this.busy)})));
+    const body = v_flex().id("details-scroll").flex_1().min_h(0).gap(24).overflow_y_scrollbar()
+      .when(Boolean(preview), el => el.child(this.preview(t, pkg, this.width - 32,
+        Math.min(440, (this.width - 32) * 0.46), true).rounded(12)))
+      .child((this.width > 760 ? h_flex() : v_flex()).gap(24).flex_none().child(summary).child(prompt))
+      .when(Boolean(pkg.collision), el => el.child(div().text_color(t.muted).child(pkg.collision)))
+      .when(Boolean(pkg.recipe), el => el.child(v_flex().gap(12).flex_none()
+        .child(div().text_size(16).child("Recipe"))
+        .child(TextView.markdown("recipe-" + pkg.id, pkg.recipe).text_size(12))));
+    return [
+      h_flex().gap(8).items_center()
+        .child(this.iconButton(t, "back", "chevron-left", "Back to catalog", cx => { this.view = "catalog"; cx.notify(); }))
+        .child(div().text_color(t.muted).child(`${pkg.kind === "layout" ? "layouts" : "mods"} / ${pkg.author}`)),
+      body,
+    ];
+  }
+
+  // -------------------------------- Settings View --------------------------------
+
+  renderSettings(t) {
+    const s = this.settings || {};
+    const auto = Boolean(s.auto_update);
+    const interval = s.interval_hours || 24;
+
+    return [
+      // Settings Header
+      h_flex()
+        .gap(10)
+        .items_center()
+        .child(
+          this.button(t, "btn-back-settings", "← Catalog", (cx) => {
+            this.view = "catalog";
+            cx.notify();
+          })
+        )
+        .child(div().font_semibold().text_size(16).text_color(t.foreground).child("Settings")),
+
+      // Settings Cards
+      v_flex()
+        .id("settings-scroll")
+        .flex_1()
+        .min_h(0)
+        .gap(12)
+        .overflow_y_scrollbar()
+        // Auto update toggle
+        .child(
+          h_flex()
+            .p(14)
+            .justify_between()
+            .items_center()
+            .rounded(8)
+            .bg(t.chrome)
+            .border(0.5)
+            .border_color(t.border)
+            .child(
+              v_flex()
+                .gap(2)
+                .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Automatic update checks"))
+                .child(
+                  div()
+                    .text_size(12)
+                    .text_color(t.muted)
+                    .child("Download and verify candidates in the background. Active mods remain intact until applied.")
+                )
+            )
+            .child(
+              this.button(
+                t,
+                "btn-toggle-auto",
+                auto ? "Enabled" : "Disabled",
+                async (cx) => {
+                  this.settings = await this.helper(["settings", "--auto-update", (!auto).toString()]);
+                  cx.notify();
+                },
+                { primary: auto }
+              )
+            )
+        )
+        // Interval selector
+        .child(
+          h_flex()
+            .p(14)
+            .justify_between()
+            .items_center()
+            .rounded(8)
+            .bg(t.chrome)
+            .border(0.5)
+            .border_color(t.border)
+            .child(
+              v_flex()
+                .gap(2)
+                .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Check interval"))
+                .child(
+                  div().text_size(12).text_color(t.muted).child("How frequently Mods Plus checks for upstream updates while Herdr is running.")
+                )
+            )
+            .child(
+              h_flex()
+                .gap(4)
+                .children(
+                  [1, 6, 12, 24].map((hours) =>
+                    this.button(
+                      t,
+                      `btn-interval-${hours}`,
+                      `${hours}h`,
+                      async (cx) => {
+                        this.settings = await this.helper(["settings", "--interval", hours.toString()]);
+                        cx.notify();
+                      },
+                      { primary: interval === hours }
+                    )
+                  )
+                )
+            )
+        )
+        // Manual Check and Prepared Updates
+        .child(
+          h_flex()
+            .p(14)
+            .justify_between()
+            .items_center()
+            .rounded(8)
+            .bg(t.chrome)
+            .border(0.5)
+            .border_color(t.border)
+            .child(
+              v_flex()
+                .gap(2)
+                .child(div().font_semibold().text_size(13).text_color(t.foreground).child("Manual check"))
+                .child(
+                  div()
+                    .text_size(12)
+                    .text_color(t.muted)
+                    .child(
+                      this.preparedCount > 0
+                        ? `${this.preparedCount} update candidate(s) prepared and verified.`
+                        : "Check upstream repositories immediately for newer releases."
+                    )
+                )
+            )
+            .child(
+              h_flex()
+                .gap(6)
+                .child(
+                  this.button(t, "btn-check-now", "Check now", (cx) => this.runUpdateCheck(cx, true))
+                )
+            )
+        ),
+    ];
+  }
+
+  // -------------------------------- Main Render --------------------------------
+
+  render(_cx) {
+    const t = theme();
+    if (this.entry) {
+      return this.renderEntry(t);
+    }
+
+    const content =
+      this.view === "details"
+        ? this.renderDetails(t)
+        : this.view === "settings"
+        ? this.renderSettings(t)
+        : this.renderCatalog(t);
+
+    return v_flex()
+      .id("mods-plus-root")
+      .text_size(12)
+      .on_size_change((size, cx) => {
+        const width = size.width / (Number(settings().zoom) || 1);
+        if (Math.abs(this.width - width) > 1) { this.width = width; cx.notify(); }
+      })
+      .track_focus(this.handle)
+      .size_full()
+      .p(16)
+      .gap(12)
+      .bg(t.canvas)
+      .text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") {
+          if (this.view === "details" || this.view === "settings") {
+            this.view = "catalog";
+          } else if (props()?.overlay) {
+            closeOverlay(props().overlay);
+          }
+          cx.stop_propagation();
+          cx.notify();
+        }
+      })
+      // Dialog Title Row
+      .child(
+        h_flex()
+          .gap(6)
+          .items_center()
+          .child(div().text_size(16).font_semibold().pr(8).child("Plugins"))
+          .child(div().flex_1())
+          .child(
+            div()
+              .text_size(12)
+              .text_color(t.dim)
+              .child("Esc")
+          )
+      )
+      .children(content)
+      // Busy & Status message banner
+      .when(Boolean(this.busy), (el) =>
+        el.child(
+          div().text_size(12).text_color(t.accent).child(this.busy)
+        )
+      )
+      .when(Boolean(this.message) && !this.busy, (el) =>
+        el.child(
+          div().text_size(12).text_color(t.muted).child(this.message)
+        )
+      );
+  }
+}
