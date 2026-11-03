@@ -3,7 +3,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState, TextView, Select, Popup } from "gpui-base";
-import { exec, appHome, props, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates } from "herdr";
+import { exec, appHome, props, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates, shared, setShared } from "herdr";
 
 const short = (sha) => (sha ? sha.slice(0, 7) : "?");
 const opener = () => (window()?.platform === "macos" ? "open" : window()?.platform === "windows" ? "explorer" : "xdg-open");
@@ -11,14 +11,15 @@ const opener = () => (window()?.platform === "macos" ? "open" : window()?.platfo
 export default class ModsPlus extends View {
   init(_props, cx) {
     this.entry = Boolean(props()?.entry);
-    this.hasUpdate = false;
     this.preparedCount = 0;
     this.checking = false;
+    this.savingSettings = false;
+    this.workDepth = 0;
     this.busy = null;
     this.message = null;
 
     if (this.entry) {
-      // Entry button in layout header: manages scheduled background checks while layout is loaded
+      // The footer owns scheduling while its layout is loaded.
       cx.spawn(cx => this.checkOverdue(cx));
       cx.timer.every(10 * 60 * 1000, (cx) => cx.spawn(cx => this.checkOverdue(cx)));
       return;
@@ -76,6 +77,7 @@ export default class ModsPlus extends View {
   }
 
   async work(cx, label, fn) {
+    this.workDepth += 1;
     this.busy = label;
     this.message = null;
     cx.notify();
@@ -84,21 +86,20 @@ export default class ModsPlus extends View {
     } catch (e) {
       this.message = String(e?.message ?? e);
     }
-    this.busy = null;
+    this.workDepth -= 1;
+    if (!this.workDepth) this.busy = null;
     cx.notify();
   }
 
   // -------------------------------- Data loading --------------------------------
 
   async checkOverdue(cx) {
+    if (this.checking) return;
     try {
       const s = await this.helper(["settings"]);
-      this.preparedCount = s.prepared_updates_count || 0;
-      this.hasUpdate = this.preparedCount > 0;
+      this.acceptSettings(s);
       if (s.overdue) {
-        const r = await this.helper(["check-updates"]);
-        this.preparedCount = r.count || 0;
-        this.hasUpdate = this.preparedCount > 0;
+        await this.runUpdateCheck(cx, false);
       }
       cx.notify();
     } catch {
@@ -158,12 +159,30 @@ export default class ModsPlus extends View {
 
   async loadSettings(cx) {
     try {
-      this.settings = await this.helper(["settings"]);
-      this.preparedCount = this.settings?.prepared_updates_count || 0;
-      cx.notify();
+      this.acceptSettings(await this.helper(["settings"]));
     } catch (e) {
       this.message = `Settings load error: ${e.message}`;
     }
+    cx.notify();
+  }
+
+  acceptSettings(value) {
+    this.settings = value;
+    this.preparedCount = value.prepared_updates_count || 0;
+    setShared("mods-plus.updates", { count: this.preparedCount });
+  }
+
+  async saveSettings(args, cx) {
+    if (this.savingSettings || this.checking) return;
+    this.savingSettings = true;
+    let saved = false;
+    await this.work(cx, "Saving settings…", async () => {
+      this.acceptSettings(await this.helper(["settings", ...args]));
+      saved = true;
+    });
+    this.savingSettings = false;
+    cx.notify();
+    if (saved && this.settings?.overdue) await this.runUpdateCheck(cx, false);
   }
 
   async showDetails(pkg, cx) {
@@ -224,20 +243,29 @@ export default class ModsPlus extends View {
       notify({ title: "Removed", body: `${pkg.name} removed. Backup retained in data/mods-plus/backups/`, level: "success" });
       this.view = "catalog";
       await this.loadCatalog(cx);
+      await this.loadSettings(cx);
     });
   }
 
   async runUpdateCheck(cx, userInitiated = true) {
+    if (this.checking) return;
+    this.checking = true;
     await this.work(cx, "Checking for updates…", async () => {
-      const res = await this.helper(["check-updates"]);
-      this.preparedCount = res.count || 0;
-      this.hasUpdate = this.preparedCount > 0;
+      const res = await this.helper(userInitiated ? ["check-updates"] : ["check-updates", "--if-overdue"]);
+      setShared("mods-plus.updates", { count: res.count || 0 });
       await this.loadSettings(cx);
-      await this.loadCatalog(cx);
-      if (userInitiated) {
-        this.message = res.count > 0 ? `Found ${res.count} update(s) ready to apply.` : "All installed packages are up to date.";
+      const settingsError = this.message;
+      if (!this.entry) {
+        await this.loadCatalog(cx);
+        const summary = res.count > 0 ? `${res.count} update(s) available.` : "All installed packages are up to date.";
+        const result = res.errors?.length
+          ? `Could not check ${res.errors.length} package(s). ${res.errors.map(e => `${e.id}: ${e.error}`).join("\n")}`
+          : summary;
+        this.message = [result, settingsError, this.message].filter(Boolean).join("\n");
       }
     });
+    this.checking = false;
+    cx.notify();
   }
 
   async applyUpdate(pkg, cx) {
@@ -247,6 +275,7 @@ export default class ModsPlus extends View {
       notify({ title: "Updated", body: `${pkg.name} updated.`, level: "success" });
       await this.showDetails(pkg, cx);
       await this.loadCatalog(cx);
+      await this.loadSettings(cx);
     });
   }
 
@@ -295,6 +324,8 @@ export default class ModsPlus extends View {
     const { primary = false, destructive = false, disabled = false } = options;
     return div()
       .id(id)
+      .role("button")
+      .cursor_pointer()
       .px(10)
       .h(26)
       .flex()
@@ -311,9 +342,11 @@ export default class ModsPlus extends View {
         el.bg(t.background).text_color(t.foreground).hover((s) => s.bg(t.hover))
       )
       .when(disabled, (el) => el.opacity(0.5).cursor_default())
+      .when(!disabled, el => el.active(s => s.opacity(0.7)))
+      .transition("opacity", { duration: 250, easing: "ease-out" })
       .on_click((_e, cx) => {
+        cx.stop_propagation();
         if (!disabled) {
-          cx.stop_propagation();
           action(cx);
         }
       })
@@ -341,6 +374,7 @@ export default class ModsPlus extends View {
   // -------------------------------- Entry View --------------------------------
 
   renderEntry(t) {
+    const count = Number(shared("mods-plus.updates")?.count) || 0;
     if (props()?.footer) {
       const nodes = [layout()];
       let collapsed = false;
@@ -356,13 +390,17 @@ export default class ModsPlus extends View {
         h_flex().id(id).role("button").accessibility_label(label).h(28).px(8).gap(9)
           .items_center().rounded(8).text_color(dim ? t.dim : t.muted)
           .hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().tooltip(label)
-          .on_click(action).child(this.icon(icon, 14))
-          .when(!collapsed, el => el.child(label))
-          .when(badge, el => el.child(div().size(6).rounded_full().bg(t.accent)));
+          .on_click(action)
+          .when(!(collapsed && id === "plugins" && badge), el => el.child(this.icon(icon, 14)))
+          .when(!collapsed, el => el.child(label).child(div().flex_1()))
+          .when(id === "plugins" && this.checking && !collapsed, el => el.child(this.spinner()))
+          .when(Boolean(badge), el => el.child(typeof badge === "number"
+            ? this.updateBadge(t, badge)
+            : div().size(6).rounded_full().bg(t.accent)));
       return v_flex().size_full().bg(t.chrome).border_t(0.5).border_color(t.border)
         .px(8).pt(4).pb(8).text_size(13)
         .child(row("plugins", "layers", "Plugins", false,
-          () => run("mod.open", { name: "mods-plus" }), this.hasUpdate))
+          () => run("mod.open", { name: "mods-plus" }), count))
         .child(row("settings", "settings", "Settings", false,
           () => run("app.settings"), Boolean(updates().app.ready)))
         .child(row("machine", "plus", "Add machine", true,
@@ -389,17 +427,7 @@ export default class ModsPlus extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click(() => run("mod.open", { name: "mods-plus" }))
           .child(this.icon("layers", 16))
-          .when(this.hasUpdate, (el) =>
-            el.child(
-              div()
-                .size(6)
-                .rounded_full()
-                .bg(t.accent)
-                .absolute()
-                .top(2)
-                .right(2)
-            )
-          )
+          .when(count > 0, el => el.child(this.updateBadge(t, count)))
       );
   }
 
@@ -407,6 +435,16 @@ export default class ModsPlus extends View {
 
   icon(name, size = 16) {
     return svg(`mods/workspace-chrome/${name}.svg`).size(size).flex_none();
+  }
+
+  spinner() {
+    return this.icon("spinner", 14).spin(900);
+  }
+
+  updateBadge(t, count) {
+    return div().min_w(18).h(18).px(4).flex_none().rounded_full().flex().items_center().justify_center()
+      .text_size(12).font_medium().bg(t.accent).text_color(t.accent_foreground)
+      .child(String(count));
   }
 
   iconButton(t, id, name, label, action) {
@@ -441,6 +479,7 @@ export default class ModsPlus extends View {
       picture = image(asset.preview_path).w(iw * scale).h(ih * scale).flex_none();
     } else {
       picture = div().p(20).text_size(12).text_color(t.muted)
+        .when(Boolean(pkg.preview_url && !asset), el => el.child(this.spinner()))
         .child(pkg.preview_url ? (asset ? "Preview unavailable" : "Loading preview…") : pkg.description);
     }
     return div().w(width).h(height).flex_none().overflow_hidden().bg(t.background)
@@ -583,6 +622,8 @@ export default class ModsPlus extends View {
     const s = this.settings || {};
     const auto = Boolean(s.auto_update);
     const interval = s.interval_hours || 24;
+    const disabled = !this.settings || this.savingSettings || this.checking;
+    const count = Number(shared("mods-plus.updates")?.count) || 0;
 
     return [
       // Settings Header
@@ -630,11 +671,8 @@ export default class ModsPlus extends View {
                 t,
                 "btn-toggle-auto",
                 auto ? "Enabled" : "Disabled",
-                async (cx) => {
-                  this.settings = await this.helper(["settings", "--auto-update", (!auto).toString()]);
-                  cx.notify();
-                },
-                { primary: auto }
+                cx => cx.spawn(cx => this.saveSettings(["--auto-update", (!auto).toString()], cx)),
+                { primary: auto, disabled }
               )
             )
         )
@@ -665,11 +703,8 @@ export default class ModsPlus extends View {
                       t,
                       `btn-interval-${hours}`,
                       `${hours}h`,
-                      async (cx) => {
-                        this.settings = await this.helper(["settings", "--interval", hours.toString()]);
-                        cx.notify();
-                      },
-                      { primary: interval === hours }
+                      cx => cx.spawn(cx => this.saveSettings(["--interval", hours.toString()], cx)),
+                      { primary: interval === hours, disabled }
                     )
                   )
                 )
@@ -694,8 +729,8 @@ export default class ModsPlus extends View {
                     .text_size(12)
                     .text_color(t.muted)
                     .child(
-                      this.preparedCount > 0
-                        ? `${this.preparedCount} update candidate(s) prepared and verified.`
+                      count > 0
+                        ? `${count} update candidate(s) prepared and verified.`
                         : "Check upstream repositories immediately for newer releases."
                     )
                 )
@@ -704,7 +739,9 @@ export default class ModsPlus extends View {
               h_flex()
                 .gap(6)
                 .child(
-                  this.button(t, "btn-check-now", "Check now", (cx) => this.runUpdateCheck(cx, true))
+                  this.button(t, "btn-check-now",
+                    this.checking ? h_flex().gap(6).items_center().child(this.spinner()).child("Checking…") : "Check now",
+                    cx => cx.spawn(cx => this.runUpdateCheck(cx, true)), { disabled })
                 )
             )
         ),
@@ -768,7 +805,7 @@ export default class ModsPlus extends View {
       // Busy & Status message banner
       .when(Boolean(this.busy), (el) =>
         el.child(
-          div().text_size(12).text_color(t.accent).child(this.busy)
+          h_flex().gap(8).items_center().text_size(12).text_color(t.accent).child(this.spinner()).child(this.busy)
         )
       )
       .when(Boolean(this.message) && !this.busy, (el) =>

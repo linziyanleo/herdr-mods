@@ -10,6 +10,7 @@ import argparse
 
 # Also supports loading the helper by absolute path from tests.
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import difflib
 import fcntl
 import hashlib
@@ -75,8 +76,7 @@ def file_lock(lock_path: str, timeout: float = 10.0):
             except (BlockingIOError, OSError):
                 time.sleep(0.1)
         if not locked:
-            # Continue even if lock timed out to avoid blocking UI operations
-            pass
+            raise TimeoutError("Another package operation is running. Try again shortly.")
         yield
     finally:
         if locked:
@@ -279,10 +279,15 @@ class PackageManager:
                     return json.load(f)
             raise e
 
-    def branch_tree(self, repo: str, branch: str = "HEAD"):
+    def branch_tree(self, repo: str, branch: str = "HEAD", refresh=False):
         def fetch():
             t = self._gh_api(f"repos/{repo}/git/trees/{urllib.parse.quote(branch, safe='')}?recursive=1")
-            return {e["path"]: e["sha"] for e in t.get("tree", []) if e.get("type") == "blob"}
+            if t.get("truncated"):
+                raise ValueError("Upstream file listing is incomplete")
+            return {**{e["path"]: e["sha"] for e in t.get("tree", []) if e.get("type") == "blob"},
+                    "HEAD": t.get("sha", "unknown")}
+        if refresh:
+            return fetch()
         slug = repo.replace("/", "-")
         return self._cached(f"tree-{slug}-{hashlib.sha256(branch.encode()).hexdigest()[:12]}.json", DAY, fetch)
 
@@ -295,8 +300,11 @@ class PackageManager:
         r = self._gh_api(f"repos/{repo}/git/blobs/{sha}")
         import base64
         content = base64.b64decode(r["content"])
-        with open(cache_path, "wb") as f:
+        # Parallel packages may request the same blob. Readers only see complete files.
+        with tempfile.NamedTemporaryFile(dir=os.path.dirname(cache_path), delete=False) as f:
+            temp = f.name
             f.write(content)
+        os.replace(temp, cache_path)
         return content
 
     # -------------------------------- Catalog & Association --------------------------------
@@ -636,42 +644,57 @@ Instructions:
     def check_updates(self) -> dict:
         """Checks upstream for newer commits, stages and verifies candidate updates."""
         candidates = []
-        now = time.time()
-        self.settings["last_check"] = now
-        self._save_settings()
+        errors = []
+        installed = [(pkg_id, record) for pkg_id, record in self.records.items() if record.get("installed")]
+        sources = {(record.get("repo"), record.get("ref", "HEAD")) for _, record in installed}
 
-        for pkg_id, record in list(self.records.items()):
-            if not record.get("installed"):
-                continue
+        def fetch_tree(source):
+            try:
+                return self.branch_tree(*source, refresh=True)
+            except Exception as error:
+                return error
+
+        # Fetch each source once, then prepare independent packages in parallel.
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            trees = dict(zip(sources, pool.map(fetch_tree, sources)))
+            results = pool.map(lambda item: self._check_update(*item, trees), installed)
+            for pkg_id, candidate, error in results:
+                if candidate:
+                    candidates.append(candidate)
+                if error:
+                    errors.append({"id": pkg_id, "error": error})
+
+        self.settings = self._load_settings()
+        if not errors:
+            self.settings["last_check"] = time.time()
+        self._save_settings()
+        self._save_records()
+        return {"ok": not errors, "candidates": candidates,
+                "count": self.get_settings()["prepared_updates_count"], "errors": errors}
+
+    def _check_update(self, pkg_id, record, trees):
+        try:
             repo = record.get("repo")
             subdir = record.get("subdir", "")
-            current_commit = record.get("commit")
-            branch = record.get("ref", "main")
-
-            try:
-                tree = self.branch_tree(repo, branch)
-                latest_commit = tree.get("HEAD", "unknown")
-            except Exception:
-                continue
+            tree = trees[(repo, record.get("ref", "HEAD"))]
+            if isinstance(tree, Exception):
+                raise tree
+            latest_commit = tree.get("HEAD", "unknown")
 
             sub_prefix = (subdir + "/") if subdir else ""
-            has_diff = False
-
-            # Check if upstream tree shas for package files differ
-            for rel, local_sha in record.get("files", {}).items():
-                remote_path = sub_prefix + rel
-                if remote_path in tree and tree[remote_path] != local_sha:
-                    has_diff = True
-                    break
-
-            if not has_diff:
-                record["has_update"] = False
-                continue
+            slug = pkg_id.replace("/", "-")
+            # Clear stale or partial candidates before preparing a new one.
+            record["has_update"] = False
+            rmtree(os.path.join(self.updates_dir, slug))
+            upstream = {path[len(sub_prefix):]: sha for path, sha in tree.items()
+                        if path != "HEAD" and path.startswith(sub_prefix) and not ignored(path[len(sub_prefix):])}
+            # Association records own runtime files only; unrelated repository files
+            # must not make an unchanged package appear out of date.
+            if not any(rel in upstream and upstream[rel] != sha for rel, sha in record.get("files", {}).items()):
+                return pkg_id, None, None
 
             # Stage update candidate
-            slug = pkg_id.replace("/", "-")
             cand_dir = os.path.join(self.updates_dir, slug, "candidate")
-            rmtree(cand_dir)
             os.makedirs(cand_dir, exist_ok=True)
 
             cand_hashes = {}
@@ -694,15 +717,18 @@ Instructions:
             valid = True
             for mod_name in record.get("mods", []):
                 staged_mod = os.path.join(cand_dir, "mods", mod_name)
-                if os.path.isdir(staged_mod):
+                if os.path.isfile(os.path.join(staged_mod, "main.js")):
                     chk = subprocess.run(["herdr-app", "check", staged_mod], capture_output=True, text=True)
                     if chk.returncode != 0:
                         valid = False
                         break
+                else:
+                    valid = False
+                    break
 
             if not valid:
                 rmtree(cand_dir)
-                continue
+                raise ValueError("Update candidate failed herdr-app check")
 
             # 3-Way Merge check: compare baseline, local active files, and candidate
             conflicts = []
@@ -726,7 +752,6 @@ Instructions:
                             if not merged:
                                 conflicts.append(f"mods/{mod_name}/{rel}")
 
-            record["has_update"] = True
             cand_meta = {
                 "id": pkg_id,
                 "latest_commit": latest_commit,
@@ -738,15 +763,15 @@ Instructions:
             with open(os.path.join(self.updates_dir, slug, "meta.json"), "w", encoding="utf-8") as f:
                 json.dump(cand_meta, f, indent=2)
 
-            candidates.append({
+            record["has_update"] = True
+            return pkg_id, {
                 "id": pkg_id,
                 "latest_commit": short_sha(latest_commit),
                 "conflicts": conflicts,
                 "locally_modified": locally_modified,
-            })
-
-        self._save_records()
-        return {"ok": True, "candidates": candidates, "count": len(candidates)}
+            }, None
+        except Exception as error:
+            return pkg_id, None, str(error)
 
     def _three_way_merge(self, local_path: str, base_sha: str, cand_sha: str, repo: str) -> bool:
         """Attempts diff3 merge, preserving local modifications without conflicts."""
@@ -828,7 +853,10 @@ Instructions:
         overdue = bool(self.settings.get("auto_update") and (last is None or (now - last) >= interval_secs))
 
         # Check prepared updates
-        prepared_count = len([d for d in os.listdir(self.updates_dir) if os.path.isdir(os.path.join(self.updates_dir, d))])
+        prepared_count = sum(1 for pkg_id, record in self.records.items()
+                             if record.get("installed") and record.get("has_update")
+                             and os.path.isfile(os.path.join(self.updates_dir, pkg_id.replace("/", "-"), "meta.json"))
+                             and os.path.isdir(os.path.join(self.updates_dir, pkg_id.replace("/", "-"), "candidate")))
 
         return {
             **self.settings,
@@ -893,7 +921,8 @@ def main():
     p_remove.add_argument("--force", action="store_true")
 
     # check-updates
-    sub.add_parser("check-updates")
+    p_check = sub.add_parser("check-updates")
+    p_check.add_argument("--if-overdue", action="store_true")
 
     # apply-update
     p_apply = sub.add_parser("apply-update")
@@ -908,7 +937,12 @@ def main():
     args = parser.parse_args()
     mgr = PackageManager(args.app_home)
 
-    with file_lock(mgr.lock_file):
+    readonly = args.command == "media" or (args.command == "settings" and
+               args.auto_update is None and args.interval is None and args.agent is None)
+    with contextlib.nullcontext() if readonly else file_lock(mgr.lock_file):
+        # Another helper may have committed records while this process waited.
+        mgr.records = mgr._load_records()
+        mgr.settings = mgr._load_settings()
         result = None
         if args.command == "catalog":
             pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter)
@@ -946,7 +980,8 @@ def main():
         elif args.command == "remove":
             result = mgr.remove(args.id, force=args.force)
         elif args.command == "check-updates":
-            result = mgr.check_updates()
+            result = ({"ok": True, "count": mgr.get_settings()["prepared_updates_count"], "errors": []}
+                      if args.if_overdue and not mgr.get_settings()["overdue"] else mgr.check_updates())
         elif args.command == "apply-update":
             result = mgr.apply_update(args.id)
         elif args.command == "settings":

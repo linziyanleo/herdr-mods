@@ -90,7 +90,7 @@ class TestAcceptance(unittest.TestCase):
         self.catalog_patch = patch.object(helper.gallery, "official_packages", return_value=fixtures)
         self.catalog_patch.start()
         self.addCleanup(self.catalog_patch.stop)
-        def tree(repo, branch="HEAD"):
+        def tree(repo, branch="HEAD", refresh=False):
             with open(os.path.join(self.mgr.cache_dir, f"tree-{repo.replace('/', '-')}.json")) as f:
                 return json.load(f)
         self.mgr.branch_tree = tree
