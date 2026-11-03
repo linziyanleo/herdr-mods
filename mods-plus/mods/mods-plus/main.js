@@ -498,8 +498,8 @@ export default class ModsPlus extends View {
   }
 
   updateBadge(t, count) {
-    return div().min_w(16).h(16).px(3).flex_none().rounded_full().flex().items_center().justify_center()
-      .text_size(11).font_medium().bg(t.accent).text_color(t.accent_foreground)
+    return div().min_w(12).h(12).px(2).flex_none().rounded_full().flex().items_center().justify_center()
+      .text_size(8).font_medium().bg(t.accent).text_color(t.accent_foreground)
       .child(String(count));
   }
 
