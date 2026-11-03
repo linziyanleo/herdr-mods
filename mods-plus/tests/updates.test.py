@@ -96,6 +96,43 @@ class UpdatesTest(unittest.TestCase):
                 with helper.file_lock(self.mgr.lock_file, timeout=0.01):
                     self.fail("Mutation entered without lock")
 
+    def test_files_within_one_package_download_concurrently(self):
+        self.package("suite")
+        barrier = threading.Barrier(4, timeout=5)
+        files = {"suite/mods/suite/main.js": self.sha2,
+                 **{f"suite/mods/suite/{n}.txt": str(n) for n in range(3)}}
+
+        def blob(repo, sha):
+            barrier.wait()
+            return self.v2 if sha == self.sha2 else sha.encode()
+
+        with patch.object(self.mgr, "branch_tree", return_value=files), patch.object(self.mgr, "blob_bytes", side_effect=blob):
+            result = self.mgr.check_updates()
+        self.assertTrue(result["ok"], result["errors"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["settings"]["prepared_update_ids"], ["owner/suite/suite"])
+
+    def test_legacy_hours_and_custom_minutes_persist_and_schedule(self):
+        Path(self.mgr.settings_file).write_text(json.dumps({"auto_update": True, "interval_hours": 12, "last_check": 1000}))
+        mgr = helper.PackageManager(self.temp.name)
+        self.assertEqual(mgr.get_settings()["interval_value"], 12)
+        self.assertEqual(mgr.get_settings()["interval_unit"], "hr")
+        mgr.update_settings(interval_value=5, interval_unit="min")
+        mgr = helper.PackageManager(self.temp.name)
+        with patch.object(helper.time, "time", return_value=1299):
+            self.assertFalse(mgr.get_settings()["overdue"])
+        with patch.object(helper.time, "time", return_value=1300):
+            self.assertTrue(mgr.get_settings()["overdue"])
+        self.assertNotIn("interval_hours", json.loads(Path(mgr.settings_file).read_text()))
+
+    def test_invalid_intervals_leave_persisted_settings_unchanged(self):
+        self.mgr.update_settings(interval_value=30, interval_unit="min")
+        before = Path(self.mgr.settings_file).read_bytes()
+        for value, unit in [(0, "min"), (-1, "hr"), (1.5, "hr"), (True, "min"), (1, "seconds")]:
+            with self.subTest(value=value, unit=unit), self.assertRaises(ValueError):
+                self.mgr.update_settings(interval_value=value, interval_unit=unit)
+            self.assertEqual(Path(self.mgr.settings_file).read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

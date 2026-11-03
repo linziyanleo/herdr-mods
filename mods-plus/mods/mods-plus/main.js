@@ -2,7 +2,7 @@
 // All package operations are handled through helper.py with validation and protection.
 
 import { View, div, image, svg } from "gpui-kit";
-import { h_flex, v_flex, Input, InputState, TextView, Select, Popup } from "gpui-base";
+import { h_flex, v_flex, Input, InputState, TextView, Select, Popup, Switch } from "gpui-base";
 import { exec, appHome, props, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates, shared, setShared } from "herdr";
 
 const short = (sha) => (sha ? sha.slice(0, 7) : "?");
@@ -21,7 +21,7 @@ export default class ModsPlus extends View {
     if (this.entry) {
       // The footer owns scheduling while its layout is loaded.
       cx.spawn(cx => this.checkOverdue(cx));
-      cx.timer.every(10 * 60 * 1000, (cx) => cx.spawn(cx => this.checkOverdue(cx)));
+      cx.timer.every(60 * 1000, (cx) => cx.spawn(cx => this.checkOverdue(cx)));
       return;
     }
 
@@ -51,6 +51,7 @@ export default class ModsPlus extends View {
       this.loadMedia(cx);
       cx.notify();
     });
+    this.initIntervalInput();
     this.handle.focus();
 
     cx.spawn(async (cx) => {
@@ -170,6 +171,63 @@ export default class ModsPlus extends View {
     this.settings = value;
     this.preparedCount = value.prepared_updates_count || 0;
     setShared("mods-plus.updates", { count: this.preparedCount });
+    if (value.prepared_update_ids) {
+      const ids = new Set(value.prepared_update_ids);
+      this.packages = (this.packages || []).map(pkg => ({ ...pkg, has_update: ids.has(pkg.id) }));
+      if (this.selected) this.selected.has_update = ids.has(this.selected.id);
+    }
+    if (this.intervalInput && !this.intervalDirty) {
+      this.intervalUnit = value.interval_unit;
+      const text = String(value.interval_value);
+      if (this.intervalInput.value() !== text) this.intervalInput.set_value(text);
+    }
+  }
+
+  initIntervalInput() {
+    this.intervalUnit = "hr";
+    this.intervalInput = InputState.new({ value: "24" });
+    this.intervalInput.on("change", (_e, cx) => {
+      this.intervalDirty = this.intervalChanged();
+      this.intervalError = null;
+      cx.notify();
+    });
+    this.intervalInput.on("blur", (_e, cx) => this.queueIntervalSave(cx));
+    this.intervalInput.on("submit", (_e, cx) => this.queueIntervalSave(cx));
+  }
+
+  intervalChanged() {
+    return this.intervalInput.value().trim() !== String(this.settings?.interval_value)
+      || this.intervalUnit !== this.settings?.interval_unit;
+  }
+
+  queueIntervalSave(cx, unit = this.intervalUnit) {
+    this.intervalUnit = unit;
+    this.intervalDirty = this.intervalChanged();
+    this.intervalSaveTask?.cancel();
+    if (this.intervalDirty) {
+      // Coalesce the input's blur with a click on its adjacent unit control.
+      this.intervalSaveTask = cx.timer.after(250, cx => cx.spawn(cx => this.saveInterval(cx)));
+    }
+    cx.notify();
+  }
+
+  async saveInterval(cx) {
+    if (this.savingSettings) { this.queueIntervalSave(cx); return; }
+    const text = this.intervalInput.value().trim();
+    const value = Number(text);
+    if (!/^\d+$/.test(text) || !Number.isSafeInteger(value) || value < 1) {
+      this.intervalError = "Enter a positive whole number.";
+      cx.notify();
+      return;
+    }
+    if (!this.intervalChanged()) return;
+    const saved = await this.saveSettings(["--interval-value", String(value), "--interval-unit", this.intervalUnit], cx);
+    if (saved) {
+      this.intervalDirty = false;
+      this.intervalError = null;
+      this.acceptSettings(this.settings);
+    }
+    cx.notify();
   }
 
   async saveSettings(args, cx) {
@@ -183,6 +241,7 @@ export default class ModsPlus extends View {
     this.savingSettings = false;
     cx.notify();
     if (saved && this.settings?.overdue) await this.runUpdateCheck(cx, false);
+    return saved;
   }
 
   async showDetails(pkg, cx) {
@@ -252,16 +311,13 @@ export default class ModsPlus extends View {
     this.checking = true;
     await this.work(cx, "Checking for updates…", async () => {
       const res = await this.helper(userInitiated ? ["check-updates"] : ["check-updates", "--if-overdue"]);
-      setShared("mods-plus.updates", { count: res.count || 0 });
-      await this.loadSettings(cx);
-      const settingsError = this.message;
+      this.acceptSettings(res.settings);
       if (!this.entry) {
-        await this.loadCatalog(cx);
         const summary = res.count > 0 ? `${res.count} update(s) available.` : "All installed packages are up to date.";
         const result = res.errors?.length
           ? `Could not check ${res.errors.length} package(s). ${res.errors.map(e => `${e.id}: ${e.error}`).join("\n")}`
           : summary;
-        this.message = [result, settingsError, this.message].filter(Boolean).join("\n");
+        this.message = result;
       }
     });
     this.checking = false;
@@ -621,7 +677,6 @@ export default class ModsPlus extends View {
   renderSettings(t) {
     const s = this.settings || {};
     const auto = Boolean(s.auto_update);
-    const interval = s.interval_hours || 24;
     const disabled = !this.settings || this.savingSettings || this.checking;
     const count = Number(shared("mods-plus.updates")?.count) || 0;
 
@@ -667,13 +722,15 @@ export default class ModsPlus extends View {
                 )
             )
             .child(
-              this.button(
-                t,
-                "btn-toggle-auto",
-                auto ? "Enabled" : "Disabled",
-                cx => cx.spawn(cx => this.saveSettings(["--auto-update", (!auto).toString()], cx)),
-                { primary: auto, disabled }
-              )
+              Switch.new("btn-toggle-auto").accessibility_label("Automatic update checks")
+                .checked(auto).disabled(disabled || Boolean(this.intervalDirty))
+                .w(38).h(22).flex_none().relative().rounded(11).border(0.5)
+                .border_color(auto ? t.accent : t.border).bg(auto ? t.accent : t.background)
+                .cursor_pointer().when(disabled || this.intervalDirty, el => el.opacity(0.5).cursor_default())
+                .on_change((checked, cx) => cx.spawn(cx => this.saveSettings(["--auto-update", String(checked)], cx)))
+                .child(div().id("auto-update-thumb").absolute().top(3).left(auto ? 19 : 3)
+                  .size(16).rounded_full().bg(auto ? t.accent_foreground : t.foreground)
+                  .transition("left", { duration: 250, easing: "ease-out" }))
             )
         )
         // Interval selector
@@ -695,19 +752,15 @@ export default class ModsPlus extends View {
                 )
             )
             .child(
-              h_flex()
-                .gap(4)
-                .children(
-                  [1, 6, 12, 24].map((hours) =>
-                    this.button(
-                      t,
-                      `btn-interval-${hours}`,
-                      `${hours}h`,
-                      cx => cx.spawn(cx => this.saveSettings(["--interval", hours.toString()], cx)),
-                      { primary: interval === hours, disabled }
-                    )
-                  )
-                )
+              v_flex().gap(4).items_end()
+                .child(h_flex().gap(6).items_center()
+                  .child(Input.new(this.intervalInput).id("check-interval-value")
+                    .accessibility_label("Check interval").disabled(disabled)
+                    .w(72).h(28).px(8).text_size(12).rounded(6).bg(t.background)
+                    .border(0.5).border_color(this.intervalError ? t.blocked : t.border))
+                  .children(["min", "hr"].map(unit => this.button(t, `interval-${unit}`, unit,
+                    cx => this.queueIntervalSave(cx, unit), { primary: this.intervalUnit === unit, disabled }))))
+                .when(Boolean(this.intervalError), el => el.child(div().text_size(12).text_color(t.blocked).child(this.intervalError)))
             )
         )
         // Manual Check and Prepared Updates
@@ -741,7 +794,7 @@ export default class ModsPlus extends View {
                 .child(
                   this.button(t, "btn-check-now",
                     this.checking ? h_flex().gap(6).items_center().child(this.spinner()).child("Checking…") : "Check now",
-                    cx => cx.spawn(cx => this.runUpdateCheck(cx, true)), { disabled })
+                    cx => cx.spawn(cx => this.runUpdateCheck(cx, true)), { disabled: disabled || Boolean(this.intervalDirty) })
                 )
             )
         ),

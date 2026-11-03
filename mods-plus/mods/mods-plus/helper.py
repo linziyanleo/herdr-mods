@@ -134,13 +134,18 @@ class PackageManager:
     def _load_settings(self):
         defaults = {
             "auto_update": False,
-            "interval_hours": 24,
+            "interval_value": 24,
+            "interval_unit": "hr",
             "default_agent": None,
             "last_check": None,
         }
         try:
             with open(self.settings_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
+                if "interval_value" not in saved and "interval_hours" in saved:
+                    saved["interval_value"] = saved["interval_hours"]
+                    saved["interval_unit"] = "hr"
+                saved.pop("interval_hours", None)
                 defaults.update(saved)
         except (OSError, ValueError):
             pass
@@ -655,9 +660,9 @@ Instructions:
                 return error
 
         # Fetch each source once, then prepare independent packages in parallel.
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool, ThreadPoolExecutor(max_workers=8) as downloads:
             trees = dict(zip(sources, pool.map(fetch_tree, sources)))
-            results = pool.map(lambda item: self._check_update(*item, trees), installed)
+            results = pool.map(lambda item: self._check_update(*item, trees, downloads), installed)
             for pkg_id, candidate, error in results:
                 if candidate:
                     candidates.append(candidate)
@@ -669,10 +674,11 @@ Instructions:
             self.settings["last_check"] = time.time()
         self._save_settings()
         self._save_records()
-        return {"ok": not errors, "candidates": candidates,
-                "count": self.get_settings()["prepared_updates_count"], "errors": errors}
+        settings = self.get_settings()
+        return {"ok": not errors, "candidates": candidates, "settings": settings,
+                "count": settings["prepared_updates_count"], "errors": errors}
 
-    def _check_update(self, pkg_id, record, trees):
+    def _check_update(self, pkg_id, record, trees, downloads):
         try:
             repo = record.get("repo")
             subdir = record.get("subdir", "")
@@ -697,21 +703,25 @@ Instructions:
             cand_dir = os.path.join(self.updates_dir, slug, "candidate")
             os.makedirs(cand_dir, exist_ok=True)
 
-            cand_hashes = {}
-            for path, sha in tree.items():
-                if path == "HEAD":
-                    continue
-                if sub_prefix and not path.startswith(sub_prefix):
-                    continue
-                rel = path[len(sub_prefix):]
-                if ignored(rel):
-                    continue
+            def download_file(item):
+                rel, sha = item
                 data = self.blob_bytes(repo, sha)
                 dest_file = os.path.join(cand_dir, rel)
                 os.makedirs(os.path.dirname(dest_file), exist_ok=True)
                 with open(dest_file, "wb") as f:
                     f.write(data)
-                cand_hashes[rel] = sha
+            # One shared pool bounds file downloads across all package workers.
+            # Drain every future before exposing a candidate or releasing the lock.
+            futures = [downloads.submit(download_file, item) for item in upstream.items()]
+            failures = []
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as error:
+                    failures.append(error)
+            if failures:
+                raise failures[0]
+            cand_hashes = upstream
 
             # Check candidate runtime mods with `herdr-app check`
             valid = True
@@ -849,22 +859,33 @@ Instructions:
     def get_settings(self) -> dict:
         now = time.time()
         last = self.settings.get("last_check")
-        interval_secs = self.settings.get("interval_hours", 24) * 3600
+        interval_secs = self.settings["interval_value"] * (60 if self.settings["interval_unit"] == "min" else 3600)
         overdue = bool(self.settings.get("auto_update") and (last is None or (now - last) >= interval_secs))
 
         # Check prepared updates
-        prepared_count = sum(1 for pkg_id, record in self.records.items()
+        prepared_ids = [pkg_id for pkg_id, record in self.records.items()
                              if record.get("installed") and record.get("has_update")
                              and os.path.isfile(os.path.join(self.updates_dir, pkg_id.replace("/", "-"), "meta.json"))
-                             and os.path.isdir(os.path.join(self.updates_dir, pkg_id.replace("/", "-"), "candidate")))
+                             and os.path.isdir(os.path.join(self.updates_dir, pkg_id.replace("/", "-"), "candidate"))]
 
         return {
             **self.settings,
             "overdue": overdue,
-            "prepared_updates_count": prepared_count,
+            "interval_hours": interval_secs / 3600,
+            "prepared_update_ids": prepared_ids,
+            "prepared_updates_count": len(prepared_ids),
         }
 
     def update_settings(self, **kwargs) -> dict:
+        if "interval_hours" in kwargs:
+            kwargs["interval_value"] = kwargs.pop("interval_hours")
+            kwargs["interval_unit"] = "hr"
+        value = kwargs.get("interval_value", self.settings["interval_value"])
+        unit = kwargs.get("interval_unit", self.settings["interval_unit"])
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError("Check interval must be a positive whole number")
+        if unit not in ("min", "hr"):
+            raise ValueError("Check interval unit must be min or hr")
         for k, v in kwargs.items():
             if k in self.settings:
                 self.settings[k] = v
@@ -932,13 +953,20 @@ def main():
     p_settings = sub.add_parser("settings")
     p_settings.add_argument("--auto-update", type=lambda x: (str(x).lower() == 'true'))
     p_settings.add_argument("--interval", type=int)
+    p_settings.add_argument("--interval-value", type=int)
+    p_settings.add_argument("--interval-unit", choices=("min", "hr"))
     p_settings.add_argument("--agent")
 
     args = parser.parse_args()
+    if args.command == "settings":
+        if (args.interval_value is None) != (args.interval_unit is None):
+            parser.error("--interval-value and --interval-unit must be supplied together")
+        if args.interval is not None and args.interval_value is not None:
+            parser.error("Use either --interval or --interval-value with --interval-unit")
     mgr = PackageManager(args.app_home)
 
     readonly = args.command == "media" or (args.command == "settings" and
-               args.auto_update is None and args.interval is None and args.agent is None)
+               args.auto_update is None and args.interval is None and args.interval_value is None and args.agent is None)
     with contextlib.nullcontext() if readonly else file_lock(mgr.lock_file):
         # Another helper may have committed records while this process waited.
         mgr.records = mgr._load_records()
@@ -980,7 +1008,7 @@ def main():
         elif args.command == "remove":
             result = mgr.remove(args.id, force=args.force)
         elif args.command == "check-updates":
-            result = ({"ok": True, "count": mgr.get_settings()["prepared_updates_count"], "errors": []}
+            result = ({"ok": True, "count": mgr.get_settings()["prepared_updates_count"], "settings": mgr.get_settings(), "errors": []}
                       if args.if_overdue and not mgr.get_settings()["overdue"] else mgr.check_updates())
         elif args.command == "apply-update":
             result = mgr.apply_update(args.id)
@@ -990,6 +1018,8 @@ def main():
                 updates["auto_update"] = args.auto_update
             if args.interval is not None:
                 updates["interval_hours"] = args.interval
+            if args.interval_value is not None:
+                updates.update(interval_value=args.interval_value, interval_unit=args.interval_unit)
             if args.agent is not None:
                 updates["default_agent"] = args.agent
             result = mgr.update_settings(**updates) if updates else mgr.get_settings()
