@@ -624,7 +624,7 @@ export default class ModsPlus extends View {
         .child(v_flex().flex_none().gap(8).items_end().text_size(12)
           .child(this.stars(t, pkg))
           .when(pkg.installed === true || pkg.has_update, el => el.child(div()
-            .text_color(pkg.has_update ? t.accent : t.muted).child(pkg.has_update ? "Need Update" : "Installed")))));
+            .text_color(pkg.has_update ? t.accent : t.muted).child(pkg.has_update ? "Update Available" : "Installed")))));
   }
 
   renderDetails(t) {
