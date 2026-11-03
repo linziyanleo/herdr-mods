@@ -18,16 +18,16 @@ function defaultPointer(control) {
 test("preview buttons keep the default pointer and use Herdr hover and pressed colors", async t => {
   const r = await runtime(t), file = path.join(r.dir, "note.md"); await fs.writeFile(file, "# Note\n");
   r.props.file = file; await r.start();
-  const source = find(r.render(), "preview-source");
+  const source = find(r.render(), "preview-mode");
   defaultPointer(source); assert.equal(source.attributes.rounded[0], 6); assert.equal(source.attributes.role[0], "button");
   assert.equal(styles(source).bg[0], r.theme.hover); assert.equal(styles(source).text_color[0], r.theme.foreground);
   assert.equal(styles(source, "active").bg[0], r.theme.selected);
   let stopped = 0; r.cx.stop_propagation = () => stopped++;
   source.handlers.on_mouse_down({}, r.cx); source.handlers.on_click({}, r.cx);
   assert.equal(stopped, 2); assert.equal(r.panel.source, true);
-  const selected = find(r.render(), "preview-source");
-  assert.equal(selected.attributes.bg[0], r.theme.selected);
-  assert.equal(styles(selected).bg[0], r.theme.selected);
+  const preview = find(r.render(), "preview-mode");
+  assert.equal(preview.attributes.tooltip[0], "Preview");
+  assert.equal(styles(preview).bg[0], r.theme.hover);
   const back = find(r.render(), "preview-back");
   defaultPointer(back); assert.equal(back.attributes.disabled[0], true);
   assert.equal(back.attributes.text_color[0], r.theme.dim); assert.equal(back.attributes.hover, undefined);
@@ -121,4 +121,40 @@ test("preview tree rows retain the default pointer while highlighting on hover",
   r.panel.tree.loading = true;
   const refresh = find(r.render(), "preview-refresh");
   defaultPointer(refresh); assert.equal(refresh.attributes.disabled[0], true); assert.equal(refresh.handlers.on_click, undefined);
+});
+
+test("editing actions share the original toolbar as native icon buttons with tooltips", async t => {
+  const r = await runtime(t), file = path.join(r.dir, "note.md"); await fs.writeFile(file, "# Note\n");
+  r.props.file = file; await r.start(); r.panel.setSource(true, r.cx); r.edit("# Draft\n");
+  const toolbar = find(r.render(), "preview-toolbar");
+  for (const id of ["preview-back", "preview-mode", "preview-wrap", "preview-discard", "preview-save", "preview-open"]) {
+    const control = find(toolbar, id);
+    assert.ok(control, id + " belongs to the top toolbar");
+    assert.ok(control.nodes.some(node => node.kind === "svg"), id + " has a native SVG icon");
+    assert.equal(control.nodes.some(node => typeof node === "string"), false, id + " has no visible text label");
+    assert.ok(control.attributes.tooltip[0]);
+    assert.equal(control.attributes.accessibility_label[0], control.attributes.tooltip[0]);
+  }
+  assert.ok(find(toolbar, "preview-dirty"));
+  find(toolbar, "preview-discard").handlers.on_click({}, r.cx);
+  const confirmation = find(r.render(), "preview-toolbar");
+  assert.equal(find(confirmation, "preview-discard").attributes.tooltip[0], "Confirm discard");
+  assert.ok(find(confirmation, "preview-cancel-discard"));
+});
+
+test("Preview/Source is one toggle and Wrap lines keeps its position while disabled in Preview", async t => {
+  const r = await runtime(t), file = path.join(r.dir, "note.md"); await fs.writeFile(file, "# Note\n");
+  r.props.file = file; await r.start();
+  const controls = () => find(r.render(), "preview-toolbar").nodes.map(node => node.attributes?.id?.[0]).filter(Boolean);
+  const initial = controls(), toggle = find(r.render(), "preview-mode"), wrap = find(r.render(), "preview-wrap");
+  assert.equal(toggle.attributes.tooltip[0], "Source");
+  assert.equal(wrap.attributes.disabled[0], true); assert.equal(wrap.handlers.on_click, undefined);
+  toggle.handlers.on_click({}, r.cx);
+  assert.equal(find(r.render(), "preview-mode").attributes.tooltip[0], "Preview");
+  assert.equal(find(r.render(), "preview-wrap").attributes.disabled[0], false);
+  find(r.render(), "preview-wrap").handlers.on_click({}, r.cx);
+  find(r.render(), "preview-mode").handlers.on_click({}, r.cx);
+  assert.deepEqual(controls(), initial);
+  assert.equal(find(r.render(), "preview-wrap").attributes.disabled[0], true);
+  assert.equal(r.panel.wrap, true);
 });

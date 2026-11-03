@@ -1,18 +1,18 @@
 # Preview Plus
 
-Preview Markdown, inspect images and browse PDF pages inside Herdr. Operate as an independent Files panel, pair seamlessly with Files Plus in a layout stack, or open any file in its own split pane or tab. Markdown provides instant toggle between rich formatted preview and syntax-highlighted source, with native interleaved local images and link navigation. Multi-format image and macOS PDF viewing offer Fit, 100%, multi-level zoom, and page navigation controls. Local relative links resolve across documents and media with a complete in-memory history stack, while smart file watching reloads edits automatically.
+Preview Markdown, edit local text, inspect images and browse PDF pages inside Herdr. Operate as an independent Files panel, pair with Files Plus in a layout stack, or open any file in its own split pane or tab. Markdown toggles between formatted preview and editable source, with native interleaved local images and link navigation. Save text with conflict protection and toggle soft wrapping. Multi-format image and macOS PDF viewing offer Fit, 100%, multi-level zoom, and page navigation controls. Local relative links resolve across documents and media with a complete in-memory history stack, while file watching reloads clean documents and preserves drafts.
 
 ![Preview Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` of a disposable Herdr window showing an image in Fit mode with its calculated percentage. All documents are synthetic. Preserve the capture's sRGB metadata.
+The preview is an unedited `herdr-app shot` of a disposable Herdr window showing the native text editor and compact top toolbar. All documents are synthetic. Preserve the capture's sRGB metadata.
 
 ## What you see
 
-The 42px header shows Back (`←`, 28px height, 12px text with hover state), the file name or “Files” (13px semibold, truncated), Markdown's Preview and Source mode toggle controls, an Open control for launching local files in the system application, and a Refresh control when viewing the standalone folder tree. A 28px path row below the header displays the containing directory of the active file or the workspace cwd in 12px muted text.
+The 42px header holds Back, the file name or “Files” (13px semibold, truncated), one Markdown Preview/Source toggle, Wrap lines, Save, and Open. The mode toggle shows the next action: code for Source, eye for Preview. Wrap lines keeps its position in both modes, disabled in Markdown Preview and enabled in Source. Refresh replaces file actions in the tree. All these controls are icon buttons with tooltips and accessible names. Follow Herdr's Workspace Chrome: 26px targets, 14px tintable native SVGs, 6px corners, theme muted/foreground/hover/selected colors, and the default arrow pointer. The top separator is 0.5px. There is no extra editor toolbar. A 6px muted dot beside the filename indicates unsaved/saving state; its tooltip explains which. Read-only text has a lock icon. The discard action appears only for dirty files and becomes a confirmation check with an adjacent cancel cross. A 28px path row below the header displays the containing directory or workspace cwd in 12px muted text.
 
 An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, an editable percentage and + zoom controls. The percentage frame is 76px wide and 28px high, with a 0.5px border and centered 12px Geist Mono text. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. Drag enlarged media with the left mouse button to pan in both directions; the pointer changes from grab to grabbing. Releasing or leaving the canvas stops the drag. Fit resets panning, centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
-Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in a read-only syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. The standalone Files tree features 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
+Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in the native syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. Complete local text is editable; remote and truncated text stays read-only. The standalone Files tree features 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
 Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI/code font families from resolved `settings()`. Preserve color alpha, custom color overrides and same-appearance theme changes. Unexposed fields use the actual Herdr 0.1.11 Files/Changes defaults: a 1px theme-colored border, 10px panel corners, a semibold title, 13px interface text, 12px secondary text and 1px separators. Rows use 7px corners, 18px indentation and 6px tree padding. There is no separate Preview Plus palette or type/spacing/radius scale. The generic `cx.theme()` scale is not Herdr's shipped panel styling. Native editor and rich-text internals retain Herdr's theme. UI and code sizes receive zoom exactly once; version upgrades require rechecking unexposed control defaults.
 
@@ -28,7 +28,11 @@ Buttons retain the default arrow pointer. Hover changes only the control's own b
 
 ### Markdown preview and source editing
 
-Render `.md` and `.markdown` through native `TextView.markdown()`; Source uses a retained read-only `Editor`. Plain text uses the same editor. Truncate text after 400,000 characters with a visible notice, retain the source for Preview/Source switching, and show explicit missing, unreadable and binary-file states.
+Render `.md` and `.markdown` through native `TextView.markdown()`; Source uses a retained `Editor`. Plain text uses the same editor. Complete local UTF-8 text is editable. Track the draft separately from the last saved snapshot using native change events. Save through `writeTextFile(file, text, expected)`; save the submitted snapshot, and keep later typing dirty if a save finishes while the person is still editing. Reject duplicate in-flight saves. `Cmd+S` on macOS and `Ctrl+S` elsewhere operate on the focused mod's document without changing global bindings. Native selection, clipboard and undo/redo remain editor-owned.
+
+Keep unsaved drafts across navigation and persist only dirty/in-flight documents in this mod's `localStorage`. Restore them when reopening the file, including after the file is removed or externally changed. A completed save or confirmed discard removes its recovery entry. Flush pending storage writes on normal close. Show storage and save failures without dropping the in-memory text. Conflict recovery is explicit: keep/copy the draft, or confirm discard to reload disk; never silently force-overwrite an external edit.
+
+Preview renders the current draft, including local image references, without saving. Wrap lines toggles `soft_wrap` and remembers the setting; it never inserts newline characters. This host exposes no dynamic Editor wrap/style setter, so rebuild from the draft when wrap or code appearance changes. Selection, scroll and undo history can reset on those rebuilds. Truncate text after 400,000 characters with a visible notice and no Save action. Show explicit missing, unreadable and binary-file states when no recoverable draft exists.
 
 ### Interleaved inline Markdown images
 
@@ -48,13 +52,13 @@ On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page
 
 ### Smart file watching and live reload
 
-Watch the displayed local file and local images referenced by Markdown using `watchFolder`. Resolve parent-directory aliases to physical paths (`pwd -P`) when comparing native events to handle macOS `/private/tmp` vs `/tmp` paths. Reload modified, atomically replaced, deleted and restored files. Queue a reload if an update arrives during an active read or conversion. Ignore unrelated file events. Remote previews reload when reopened or sent `preview-plus.refresh`.
+Watch the displayed local file and local images referenced by Markdown using `watchFolder`. Resolve parent-directory aliases to physical paths (`pwd -P`) when comparing native events to handle macOS `/private/tmp` vs `/tmp` paths. Reload clean modified, atomically replaced, deleted and restored files. Preserve dirty/in-flight buffers and report external changes instead. Unchanged source events, including the mod's own save, retain the editor and undo history. Refresh referenced Markdown images from the draft. Queue a reload if an update arrives during an active read or conversion. Ignore unrelated file events. Remote previews reload when reopened or sent `preview-plus.refresh`.
 
 ### Request identity and external commands
 
 Apply async results only when the target request, file, machine and active space still match. Switching a target resets link history. Release retained editors when the target or view closes.
 
-Optional external commands can be sent via `nextCommand()`: `back`, `source`, `preview`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
+Optional external commands can be sent via `nextCommand()`: `back`, `source`, `preview`, `save`, `wrap`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
 
 Agent working, blocked, done and idle displays remain the surrounding Herdr UI's responsibility.
 
@@ -64,13 +68,13 @@ Agent working, blocked, done and idle displays remain the surrounding Herdr UI's
 preview-plus/
   RECIPE.md, README.md, preview.png, licenses/
   mods/preview-plus/
-    main.js, tree.js, paths.js, markdown.js, media.js, appearance.js, mod.json
+    main.js, tree.js, paths.js, markdown.js, media.js, appearance.js, mod.json, icons/
   tests/
 ```
 
 Default-export a class extending `View`. `main.js` owns mode selection, request identity, source state, history, watchers, page/zoom controls and rendering. `tree.js` owns lazy enumeration and Git marks. `paths.js` normalizes paths and resolves links. `markdown.js` extracts local image references without rewriting code examples. `media.js` stages images and renders a single PDF page through argument-separated external calls. `appearance.js` reads Herdr colors and configured fonts directly. Retained source editors update their font and syntax from cached text on a theme/font change without rereading the file.
 
-Use GPUI `div`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `watchFolder`, `nextCommand` and `run`. Only paired Back runs `layout.select`; it never writes the shared target.
+Use GPUI `div`, `svg`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `nextCommand` and `run`. Use host `localStorage` for draft recovery and the wrap preference. The toolbar's original SVG assets follow Herdr's tintable outline style and are packaged with this mod. Only paired Back runs `layout.select`; it never writes the shared target.
 
 The mod manifest is `{ "place": "none" }`. Supported layout setups include:
 
@@ -109,7 +113,7 @@ Shared state contract when paired with Files Plus:
 
 ### External programs and files
 
-The mod reads only selected files, referenced local images, displayed directories and Git metadata. It writes only its app-home cache. No service credentials are required. Preview Plus makes no HTTP requests itself; opening an HTTP(S) link uses the system browser.
+The mod reads selected files, referenced local images, displayed directories and Git metadata. It writes selected local text files only on Save, and stores media cache, draft recovery text and the wrap preference inside Herdr's app storage. Drafts include the original snapshot needed for conflict detection; both copies are removed after saving or confirmed discard. No service credentials are required. Preview Plus makes no HTTP requests itself; opening an HTTP(S) link uses the system browser.
 
 macOS image staging uses `osascript -l JavaScript` with Foundation and AppKit. PDFs additionally use PDFKit. Linux/Windows image staging uses Python 3's standard library to read PNG/JPEG/WebP/SVG dimensions and copy bytes. Directory browsing uses `sh` on POSIX machines and PowerShell locally on Windows; Git marks use `git`, and physical-directory matching uses `pwd -P` on POSIX. Open uses `open`, `xdg-open` or `explorer.exe` for the local platform. Pass file paths as arguments; never splice them into executable JavaScript or shell code.
 
@@ -129,6 +133,8 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 
 ## Done when
 
+Local editor verification (2026-11-03, macOS, Herdr 0.1.12): all 34 automated tests and the native check passed. The disposable native editor verifier passed text/save, wrapping/Markdown draft, conflict/discard and remount-recovery groups with `errors: []`. Real mouse/keyboard input separately verified Unicode paste, change events, `Cmd+S` with disk readback, undo, mode switching and soft wrapping in a 320px panel. The package screenshot shows Source on the left and Preview on the right, with one icon toolbar in each. Redo key verification was blocked by automatic action review and is not counted as passed. The older complete native verifier passed its first three groups but timed out at the background-window paired handoff; it is not a full native-suite pass. See the [implementation record](../docs/plans/preview-plus.md) for scope and receipts.
+
 Local zoom/drag verification (2026-11-02, macOS, Herdr 0.1.11): all 26 runtime tests and `herdr-app check` passed. A fresh disposable window rendered the centered percentage and fitted image, with no status errors or runtime log output; its `herdr-app shot` is the package preview. Event tests cover percentage submission/blur, pixel and line scrolling, drag/release/exit, Fit reset and app zoom compensation. Physical mouse/trackpad interaction remains unverified.
 
 Run `herdr-app check preview-plus/mods/preview-plus`. Run `node --experimental-vm-modules --test preview-plus/tests/*.test.mjs` for navigation, read ownership, source/error/truncation states, watcher matching and real image/PDF helpers. On macOS, run the disposable session and native verifier from the README, then inspect the screenshots. The verifier calls production handlers; it does not synthesize mouse clicks.
@@ -146,5 +152,6 @@ Build and verify these observable behaviors using disposable files:
 9. PNG, JPEG, WebP and SVG images display with Fit, centered editable percentage (Enter/blur, invalid values, 5–800% bounds), wheel/trackpad scroll zoom, left-button dragging, Shift-scroll panning, and external Open launch. Fit percentages follow viewport changes; 100% dimensions remain stable at 120% app zoom. Dragging stops on release/exit, and Fit restores the center.
 10. Multi-page PDFs on macOS rasterize on demand per page with page turning (`Previous` / `Next`), `<page> / <total>` indicator, page clamping on external edit, and clear error states for locked or invalid PDFs.
 11. Local file watcher detects modifications, atomic replacements, deletions, and restorations of displayed files and referenced Markdown images, reloading live.
-12. External command dispatching via `preview-plus.<command>` executes back, source, preview, refresh, fit, zoom-in, zoom-out, next and previous.
+12. External command dispatching via `preview-plus.<command>` executes back, source, preview, save, wrap, refresh, fit, zoom-in, zoom-out, next and previous.
 13. `herdr-app status` reports zero mod or layout errors, and `preview.png` is captured with `herdr-app shot` from the live running window.
+14. Edit Unicode text, save exact contents, toggle wrapping without adding newlines, preview an unsaved Markdown draft, and recover drafts after navigation/remount. While dirty, external edits/deletions and failed saves preserve both the draft and disk version. Discard requires confirmation. Remote/truncated files have no Save action. Check the top toolbar and tooltips in a narrow panel as well as a full-width pane.

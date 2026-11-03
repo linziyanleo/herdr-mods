@@ -33,7 +33,7 @@ test("cached source follows code font and syntax changes without rereading the f
   assert.equal(panel.code.font_family, "Geist Mono"); assert.equal(panel.code.font_size, 18);
   assert.equal(panel.code.syntax.keyword, r.theme.ansi5); assert.equal(panel.code.syntax.constant, r.theme.ansi6);
   assert.equal(panel.code.syntax.comment, r.theme.dim);
-  assert.equal(panel.code.readonly, true); assert.equal(panel.code.value, "export const ready = true;\n");
+  assert.equal(panel.code.readonly, false); assert.equal(panel.code.value(), "export const ready = true;\n");
   const current = panel.code; r.render(); await r.settle(); assert.equal(panel.code, current);
 });
 

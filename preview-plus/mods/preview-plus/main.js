@@ -1,6 +1,6 @@
-import { View, div, image } from "gpui-kit";
+import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, Editor, EditorState, Input, InputState } from "gpui-base";
-import { props, shared, spaces, panes, focused, run, readTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
+import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, openFile } from "./media.js";
@@ -20,22 +20,37 @@ function context() {
 }
 const contextKey = () => JSON.stringify(context());
 
-function button(id, label, colors, action, enabled = true, selected = false) {
+const ICONS = {
+  "preview-back": "back", "preview-open": "open",
+  "preview-wrap": "wrap", "preview-save": "save", "preview-discard": "undo", "preview-cancel-discard": "close", "preview-refresh": "refresh",
+};
+
+function button(id, label, colors, action, enabled = true, selected = false, icon = ICONS[id]) {
   const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size" }[label] || label;
-  return div().id(id).h(28).px(8).flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
+  return div().id(id).h(icon ? 26 : 28).when(Boolean(icon), el => el.w(26)).when(!icon, el => el.px(8))
+    .flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
     .role("button").accessibility_label(title).disabled(!enabled).cursor_default()
     .text_color(enabled ? selected ? colors.foreground : colors.muted : colors.dim)
-    .when(title !== label, el => el.tooltip(title))
-    .when(selected, el => el.bg(colors.selected).font_medium())
+    .tooltip(title)
+    .when(selected && enabled, el => el.bg(colors.selected).font_medium())
     .when(enabled, el => el
       .hover(s => s.bg(selected ? colors.selected : colors.hover).text_color(colors.foreground))
       .active(s => s.bg(colors.selected).text_color(colors.foreground))
       .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
-      .on_click((_event, cx) => { cx.stop_propagation(); action(cx); })).child(label);
+      .on_click((_event, cx) => { cx.stop_propagation(); action(cx); }))
+    .child(icon ? svg(`mods/preview-plus/icons/${icon}.svg`).size(14) : label);
 }
 
 export default class PreviewPlus extends View {
   init(_props, cx) {
+    this.documents = new Map();
+    this.wrap = localStorage.getItem("preview-plus.wrap") === "true";
+    try {
+      for (const draft of JSON.parse(localStorage.getItem("preview-plus.drafts") || "[]")) {
+        if (typeof draft.file === "string" && typeof draft.base === "string" && typeof draft.text === "string")
+          this.documents.set(draft.file, { ...draft, saving: false });
+      }
+    } catch { this.draftError = "Saved drafts could not be read."; }
     this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
     this.viewport = { width: 400, height: 500 }; this.zoom = null; this.page = 1; this.total = 0;
     this.pan = { x: 0, y: 0 };
@@ -49,8 +64,10 @@ export default class PreviewPlus extends View {
       for (;;) {
         const command = await nextCommand();
         if (command === "back") this.back(cx);
-        else if (command === "source") { this.source = true; cx.notify(); }
-        else if (command === "preview") { this.source = false; cx.notify(); }
+        else if (command === "source") this.setSource(true, cx);
+        else if (command === "preview") this.setSource(false, cx);
+        else if (command === "save") this.save(cx);
+        else if (command === "wrap") this.toggleWrap(cx);
         else if (command === "refresh") this.reload(cx);
         else if (command === "fit") this.setZoom(null, cx);
         else if (command === "zoom-in") this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx);
@@ -66,7 +83,7 @@ export default class PreviewPlus extends View {
   sync(cx) {
     const next = context(), key = JSON.stringify(next);
     if (this.owner?.key === key) return;
-    this.owner = { ...next, key }; this.request = null; this.releaseEditor();
+    this.owner = { ...next, key }; this.request = null; this.releaseEditor(); this.document = null;
     this.history = []; this.selected = null; this.media = null; this.text = null; this.error = null; this.actionError = null;
     this.watchTargets([], cx); this.tree = null;
     if (next.mode === "files") {
@@ -85,8 +102,84 @@ export default class PreviewPlus extends View {
   updateEditor() {
     const style = sourceStyle(), ext = extension(this.selected.file);
     this.releaseEditor();
-    this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: true, value: this.text, ...style });
+    const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
+    code.on("change", (_event, cx) => this.editorChanged(code, cx));
     this.codeStyle = JSON.stringify(style);
+  }
+
+  editorChanged(code, cx) {
+    if (this.code !== code || !this.document) return;
+    this.text = this.document.text = code.value(); this.confirmDiscard = false;
+    this.persistDrafts(); cx.notify();
+  }
+
+  dirty(doc = this.document) { return Boolean(doc && doc.text !== doc.base); }
+
+  persistDrafts() {
+    try {
+      const drafts = [...this.documents.values()].filter(doc => this.dirty(doc) || doc.saving)
+        .map(doc => ({ file: doc.file, base: doc.base, text: doc.text }));
+      if (drafts.length) localStorage.setItem("preview-plus.drafts", JSON.stringify(drafts));
+      else localStorage.removeItem("preview-plus.drafts");
+      this.draftError = null;
+    } catch { this.draftError = "Draft recovery is unavailable. Save before closing."; }
+  }
+
+  setSource(source, cx) {
+    this.source = source;
+    if (!source && this.selected && kind(this.selected.file) === "markdown") this.refreshMarkdown(cx);
+    cx.notify();
+  }
+
+  refreshMarkdown(cx) {
+    const request = this.request, text = this.text, selected = this.selected;
+    const token = this.markdownRequest = {};
+    this.markdownBlocks = [{ text: text || "" }];
+    cx.spawn(async cx => {
+      try {
+        const staged = await stageMarkdown(text || "", selected);
+        if (!this.current(request) || this.markdownRequest !== token || this.text !== text) return;
+        this.markdownBlocks = staged.blocks; this.imageWarning = staged.unavailable;
+        this.watchTargets(selected.on ? [] : [selected.file, ...staged.files], cx);
+        cx.notify();
+      } catch (error) { if (this.current(request) && this.markdownRequest === token) { this.actionError = String(error.message || error); cx.notify(); } }
+    });
+  }
+
+  toggleWrap(cx) {
+    if (!this.code || (kind(this.selected.file) === "markdown" && !this.source)) return;
+    this.wrap = !this.wrap;
+    localStorage.setItem("preview-plus.wrap", String(this.wrap));
+    this.updateEditor(); cx.notify();
+  }
+
+  save(cx) {
+    const doc = this.document;
+    if (!doc || !this.dirty(doc) || doc.saving) return;
+    const text = doc.text, expected = doc.base;
+    doc.saving = true; doc.saveError = null; this.confirmDiscard = false; this.persistDrafts(); cx.notify();
+    cx.spawn(async cx => {
+      try {
+        await writeTextFile(doc.file, text, expected);
+        doc.base = text; doc.external = false;
+      } catch (error) { doc.saveError = `Save failed: ${String(error.message || error)}. Your draft is retained.`; }
+      finally {
+        doc.saving = false; this.persistDrafts();
+        if (!this.closed) cx.notify();
+      }
+    });
+  }
+
+  discard(cx) {
+    if (!this.document || this.document.saving) return;
+    if (!this.confirmDiscard) { this.confirmDiscard = true; cx.notify(); return; }
+    this.documents.delete(this.document.file); this.document = null;
+    this.persistDrafts(); this.load(cx);
+  }
+
+  keyDown(event, cx) {
+    const saveKey = window()?.platform === "macos" ? "cmd-s" : "ctrl-s";
+    if (event.keystroke === saveKey && this.document) { cx.stop_propagation(); this.save(cx); }
   }
 
   show(value, cx, remember = false, notify = true) {
@@ -100,7 +193,7 @@ export default class PreviewPlus extends View {
   load(cx, notify = true) {
     if (!this.selected) return;
     const selected = this.selected, type = kind(selected.file), request = { owner: this.owner, selected, page: this.page };
-    this.request = request; this.releaseEditor(); this.text = null; this.markdownBlocks = null; this.media = null;
+    this.request = request; this.releaseEditor(); this.document = null; this.confirmDiscard = false; this.text = null; this.markdownBlocks = null; this.media = null;
     this.zoomDirty = false; this.zoomEditing = false;
     this.pan = { x: 0, y: 0 }; this.drag = null;
     this.error = null; this.actionError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
@@ -112,12 +205,24 @@ export default class PreviewPlus extends View {
           if (!this.current(request)) return;
           this.media = media; this.page = media.page; this.total = media.pages;
         } else {
-          const value = await readTextFile(selected.file, { on: selected.on });
+          const draft = !selected.on && this.documents.get(selected.file);
+          let value;
+          try { value = await readTextFile(selected.file, { on: selected.on }); }
+          catch (error) { if (!draft || !this.dirty(draft)) throw error; value = null; }
           if (!this.current(request)) return;
-          if (value === null) throw new Error("This file is no longer available.");
-          if (value.includes("\0")) throw new Error("This binary file has no text preview.");
-          this.truncated = value.length > TEXT_LIMIT;
-          this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
+          if (draft && (this.dirty(draft) || draft.saving)) {
+            this.document = draft; draft.external = value !== draft.base;
+            this.text = draft.text; this.truncated = false;
+          } else {
+            if (value === null) throw new Error("This file is no longer available.");
+            if (value.includes("\0")) throw new Error("This binary file has no text preview.");
+            this.truncated = value.length > TEXT_LIMIT;
+            this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
+            if (!selected.on && !this.truncated) {
+              this.document = { file: selected.file, base: value, text: value };
+              this.documents.set(selected.file, this.document);
+            }
+          }
           if (type === "markdown") {
             const staged = await stageMarkdown(this.text, selected);
             if (!this.current(request)) return;
@@ -131,7 +236,7 @@ export default class PreviewPlus extends View {
       finally {
         if (this.current(request)) {
           this.loading = false;
-          if (this.reloadPending) this.load(cx);
+          if (this.reloadPending) { this.reloadPending = false; this.reload(cx); }
           cx.notify();
         }
       }
@@ -141,6 +246,27 @@ export default class PreviewPlus extends View {
 
   reload(cx) {
     if (this.selected) {
+      if (this.document) {
+        const doc = this.document, request = this.request;
+        cx.spawn(async cx => {
+          try {
+            const disk = await readTextFile(doc.file);
+            if (!this.current(request) || this.document !== doc) return;
+            if (!this.dirty(doc) && !doc.saving && disk !== doc.base) { this.load(cx); return; }
+            doc.external = disk !== doc.base;
+          } catch {
+            if (this.current(request)) {
+              if (!this.dirty(doc) && !doc.saving) { this.load(cx); return; }
+              doc.external = true;
+            }
+          }
+          if (this.current(request)) {
+            if (!this.source && kind(doc.file) === "markdown") this.refreshMarkdown(cx);
+            cx.notify();
+          }
+        });
+        return;
+      }
       if (this.loading) this.reloadPending = true; else this.load(cx);
     } else this.tree?.refresh(cx);
   }
@@ -193,7 +319,7 @@ export default class PreviewPlus extends View {
       this.load(cx);
     } else if (this.owner.mode === "paired") run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
     else if (this.owner.mode === "files") {
-      this.selected = null; this.request = null; this.releaseEditor(); this.media = null; this.error = null; this.actionError = null;
+      this.selected = null; this.request = null; this.releaseEditor(); this.document = null; this.media = null; this.error = null; this.actionError = null;
       this.watchTargets([], cx); this.tree?.refresh(cx); cx.notify();
     }
   }
@@ -292,15 +418,28 @@ export default class PreviewPlus extends View {
     const { colors, font } = appearance(), file = this.selected?.file, type = file ? kind(file) : null, media = type === "image" || type === "pdf";
     const canBack = this.history.length > 0 || this.owner.mode !== "pane";
     return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).rounded(10).overflow_hidden().bg(colors.background).border_1().border_color(colors.border).text_color(colors.foreground).font_family(font).text_size(13)
-      .child(h_flex().h(42).flex_none().px(10).gap(4).items_center().border_b_1().border_color(colors.border)
+      .on_key_down((event, cx) => this.keyDown(event, cx))
+      .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
         .when(Boolean(file), el => el.child(button("preview-back", "←", colors, cx => this.back(cx), canBack)))
-        .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().child(file ? basename(file) : "Files"))
+        .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "Files"))
+        .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
+          .tooltip(this.document?.saving ? "Saving…" : "Unsaved changes").accessibility_label(this.document?.saving ? "Saving" : "Unsaved changes")))
+        .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
+          .tooltip(this.selected.on ? "Remote file is read-only" : "Truncated file is read-only").accessibility_label("Read-only")
+          .child(svg("mods/preview-plus/icons/lock.svg").size(12))))
         .when(type === "markdown", el => el
-          .child(button("preview-formatted", "Preview", colors, cx => { this.source = false; cx.notify(); }, true, !this.source))
-          .child(button("preview-source", "Source", colors, cx => { this.source = true; cx.notify(); }, true, this.source)))
+          .child(button("preview-mode", this.source ? "Preview" : "Source", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? "preview" : "code")))
+        .when(Boolean(file) && !media, el => el
+          .child(button("preview-wrap", "Wrap lines", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (type !== "markdown" || this.source), this.wrap)))
+        .when(Boolean(this.document), el => el
+          .when(this.dirty(), el => el.child(button("preview-discard", this.confirmDiscard ? "Confirm discard" : "Discard changes", colors, cx => this.discard(cx), !this.document.saving, this.confirmDiscard, this.confirmDiscard ? "check" : "undo")))
+          .when(Boolean(this.confirmDiscard), el => el.child(button("preview-cancel-discard", "Cancel discard", colors, cx => { this.confirmDiscard = false; cx.notify(); })))
+          .child(button("preview-save", this.document.saving ? "Saving…" : `Save (${window()?.platform === "macos" ? "⌘S" : "Ctrl+S"})`, colors, cx => this.save(cx), this.dirty() && !this.document.saving)))
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
         .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+      .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
+      .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
         .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
         .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) > 0.05))
@@ -357,7 +496,8 @@ export default class PreviewPlus extends View {
     if (Math.abs(this.viewport.width - viewport.width) > 0.5 || Math.abs(this.viewport.height - viewport.height) > 0.5) { this.viewport = viewport; this.clampPan(); cx.notify(); }
   }
 
-  close() {
+  async close() {
     this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release();
+    this.persistDrafts(); await localStorage.flush();
   }
 }

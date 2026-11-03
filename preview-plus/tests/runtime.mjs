@@ -5,12 +5,22 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+export async function until(accept) {
+  for (let n = 0; n < 200; n++) {
+    if (accept()) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error("Expected state was not reached");
+}
+
 const execute = promisify(execFile), runtimeDir = fileURLToPath(new URL("../mods/preview-plus/", import.meta.url));
 
 export async function runtime(t) {
   const dir = await fs.mkdtemp("/tmp/pp-test.");
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], tasks: [], timers: [], hooks: {}, watches: new Map() };
+  state.storage = new Map();
+  const localStorage = { getItem: key => state.storage.get(key) ?? null, setItem: (key, value) => state.storage.set(key, value), removeItem: key => state.storage.delete(key), flush: async () => {} };
   state.settings = { dark: true, ui_font_family: "Geist", font_family: "JetBrains Mono", font_size: 14 };
   state.theme = { background: "#111113", surface: "#18191b", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#ffffff18", input: "#ffffff24", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#70b8ff", accent_foreground: "#111113", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
   state.spaces = [{ id: "s1", active: true, folder: dir, machine: null }];
@@ -22,6 +32,12 @@ export async function runtime(t) {
       if (state.hooks.read) return state.hooks.read(file, options);
       try { const value = await fs.readFile(file, "utf8"); if (Buffer.byteLength(value) > 1048576) throw new Error("File too large"); return value; }
       catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    },
+    writeTextFile: async (file, text, expected) => {
+      if (state.hooks.write) return state.hooks.write(file, text, expected);
+      const current = await host.readTextFile(file);
+      if (current !== expected) throw new Error("File changed since it was read");
+      await fs.writeFile(file, text);
     },
     exec: async (command, args = [], options = {}) => {
       state.calls.push({ command, args: [...args], options });
@@ -47,13 +63,14 @@ export async function runtime(t) {
     } });
     return element;
   };
-  const kit = { View: class {}, div: () => builder("div"), image: file => builder("image", file) };
+  const kit = { View: class {}, div: () => builder("div"), image: file => builder("image", file), svg: file => builder("svg", file) };
   const base = { h_flex: () => builder("row"), v_flex: () => builder("column"),
     InputState: { new: options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) },
     Input: { new: state => builder("input", state) },
     TextView: { markdown: (id, text) => builder("markdown", text).id(id) },
-    EditorState: { new: options => ({ ...options, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
-  const context = vm.createContext({ console }), cache = new Map();
+    EditorState: { new: options => ({ ...options, text: options.value, handlers: {}, value() { return this.text; },
+      set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
+  const context = vm.createContext({ console, localStorage }), cache = new Map();
   async function module(file) {
     if (cache.has(file)) return cache.get(file);
     const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file }); cache.set(file, result);
@@ -76,6 +93,7 @@ export async function runtime(t) {
     throw new Error("Panel did not settle");
   };
   state.start = async () => { const { default: Panel } = await state.load("main.js"); state.panel = new Panel(); state.panel.init({}, state.cx); await state.settle(); return state.panel; };
+  state.edit = text => { state.panel.code.set_value(text); state.panel.code.handlers.change({}, state.cx); };
   state.render = () => { state.rendering = true; try { return state.panel.render(state.cx); } finally { state.rendering = false; } };
   state.change = async (dir, paths) => { const resolve = state.watches.get(dir); if (!resolve) throw new Error("No watcher for " + dir); resolve(paths); await new Promise(resolve => setImmediate(resolve)); await state.settle(); };
   return state;

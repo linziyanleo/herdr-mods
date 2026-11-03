@@ -20,7 +20,13 @@ export default class NativeDriver extends PreviewPlus {
               else if (request.action === "show") this.show({ file: request.file, root: request.root, on: request.on }, cx);
               else if (request.action === "follow") this.follow(request.href, cx);
               else if (request.action === "back") this.back(cx);
-              else if (request.action === "source") { this.source = request.value; cx.notify(); }
+              else if (request.action === "source") this.setSource(request.value, cx);
+              // set_value does not emit change; keyboard input is verified separately.
+              else if (request.action === "edit") { this.code.set_value(request.value); this.editorChanged(this.code, cx); }
+              else if (request.action === "save") this.save(cx);
+              else if (request.action === "wrap") this.toggleWrap(cx);
+              else if (request.action === "discard") this.discard(cx);
+              else if (request.action === "key") this.keyDown({ keystroke: request.value }, cx);
               else if (request.action === "zoom") this.setZoom(request.value, cx);
               else if (request.action === "page") this.turnPage(request.delta, cx);
               else if (request.action === "toggle") this.tree.toggle(request.path, cx);
@@ -45,6 +51,7 @@ export default class NativeDriver extends PreviewPlus {
   record(cx) {
     const value = { owner: this.owner, selected: this.selected, loading: this.loading, error: this.error, actionError: this.actionError,
       imageWarning: this.imageWarning, text: this.text, markdownBlocks: this.markdownBlocks, source: this.source, media: this.media,
+      dirty: this.dirty(), document: this.document, wrap: this.wrap, codeText: this.code?.value(), draftError: this.draftError,
       page: this.page, total: this.total, zoom: this.zoom, history: this.history, viewport: this.viewport,
       uiFont: settings().ui_font_family, codeFontSize: settings().font_size, appZoom: settings().zoom, codeStyle: this.codeStyle, colors: theme(), windowActive: globalThis.window?.is_window_active?.(),
       tree: this.tree ? { folders: [...this.tree.folders], entries: Object.fromEntries(this.tree.entries), error: this.tree.error, loading: this.tree.loading } : null };

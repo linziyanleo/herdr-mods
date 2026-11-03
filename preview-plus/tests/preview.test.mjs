@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runtime, find } from "./runtime.mjs";
+import { runtime, find, until } from "./runtime.mjs";
 import { fixtures, png, pdf } from "./fixtures.mjs";
 
 test("relative navigation preserves machine and root, including encoded names and Windows paths", async t => {
@@ -51,14 +51,14 @@ test("standalone tree opens Markdown, source, links, history, and ordinary text 
   documentImage.handlers.on_click({}, state.cx); await state.settle();
   assert.equal(panel.selected.file, path.join(state.dir, "landscape.png")); assert.equal(panel.history.length, 1);
   panel.back(state.cx); await state.settle();
-  assert.equal(panel.code.readonly, true);
+  assert.equal(panel.code.readonly, false);
   const editor = panel.code;
-  find(state.render(), "preview-source").handlers.on_click({}, state.cx);
+  find(state.render(), "preview-mode").handlers.on_click({}, state.cx);
   assert.equal(panel.source, true); assert.equal(panel.code, editor);
   panel.follow("notes/next.markdown", state.cx); await state.settle();
   assert.equal(panel.history.length, 1); assert.match(panel.text, /Linked note/);
   panel.back(state.cx); await state.settle(); assert.equal(panel.source, true);
-  panel.follow("source.txt", state.cx); await state.settle(); assert.match(panel.code.value, /read-only/);
+  panel.follow("source.txt", state.cx); await state.settle(); assert.match(panel.code.value(), /read-only/);
   panel.back(state.cx); await state.settle(); panel.back(state.cx);
   assert.equal(panel.selected, null); assert.ok(editor.released); assert.ok(find(state.render(), "preview-tree"));
 });
@@ -79,7 +79,7 @@ test("paired mode follows per-space shared targets and returns to the configured
 test("Back restores a PDF page and zoom after following a text link", async t => {
   const state = await runtime(t); await fixtures(state.dir); state.props = { file: path.join(state.dir, "guide.pdf") };
   const panel = await state.start(); panel.turnPage(1, state.cx); await state.settle(); panel.setZoom(1.5, state.cx);
-  panel.follow("source.txt", state.cx); await state.settle(); assert.match(panel.code.value, /read-only/);
+  panel.follow("source.txt", state.cx); await state.settle(); assert.match(panel.code.value(), /read-only/);
   panel.back(state.cx); assert.equal(find(state.render(), "preview-previous").handlers.on_click, undefined);
   await state.settle(); assert.equal(panel.media.page, 2); assert.equal(panel.zoom, 1.5);
   find(state.render(), "preview-previous").handlers.on_click({}, state.cx); await state.settle(); assert.equal(panel.media.page, 1);
@@ -105,7 +105,7 @@ test("old async reads cannot replace a newer target, including an A-B-A sequence
   state.props.file = path.join(state.dir, "a.txt"); state.render(); await new Promise(resolve => setImmediate(resolve));
   pending[2].resolve("current A"); await state.settle();
   pending[0].resolve("stale A"); pending[1].resolve("stale B"); await new Promise(resolve => setImmediate(resolve));
-  assert.equal(panel.code.value, "current A"); assert.equal(panel.history.length, 0);
+  assert.equal(panel.code.value(), "current A"); assert.equal(panel.history.length, 0);
 });
 
 test("missing, binary, unreadable and truncated text produce bounded observable states", async t => {
@@ -114,7 +114,7 @@ test("missing, binary, unreadable and truncated text produce bounded observable 
   await fs.writeFile(state.props.file, "binary\0value"); panel.reload(state.cx); await state.settle(); assert.match(panel.error, /binary/);
   state.hooks.read = async () => { throw new Error("Permission denied"); }; panel.reload(state.cx); await state.settle(); assert.match(panel.error, /Permission denied/);
   state.hooks.read = async () => "x".repeat(400100); panel.reload(state.cx); await state.settle();
-  assert.ok(panel.code.value.length < 400100); assert.match(panel.code.value, /truncated/); assert.equal(panel.error, null);
+  assert.ok(panel.code.value().length < 400100); assert.match(panel.code.value(), /truncated/); assert.equal(panel.error, null);
 });
 
 test("out-of-order PDF conversions cannot overwrite the selected page or a new space", async t => {
@@ -140,9 +140,12 @@ test("watched source and Markdown image updates reload, unrelated files do not",
   const panel = await state.start(), first = panel.markdownBlocks.find(block => block.media).media.path, code = panel.code;
   await state.change(state.dir, [path.join(state.dir, "unrelated.txt")]); assert.equal(panel.code, code);
   await fs.writeFile(path.join(state.dir, "landscape.png"), png(640, 400, true));
-  await state.change(state.dir, [path.join(state.dir, "landscape.png")]); assert.notEqual(panel.markdownBlocks.find(block => block.media).media.path, first);
-  await fs.writeFile(state.props.file, "# Updated\n"); await state.change(state.dir, [state.props.file]); assert.equal(panel.text, "# Updated\n");
-  await fs.rm(state.props.file); await state.change(state.dir, [state.props.file]); assert.match(panel.error, /no longer available/);
+  await state.change(state.dir, [path.join(state.dir, "landscape.png")]);
+  await until(() => panel.markdownBlocks.some(block => block.media && block.media.path !== first));
+  await fs.writeFile(state.props.file, "# Updated\n"); await state.change(state.dir, [state.props.file]);
+  await until(() => panel.text === "# Updated\n");
+  await fs.rm(state.props.file); await state.change(state.dir, [state.props.file]);
+  await until(() => /no longer available/.test(panel.error));
 });
 
 test("remote text retains its machine; remote media explains the unsupported state", async t => {
@@ -160,7 +163,7 @@ test("native physical-path events refresh a source opened through a symlink alia
   state.props = { file: path.join(state.dir, "source.txt") };
   const panel = await state.start(), physical = await fs.realpath(state.props.file);
   await fs.writeFile(state.props.file, "Updated through a physical path event.\n");
-  await state.change(state.dir, [physical]); assert.match(panel.text, /physical path event/);
+  await state.change(state.dir, [physical]); await until(() => /physical path event/.test(panel.text));
 });
 
 test("HTTP links use the browser and preserve the current preview history", async t => {
