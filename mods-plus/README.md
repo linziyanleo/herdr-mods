@@ -12,7 +12,7 @@ See [the recipe](RECIPE.md) for detailed UI specifications, interactions, safety
 - **Mod and Layout Tabs**: Dedicated tabs with **All**, **Installed**, and **Not installed** filters. Installed packages appear first in **All**.
 - **Separate Install and Activation**: Package files are staged, checked with `herdr-app check`, and recorded outside active directories until explicit **Enable** or **Use layout** is selected.
 - **Reference-Safe Removal**: Inspects all local layouts before removing a mod. If an active layout still references a mod, removal is blocked with a guided cleanup prompt. Shared mods are retained.
-- **Protected Updates**: Manual updates by default, with configurable background checks (1h, 6h, 12h, 24h). Update candidates are staged and checked first without modifying running files. Three-way merge protects local edits.
+- **Protected Updates**: Manual updates by default, with an automatic-check switch and a custom numeric interval in min or hr. Package checks and file downloads run with bounded concurrency. Candidates are staged and checked first without modifying running files. Three-way merge protects local edits.
 - **Details**: Large previews, descriptions, author information, a copyable installation prompt, source links, package actions and the rendered recipe.
 - **Agent Integration Actions**: **Copy** copies the displayed installation prompt; **Open Agent tab** passes the fuller activation context to the configured agent.
 - **Sidebar Plugins Entry**: A native icon-and-label row above Settings, with a synchronized update count on the right. A collapsed sidebar shows the count when updates are available and the icon otherwise.

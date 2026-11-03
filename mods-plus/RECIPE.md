@@ -11,7 +11,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
 - Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Images load in batches of 24 as more cards are requested.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
-- Settings retains automatic checks, interval choices and a manual update check. Saving disables repeated clicks, preserves the selected value on failure and displays the error. Loading and checking use native rotating indicators; the check button shows Checking until the refresh finishes.
+- Settings has an automatic-check switch and a custom interval: a positive whole number followed by min / hr controls. Enter or leaving the number field saves the interval; clicking a unit saves the final number/unit pair. Existing hour settings are preserved. Saving disables repeated actions and displays failures. Loading and checking use native rotating indicators.
 - Plugins shows a right-aligned count of verified update candidates. The count refreshes after automatic or manual checks, application and removal. In the collapsed rail the count replaces the Plugins icon when updates are available.
 
 ## How it behaves
@@ -35,16 +35,17 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
   - A three-way merge check compares baseline hashes, local active files, and candidate files.
   - Local edits are preserved. If a conflict occurs, the candidate is held back without touching active files.
 - **Scheduled Background Checks**:
-  - While the layout with the Plugins entry is active, overdue update checks are triggered via `cx.timer`.
+  - While the layout with the Plugins entry is active, `cx.timer` checks for overdue work once per minute, supporting intervals as short as one minute.
   - Switching layouts or quitting Herdr pauses scheduling without background daemon services.
-  - Up to four upstream lookups or package preparations run concurrently; packages sharing a source use one fresh tree lookup. Checks bypass the catalog's cached tree. Failed packages are reported separately and never treated as up to date.
+  - Up to four upstream lookups or package preparations run concurrently; packages sharing a source use one fresh tree lookup. A shared pool downloads up to eight files concurrently, including files within a single package. Checks bypass the catalog's cached tree. Failed packages are reported separately and never treated as up to date.
+  - A completed check returns settings and verified candidate IDs together. Cards and the footer update in place without reloading the catalog or resetting the current search/filter.
   - Package mutations remain locked across helper processes. A lock timeout returns an error; it never proceeds unlocked. Settings reads and image downloads do not wait for package mutations.
 - **Prompt Actions**:
   - The agent-tab activation prompt includes repository source, revision, installed paths, target app home, active layout name, recipe text, and validation instructions (`herdr-app check`).
 
 ## Built from
 
-- **GPUI Elements**: `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `TextView` from `gpui-base`.
+- **GPUI Elements**: `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `Switch`, `TextView` from `gpui-base`.
 - **Herdr APIs**: `exec`, `appHome`, `props`, `closeOverlay`, `notify`, `theme`, `window`, `run`, `knownAgents`, `shared`, `setShared`. Async settings and update actions receive the context from `cx.spawn`; native `spin` and opacity transitions provide feedback without animation timers.
 - **Official Gallery**: `https://assets.herdr.dev/mods/index.json` and `https://assets.herdr.dev/layouts/index.json`. Examples use the cards embedded in `https://herdr.dev/mods/` and `https://herdr.dev/layouts/`, enriched with identities from those same indexes. Community previews use only the official moderated URLs; avatars use GitHub. Metadata is cached for one hour with stale-cache warnings on refresh failure. Search, status filters and sorting run locally.
 - **Backend Helper**: `helper.py` and `catalog.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `difflib`, `shutil`, `fcntl`).
@@ -77,3 +78,5 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 On 2026-11-03, Herdr 0.1.12 passed the source and installed runtime checks. All 15 Python tests passed. Live catalog and local installation readbacks were checked, and native gallery/details renders were inspected. The preview image was updated by the user. Full pointer/keyboard acceptance remains pending; see the [repair record](../docs/plans/mods-plus.md#gallery-repair-verification-2026-11-03). No real user package was installed, removed or updated during these checks.
 
 The subsequent update-check repair passes 20 Python tests and four JavaScript event tests, including parallel preparation with a failed source, stale candidate cleanup, lock exclusion, expiring click contexts, settings refresh and automatic/manual badge synchronization. Source and installed runtime checks pass on Herdr 0.1.12. Live pointer and animation acceptance remains unverified: the window capture returned a stale frame and native clicks returned `noWindowsAvailable`. The existing preview is retained because that capture does not show the repaired UI. See the [update repair record](../docs/plans/mods-plus.md#update-check-repair-2026-11-03).
+
+The custom-interval and download-concurrency follow-up passes 23 Python tests and six JavaScript tests. A native settings-render fixture checks the actual switch and interval controls, in addition to the normal source check. A live-network comparison in disposable app homes took 22.93s before and 6.44s after, with matching candidate revisions/hashes, the same 21 uncached blob requests, two verified candidates and no check errors. This is one paired measurement, not a network latency guarantee. See the [follow-up record](../docs/plans/mods-plus.md#custom-interval-and-check-latency-2026-11-03).
