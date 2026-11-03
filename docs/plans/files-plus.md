@@ -4,6 +4,14 @@ Status: the original package was implemented, installed locally and published to
 
 The workspace launcher update below is verified locally and awaits installation and publication.
 
+## Reuse open file previews (2026-11-03)
+
+The user requested that repeated clicks on an already open file focus its Tab/Pane and that this correction be committed and pushed separately. Lookup compares full paths and machine identities, prefers the current space, and validates candidates against live spaces, tabs and panes. It also handles Preview Plus and reveals a target hidden behind a zoomed sibling. Closed targets can be opened again.
+
+Herdr 0.1.12's `panes()` omits mod props. The implementation therefore reads the documented core `doc.get` RPC for `herdr-app` through `hc connect`, then inspects its persisted block content. It never writes the document and does not introduce a registry that would miss already open previews. Failed reads report an error without creating a duplicate. Windows uses PowerShell; remote reads carry `on`. These platform branches have controlled coverage but still need native verification on those systems.
+
+Validation: the 66-test Files Plus suite passed; the five focused reuse tests also cover stale lookups, full-path and machine separation, remote IDs, Windows path spelling, and stale panes. The runtime passed `herdr-app check`. In disposable Herdr 0.1.12 session `/tmp/fp.SSuP5n`, native commands verified existing Tab reuse, split Pane reuse despite Tab preference, reopening a closed preview, cross-space focus and three rapid requests leaving one preview. A cross-space check initially ran before the new space's panel settled; after waiting for its context, focus succeeded. No pointer or screenshot acceptance is claimed for this behavior-only change.
+
 ## Open-location settings (2026-11-03)
 
 Requested behavior: replace the Files heading with the current directory name, place settings at the far right, and let file clicks open in a center Tab (default), a center Pane, or inside the right panel. The app-wide persisted preference and viewer props are defined in the [recipe](../../files-plus/RECIPE.md#built-in-source-preview-and-preview-plus-handoff).

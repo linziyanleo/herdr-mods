@@ -34,6 +34,8 @@ The settings button opens a 360×264px dialog with three choices: Tab in center 
 
 Tab opens a mod-only tab named after the file in the captured space. Pane splits the captured center pane to the right; without a center pane, a notification asks the user to select one. Both keep the file and machine fixed even when focus changes. Ordinary text uses `files-plus` with `role: "preview"` and `{file, root, on}`; its read-only source view refreshes every ten seconds. Rich file types use Preview Plus with the same target props when installed, without requiring a layout stack. An unavailable receiver falls back to source.
 
+Before opening, reuse an existing Files Plus or Preview Plus file Tab/Pane with the same full path and machine. Prefer a match in the current space, otherwise select its space and tab, reveal it if a sibling was zoomed, and focus its pane. This also applies after changing the opening preference. A closed preview does not prevent a new one. Read the core's `herdr-app` document using the read-only `doc.get` RPC through `hc connect`, and cross-check the target against live spaces, tabs and panes. This discovers previews opened before the mod reloaded without keeping a separate registry. If that lookup fails, show an error instead of opening a potential duplicate.
+
 Inside right panel replaces the tree with a read-only syntax-highlighted source editor (`EditorState` with `readonly: true`). Back returns to the existing expanded tree and restores row selection. File changes refresh the tree, Git marks and an open preview. An unchanged file and look keep the existing editor and scroll state. A code-font or syntax-color change recreates the read-only editor from its cached text because Herdr exposes these options only at construction. Switching terminal focus within a workspace preserves expansions and previews.
 
 In Inside right panel mode, when paired with Preview Plus via `props.previewStack` in a layout stack, clicking `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` or `.pdf` publishes the target `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and selects `preview-plus` in that stack. Ordinary text stays in Files Plus's built-in source editor. If Preview Plus is absent or not installed, rich files gracefully fall back to the built-in source editor.
@@ -87,7 +89,7 @@ files-plus/
   licenses/
   mods/files-plus/
     main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
-    roots.js, config.js, actions.js, appearance.js, preferences.js
+    roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js
     mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
   tests/
 ```
@@ -167,7 +169,7 @@ Use `cx.spawn` for slow work. Create focus handles, inputs and editors in `init`
 
 ### Dependencies and access
 
-POSIX operations use `sh`, `cp`, `mkdir`, `mv` and, after explicit confirmation outside local macOS Trash, `rm`. Git marks use Git with `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false`. Windows retains PowerShell folder listing and file commands. Reveal uses `open -R`, `explorer.exe /select,…` or `xdg-open`. These programs receive paths as arguments, not interpolated shell source.
+POSIX operations use `sh`, `cp`, `mkdir`, `mv` and, after explicit confirmation outside local macOS Trash, `rm`. Git marks use Git with `--no-optional-locks -c core.fsmonitor=false -c diff.autoRefreshIndex=false`. Windows retains PowerShell folder listing and file commands. Existing file lookup uses the installed `hc connect` JSON-RPC interface through a fixed sh or PowerShell pipeline; remote document reads use the RPC's `on` parameter. Reveal uses `open -R`, `explorer.exe /select,…` or `xdg-open`. Paths and RPC data are arguments, never interpolated shell source.
 
 The mod reads workspace directories and text files, writes only requested filesystem mutations and workspace-config updates, and reads optional mods' `mod.json` to detect their presence. Local macOS Trash uses the person's `~/.Trash`. Remote filesystem calls carry the captured `on` machine. No service credentials, network services, Node.js, DOM or `setTimeout` are used by the runtime. Node.js 22+ and Python 3 are development/test dependencies only.
 
@@ -209,7 +211,7 @@ Workspace management supports local POSIX spaces; Windows and remote spaces reta
 Build and exercise these observable behaviors using disposable folders:
 
 1. `herdr-app check <app-home>/mods/files-plus` passes. The single-folder tree handles loading, empty, unreadable and missing states, hidden names and symlinks. Expanded directories respect the per-folder and total limits.
-2. A directory name replaces the Files title, with settings at the far right. The settings dialog remembers Tab, Pane or Inside right panel. Default clicks open a center Tab; Pane splits the captured pane. Text and Markdown open as read-only source without Preview Plus. In internal mode, Back returns to the same tree. Binary, absent and oversized files show their own states. A file edit refreshes the preview; unchanged bytes retain the editor state.
+2. A directory name replaces the Files title, with settings at the far right. The settings dialog remembers Tab, Pane or Inside right panel. Default clicks open a center Tab; Pane splits the captured pane. Repeated clicks on the same path and machine select its existing Tab/Pane without adding one, including an existing preview in another space or created before reload. Closed previews can be opened again. Text and Markdown open as read-only source without Preview Plus. In internal mode, Back returns to the same tree. Binary, absent and oversized files show their own states. A file edit refreshes the preview; unchanged bytes retain the editor state.
 3. A two-root saved workspace shows both trees, root names, Git marks and missing roots. Focus changes retain expansion and previews. An invalid config keeps the last valid roots with a visible error.
 4. Same-root and cross-root agent references reach the captured terminal with the correct quoting and trailing space, without Enter. Previous clipboard text is restored. A closed terminal is refused.
 5. Copy and Paste preserve the source and choose available copy names. A directory cannot be pasted into itself or through a symlink into a descendant. Cross-machine paste is disabled. Absolute and relative path copying uses the clicked entry's owning root.

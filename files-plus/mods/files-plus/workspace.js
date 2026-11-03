@@ -10,6 +10,7 @@ import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metri
 import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
 import { dragMove } from "./drag.js";
 import { OPEN_LOCATION, openLocation } from "./preferences.js";
+import { findOpenFile, focusOpenFile } from "./open-files.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -266,29 +267,29 @@ export class FilesPanel extends View {
     const request = this.openRequest = {};
     const stack = props()?.previewStack, context = this.context, space = this.spaceId, on = this.on;
     const destination = openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
-    if (destination !== "internal") {
-      if (destination === "pane" && !pane) {
-        notify({ title: "Select a center pane before opening a file", level: "info" });
-        return;
-      }
-      cx.spawn(async cx => {
-        const rich = RICH.test(path) && await installed("preview-plus").catch(() => false);
-        if (!this.current(context) || this.openRequest !== request) return;
-        const mod = rich ? "preview-plus" : "files-plus";
-        const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
-        if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
-        else run("pane.split", { pane, direction: "right", mod, props: previewProps });
-      });
-      return;
-    }
-    if (!stack || !RICH.test(path)) { this.show(path, cx); return; }
     cx.spawn(async cx => {
       try {
-        if (!await installed("preview-plus")) { if (this.current(context) && this.openRequest === request) this.show(path, cx); return; }
+        const existing = await findOpenFile(path, on, space);
         if (!this.current(context) || this.openRequest !== request) return;
-        setShared("preview-plus.target", { ...(shared("preview-plus.target") || {}), [space]: { file: path, root, on } });
-        run("layout.select", { stack, child: "preview-plus" });
-      } catch { if (this.current(context) && this.openRequest === request) this.show(path, cx); }
+        if (existing) { focusOpenFile(existing); return; }
+        if (destination === "pane" && !pane) {
+          notify({ title: "Select a center pane before opening a file", level: "info" });
+          return;
+        }
+        const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+        if (!this.current(context) || this.openRequest !== request) return;
+        if (destination !== "internal") {
+          const mod = rich ? "preview-plus" : "files-plus";
+          const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
+          if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
+          else run("pane.split", { pane, direction: "right", mod, props: previewProps });
+        } else if (rich) {
+          setShared("preview-plus.target", { ...(shared("preview-plus.target") || {}), [space]: { file: path, root, on } });
+          run("layout.select", { stack, child: "preview-plus" });
+        } else this.show(path, cx);
+      } catch {
+        if (this.current(context) && this.openRequest === request) notify({ title: "Cannot check open files. Try again.", level: "error" });
+      }
       cx.notify();
     });
   }
