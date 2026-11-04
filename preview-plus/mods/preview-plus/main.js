@@ -416,11 +416,12 @@ export default class PreviewPlus extends View {
       });
     }
     const { colors, font } = appearance(), file = this.selected?.file, type = file ? kind(file) : null, media = type === "image" || type === "pdf";
-    const canBack = this.history.length > 0 || this.owner.mode !== "pane";
-    return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).rounded(10).overflow_hidden().bg(colors.background).border_1().border_color(colors.border).text_color(colors.foreground).font_family(font).text_size(13)
+    const panelFrame = this.owner.mode !== "pane";
+    return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background)
+      .when(panelFrame, el => el.rounded(10).border_1().border_color(colors.border)).text_color(colors.foreground).font_family(font).text_size(13)
       .on_key_down((event, cx) => this.keyDown(event, cx))
       .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
-        .when(Boolean(file), el => el.child(button("preview-back", "←", colors, cx => this.back(cx), canBack)))
+        .when(Boolean(file) && panelFrame, el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
         .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "Files"))
         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
           .tooltip(this.document?.saving ? "Saving…" : "Unsaved changes").accessibility_label(this.document?.saving ? "Saving" : "Unsaved changes")))

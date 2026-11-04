@@ -28,10 +28,10 @@ test("preview buttons keep the default pointer and use Herdr hover and pressed c
   const preview = find(r.render(), "preview-mode");
   assert.equal(preview.attributes.tooltip[0], "Preview");
   assert.equal(styles(preview).bg[0], r.theme.hover);
-  const back = find(r.render(), "preview-back");
-  defaultPointer(back); assert.equal(back.attributes.disabled[0], true);
-  assert.equal(back.attributes.text_color[0], r.theme.dim); assert.equal(back.attributes.hover, undefined);
-  assert.equal(back.handlers.on_click, undefined); assert.equal(back.attributes.accessibility_label[0], "Back");
+  const root = r.render();
+  assert.equal(find(root, "preview-back"), null);
+  assert.equal(root.attributes.rounded, undefined);
+  assert.equal(root.attributes.border_1, undefined);
 });
 
 test("preview zoom and page controls expose disabled loading and boundary states without pointer changes", async t => {
@@ -127,7 +127,7 @@ test("editing actions share the original toolbar as native icon buttons with too
   const r = await runtime(t), file = path.join(r.dir, "note.md"); await fs.writeFile(file, "# Note\n");
   r.props.file = file; await r.start(); r.panel.setSource(true, r.cx); r.edit("# Draft\n");
   const toolbar = find(r.render(), "preview-toolbar");
-  for (const id of ["preview-back", "preview-mode", "preview-wrap", "preview-discard", "preview-save", "preview-open"]) {
+  for (const id of ["preview-mode", "preview-wrap", "preview-discard", "preview-save", "preview-open"]) {
     const control = find(toolbar, id);
     assert.ok(control, id + " belongs to the top toolbar");
     assert.ok(control.nodes.some(node => node.kind === "svg"), id + " has a native SVG icon");
