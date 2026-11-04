@@ -54,6 +54,8 @@ class Examples(HTMLParser):
         d = dict(attrs)
         if d.get("data-kind") != "example" or not d.get("data-gh"):
             return
+        if d.get("data-type") and d["data-type"] != self.kind + "s":
+            return
         source = urllib.parse.urlparse(d["data-gh"]).path.strip("/").split("/")
         if len(source) < 5 or source[2] != "tree":
             return
@@ -99,13 +101,14 @@ def official_packages(manager):
             parser = Examples(kind)
             parser.feed(download(f"https://herdr.dev/{plural}/").decode("utf-8"))
             if not parser.items:
-                raise ValueError("Official examples were not found")
+                return []
             return parser.items
 
         groups = {}
         for collection, fetcher in (("index", community), ("examples", examples)):
             try:
-                groups[collection] = manager._cached(f"official-{plural}-{collection}.json", 3600, fetcher)
+                cache_version = "-v2" if collection == "examples" else ""
+                groups[collection] = manager._cached(f"official-{plural}-{collection}{cache_version}.json", 3600, fetcher)
             except Exception as exc:
                 manager.catalog_errors.append(str(exc))
         indexed = {p["id"]: p for p in groups.get("index", [])}

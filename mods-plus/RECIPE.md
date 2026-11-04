@@ -77,6 +77,8 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 
 ## Repair verification
 
+The gallery type repair filters example cards by their official `data-type`, with a new examples cache key to discard previously mixed classifications. The repository preview is now encoded as PNG, matching its filename. The official Mods Plus index currently omits `previewUrl`; publishing the corrected asset and upstream gallery reprocessing are still required before the community card can display it. The client retains the official moderated-preview policy.
+
 On 2026-11-03, Herdr 0.1.12 passed the source and installed runtime checks. All 15 Python tests passed. Live catalog and local installation readbacks were checked, and native gallery/details renders were inspected. The preview image was updated by the user. Full pointer/keyboard acceptance remains pending; see the [repair record](../docs/plans/mods-plus.md#gallery-repair-verification-2026-11-03). No real user package was installed, removed or updated during these checks.
 
 The subsequent update-check repair passes 20 Python tests and four JavaScript event tests, including parallel preparation with a failed source, stale candidate cleanup, lock exclusion, expiring click contexts, settings refresh and automatic/manual badge synchronization. Source and installed runtime checks pass on Herdr 0.1.12. Live pointer and animation acceptance remains unverified: the window capture returned a stale frame and native clicks returned `noWindowsAvailable`. The existing preview is retained because that capture does not show the repaired UI. See the [update repair record](../docs/plans/mods-plus.md#update-check-repair-2026-11-03).

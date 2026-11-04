@@ -138,6 +138,20 @@ class CatalogTests(unittest.TestCase):
         path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + gallery.struct.pack(">II", 1600, 1000))
         self.assertEqual(gallery.image_size(path), (1600, 1000))
 
+    def test_mixed_examples_follow_card_type(self):
+        html = ''.join(
+            f'<div data-kind="example" data-type="{kind}s" data-name="{kind}" '
+            f'data-owner="herdrdev" data-gh="https://github.com/herdrdev/examples/tree/main/{kind}"></div>'
+            for kind in ("mod", "layout"))
+        for kind in ("mod", "layout"):
+            parser = gallery.Examples(kind)
+            parser.feed(html)
+            self.assertEqual([(p["name"], p["kind"]) for p in parser.items], [(kind, kind)])
+
+    def test_repository_preview_is_png(self):
+        preview = Path(__file__).parents[1] / "preview.png"
+        self.assertTrue(preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+
 
 if __name__ == "__main__":
     unittest.main()
