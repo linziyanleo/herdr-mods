@@ -28,9 +28,22 @@ async function request(action, values = {}) {
   assert.equal(receipt.error, null);
   return receipt;
 }
-const shot = name => cli(["shot", path.join(info.base, name + ".png")]);
+async function shot(name) {
+  // A resize wakes the fixture's initial/frozen native frame in the test environment.
+  await cli(["do", "window.maximize"]);
+  let previous = null, stable = 0;
+  await until(async () => {
+    const state = await read(path.join(info.control, "state.json"));
+    const value = JSON.stringify(state);
+    stable = !state.busy && value === previous ? stable + 1 : 0;
+    previous = value;
+    return stable >= 3;
+  });
+  return cli(["shot", path.join(info.base, name + ".png")]);
+}
 await cli(["status"]);
 await cli(["do", "layout.switch", "--name", info.layout]);
+await cli(["do", "window.maximize"]);
 await until(() => read(path.join(info.control, "state.json")));
 await request("activate");
 await request("discover");
@@ -67,8 +80,11 @@ assert.equal((await read(path.join(info.app, "keys.json"))).global["cmd-shift-y"
 await request("remove");
 await request("remove");
 assert.equal(await fs.stat(path.join(info.app, "mods/review-fixture")).catch(() => null), null);
+const status = JSON.parse((await cli(["status"])).stdout);
+assert.deepEqual(status.errors, [], "Disposable app must finish without runtime errors");
 await fs.writeFile(path.join(info.base, "native-report.json"), JSON.stringify({ passed: [
   "multi-package discovery", "review cancellation", "install without activation", "shortcut conflict preservation",
   "enable", "prepared update review", "local drift refusal", "reviewed apply", "remove preserving rebound keys",
-], pointerAcceptance: "Not exercised by this driver; root must inspect screenshots and native pointer/keyboard flows." }, null, 2));
+], runtimeErrors: status.errors,
+pointerAcceptance: "Not exercised by this driver; root must inspect screenshots and native pointer/keyboard flows." }, null, 2));
 console.log(path.join(info.base, "native-report.json"));
