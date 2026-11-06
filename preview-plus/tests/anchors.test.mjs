@@ -51,6 +51,7 @@ test("only an open list paragraph accepts lazy continuation before a top-level s
   assert.equal(parsed.headings[0].start, exact.indexOf("After list"));
   const blocks = [
     '- Item\n  ## Nested heading\n',
+    '- Item\n  --\n',
     '- Item\n  ---\n',
     '- ```js\n  const value = 1;\n  ```\n',
     '- ```js\n  const value = 1;\n',

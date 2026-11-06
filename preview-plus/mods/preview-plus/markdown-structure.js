@@ -38,7 +38,7 @@ export function markdownStructure(text) {
       listFence = marker[1]; listParagraph = false; return;
     }
     listParagraph = Boolean(value.trim()) && !ATX.test(value) && !THEMATIC.test(value) &&
-      !(listParagraph && /^ {0,3}=+[ \t]*$/.test(value)) &&
+      !(listParagraph && /^ {0,3}(?:=+|-+)[ \t]*$/.test(value)) &&
       !/^ {0,3}\[.*\]:/.test(value) && (listParagraph || !/^(?: {4}|\t)/.test(value));
   };
   const heading = (raw, level, start) => {
