@@ -60,7 +60,7 @@ const reports = [];
 for (const [name, text] of samples) {
   const file = path.join(root, "structured", name);
   await filesRequest({ type: "preview", path: file, root });
-  const value = await until(preview, value => value.selected?.file === file && !value.loading && !value.error, name);
+  const value = await until(preview, value => value.selected?.file === file && !value.loading && !value.error && !value.dataError && value.structuredRows > 0, name);
   assert.equal(value.selected.root, root);
   assert.equal(value.selected.on, null);
   assert.equal(value.owner.mode, "paired");
