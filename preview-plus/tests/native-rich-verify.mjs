@@ -30,8 +30,9 @@ const shot = async name => { await request({ action: "activate" }); await execut
 const passed = label => { reports.push(label); console.log("passed: " + label); };
 const file = name => path.join(info.project, name);
 const previousDriver = (await state().catch(() => null))?.driverIdentity;
+const driverRun = `${Date.now()}-${Math.random()}`;
 await fs.rm(path.join(control, "request.json"), { force: true });
-await command("layout.set", { layout: { id: "root", type: "block", content: { mod: "preview-plus-driver", props: { base: control, file: file("community.md") } } } });
+await command("layout.set", { layout: { id: "root", type: "block", content: { mod: "preview-plus-driver", props: { base: control, file: file("community.md"), driverRun } } } });
 await until(state, v => v.driverIdentity && v.driverIdentity !== previousDriver && v.owner?.target?.file === file("community.md"), "new Preview driver");
 await request({ action: "activate" });
 let current = await ready(v => v.selected?.file === file("community.md") && v.markdownBlocks?.filter(b => b.diagram && b.media).length === 2, "native Mermaid");
