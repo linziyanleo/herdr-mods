@@ -1,6 +1,6 @@
 # Mods Plus implementation plan
 
-Status: review and direct-import implementation is ready for local delivery on `agent/mods-plus-community`, based on `1f82759aea1cd8c78c9de36fe624a27cab5c2253`. The 2026-11-06 user request authorizes implementation and commits; the coordinating agent owns integration into `main`, push and serial native acceptance under the existing verification authorization. Normal-home installation and layout switching are excluded. This worker does not launch native windows.
+Status: install/update review and direct GitHub import are implemented and verified in the combined source release. Development used `agent/mods-plus-community`, based on `1f82759aea1cd8c78c9de36fe624a27cab5c2253`, under the user's authorization to verify, integrate into `main` and push. Normal-home installation and layout switching are excluded.
 
 ## Goal and delivery
 
@@ -87,7 +87,7 @@ Catalog or update-check failures must not change installed detection or report u
 
 ## Review and direct import (2026-11-06)
 
-The user requested complete install/update review and direct public GitHub import in this mod's isolated worktree. Changes are confined to `mods-plus/**` and this record. The unrelated `mods-plus-timeout` worktree owns execution/timeout work; this task does not absorb it or redesign helper dispatch. No additional agents are used.
+The user requested install/update review and direct public GitHub import. The unrelated `mods-plus-timeout` worktree owns execution/timeout work; this task does not absorb it or redesign helper dispatch.
 
 The existing details flow now exposes Review install/Review update, then the concrete files, mods, layouts, keys and local edits, followed by confirmation or cancellation. Preview reads GitHub metadata/blobs and may populate caches; it does not modify package records, installed files, keys or layouts, or run downloaded code. Install confirmation retains the native staged checks and separate activation. Review tokens bind the exact commit/manifest and relevant current local state. Installation refuses a moved source; updates apply the exact reviewed prepared candidate and reject replaced candidates or local drift.
 
@@ -99,7 +99,9 @@ CLI integration contracts: `discover SOURCE` returns package descriptors; `revie
 
 Validation: 36 Python cases (helper 4, catalog 12, updates 8, acceptance 1, review/import 11) and nine Node event cases pass. The added cases verify source parsing, multiple packages, no preview writes/execution, shortcut conflicts, commit versus tree identity, source persistence/offline catalog access, reviewed revision/candidate/local drift, merge output, layout edits and install versus activation. Herdr 0.1.13 on macOS 27.2 passes the source check and isolated native driver/review-render checks. `git diff --check` passes. The eager native review check verifies renderable controls, not actual pointer interaction.
 
-Remaining native acceptance: `node mods-plus/tests/native-fixture.mjs` prepares an isolated home without starting a window/core. After the coordinating agent launches it with its printed environment, `node mods-plus/tests/native-verify.mjs <session.json>` drives the production view and helper against local fixtures and emits screenshots/report. Inspect real source input/Enter, review scrolling/cancel/confirm, conflict messages and install/enable/update/remove controls with pointer/keyboard, narrow/wide sizing and light/dark themes. Capture `herdr-app shot`; replace the preview only after an actual suitable capture. This worker does not run the window driver, call `hc`, install to the normal home or switch its layout.
+Native acceptance in `/tmp/mp.lBl5xK` passed nine production-view/helper checks: multi-package discovery, review cancellation, installation without activation, shortcut conflicts, enable, prepared update review, refusal after local drift, reviewed apply and removal preserving rebound keys. `herdr-app status` reported no errors. The inspected `review-delivery.png` is the current `preview.png` and shows the concrete file changes and both preserved shortcut conflicts. The fixture resizes its own window before captures because this environment can retain an old frame.
+
+A live public GitHub discovery of this repository found Files Plus, Mods Plus and Preview Plus as separate packages. A read-only Files Plus install review resolved commit `1f82759aea1cd8c78c9de36fe624a27cab5c2253` and returned its manifest and change list. No live package was installed. Physical pointer/keyboard dispatch, scrolling and additional narrow/theme combinations remain unverified: CUA could not locate the isolated window. The existing normal app home and user bindings remain unchanged.
 
 Attribution: UX references are [herdr-customize/docs/app.md](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager). No third-party code/assets were copied, and no license decision or new library dependency is introduced. Review/check output is not a security certification.
 
