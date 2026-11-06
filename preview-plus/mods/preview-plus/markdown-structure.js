@@ -6,10 +6,41 @@ const titleText = value => value.replace(/!?(\[([^\]]*)\])\([^)]*\)/g, "$2")
   .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
 
 const columns = whitespace => [...whitespace].reduce((column, char) => char === "\t" ? column + 4 - column % 4 : column + 1, 0);
+const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)$/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const LIST = /^( {0,3})(?:[-+*]|\d{1,9}[.)])([ \t]+|$)/;
+const THEMATIC = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+
+function listItem(value, marker) {
+  const prefix = marker[0].length - marker[2].length, gap = columns(marker[0]) - prefix;
+  const padding = gap >= 1 && gap <= 4 ? gap : 1;
+  return { indent: prefix + padding, text: " ".repeat(Math.max(0, gap - padding)) + value.slice(marker[0].length) };
+}
 
 export function markdownStructure(text) {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) || [], headings = [], diagrams = [], used = new Set(), counts = new Map();
-  let offset = 0, fence = null, previous = null, listIndent = null, listBlank = false;
+  let offset = 0, fence = null, previous = null, listIndent = null, listParagraph = false, listFence = null;
+  const listLine = value => {
+    // Only paragraph content can continue after its list indentation is omitted.
+    // Inspect nested container prefixes, but never interpret fenced code as prose.
+    for (;;) {
+      const quote = /^ {0,3}>[ \t]?/.exec(value), nested = !listFence && LIST.exec(value);
+      if (quote) value = value.slice(quote[0].length);
+      else if (nested && !THEMATIC.test(value)) { value = listItem(value, nested).text; listParagraph = false; }
+      else break;
+    }
+    const marker = FENCE.exec(value);
+    if (listFence) {
+      if (marker && marker[1][0] === listFence[0] && marker[1].length >= listFence.length && !marker[2].trim()) listFence = null;
+      listParagraph = false; return;
+    }
+    if (marker && !(marker[1][0] === "`" && marker[2].includes("`"))) {
+      listFence = marker[1]; listParagraph = false; return;
+    }
+    listParagraph = Boolean(value.trim()) && !ATX.test(value) && !THEMATIC.test(value) &&
+      !(listParagraph && /^ {0,3}=+[ \t]*$/.test(value)) &&
+      !/^ {0,3}\[.*\]:/.test(value) && (listParagraph || !/^(?: {4}|\t)/.test(value));
+  };
   const heading = (raw, level, start) => {
     const title = titleText(raw), base = title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "").replace(/\s/g, "-") || "section";
     let suffix = counts.get(base) || 0, slug = suffix ? `${base}-${suffix}` : base;
@@ -18,22 +49,21 @@ export function markdownStructure(text) {
     used.add(slug); headings.push({ title: title || "Untitled", level, slug, start });
   };
   for (const line of lines) {
-    const value = line.replace(/\r?\n$/, ""), marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(value);
-    const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)$/.exec(value);
+    const value = line.replace(/\r?\n$/, ""), marker = FENCE.exec(value), atx = ATX.exec(value);
     if (!fence) {
-      const list = /^( {0,3})(?:[-+*]|\d{1,9}[.)])([ \t]+|$)/.exec(value);
-      const thematic = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(value);
+      const list = LIST.exec(value), thematic = THEMATIC.test(value);
       const indent = columns(/^[ \t]*/.exec(value)[0]);
       // Leave list contents (including lazy continuation lines) in one native TextView.
       // Extracting a nested heading or fence would break the surrounding list syntax.
       if (listIndent !== null && (!value.trim() || indent >= listIndent ||
-          (!listBlank && !list && !marker && !atx && !thematic && !/^ {0,3}>/.test(value)))) {
-        listBlank = !value.trim(); previous = null; offset += line.length; continue;
+          (listParagraph && !list && !marker && !atx && !thematic && !/^ {0,3}>/.test(value)))) {
+        if (!value.trim() || indent >= listIndent) listLine(value.replace(/^[ \t]*/, whitespace => " ".repeat(columns(whitespace))).slice(listIndent));
+        previous = null; offset += line.length; continue;
       }
-      listIndent = null; listBlank = false;
+      listIndent = null; listParagraph = false; listFence = null;
       if (list && !thematic) {
-        const prefix = list[0].length - list[2].length, gap = columns(list[0]) - prefix;
-        listIndent = prefix + (gap >= 1 && gap <= 4 ? gap : 1);
+        const item = listItem(value, list);
+        listIndent = item.indent; listLine(item.text);
         previous = null; offset += line.length; continue;
       }
     }
