@@ -43,6 +43,36 @@ test("nested headings and fences keep the surrounding list in one native Markdow
   assert.equal(panel.headings.length, 0);
 });
 
+test("only an open list paragraph accepts lazy continuation before a top-level setext heading", async t => {
+  const state = await runtime(t), { markdownStructure } = await state.load("markdown-structure.js");
+  const exact = '- # Item\nAfter list\n==========\n';
+  const parsed = markdownStructure(exact);
+  assert.deepEqual(Array.from(parsed.headings, h => h.slug), ["after-list"]);
+  assert.equal(parsed.headings[0].start, exact.indexOf("After list"));
+  const blocks = [
+    '- Item\n  ## Nested heading\n',
+    '- Item\n  ---\n',
+    '- ```js\n  const value = 1;\n  ```\n',
+    '- ```js\n  const value = 1;\n',
+    '-     indented code\n',
+    '- > # Quoted heading\n',
+    '- - # Nested heading\n',
+  ];
+  for (const block of blocks) {
+    const source = block + 'After list\n==========\n';
+    assert.deepEqual(Array.from(markdownStructure(source).headings, h => h.slug), ["after-list"], source);
+  }
+  for (const block of ['- # Item\n', '- Item\n\n', '- ```js\n  code\n  ```\n', '- > # Heading\n']) {
+    const source = block + '  Paragraph\nlazy continuation\n  ## Nested heading\n- Next\n';
+    assert.equal(markdownStructure(source).headings.length, 0, source);
+  }
+  assert.equal(markdownStructure('- > Paragraph\nlazy continuation\n  ## Nested heading\n').headings.length, 0);
+  const { stageMarkdown } = await state.load("markdown.js");
+  const staged = await stageMarkdown(exact, { file: path.join(state.dir, "list.md"), on: null }, { colors: state.theme, font: "Geist" });
+  assert.equal(staged.blocks.length, 2); assert.equal(staged.blocks[1].heading.slug, "after-list");
+  assert.equal(staged.blocks.map(block => block.text).join(""), exact);
+});
+
 test("same-document anchors and contents retain editor, draft, source and heading history", async t => {
   const state = await runtime(t), file = path.join(state.dir, "readme.md");
   await fs.writeFile(file, "# Top\n\n## Details\n\nOriginal.\n\n## Details\n\nSecond.\n"); state.props = { file };
