@@ -1,6 +1,6 @@
 # Files Plus
 
-Browse a single folder or every folder in a workspace in the Files panel. Right-click an entry to insert an agent reference, copy it, paste it, copy an absolute or relative path, reveal it in Finder or File Explorer, or create, rename and remove files. A persistent + adds workspace folders, and root entries offer a dedicated root menu to launch terminals or remove folders. Drag any file or folder to insert an agent reference into the active terminal or agent. Adaptive fitting sizes the panel to content, context menus fit their text within window edges, and folders expand and collapse through native transitions. High-performance retained row chunking and incremental change tracking keep scrolling and tree updates fast. Files open in a center Tab by default; the header settings offer a center Pane or the right panel instead. Text uses the built-in read-only source viewer, with optional rich rendering through Preview Plus.
+Browse a single folder or every folder in a workspace in the Files panel. Find files by name or path, including unopened directories. Right-click an entry to insert an agent reference, copy it, paste it, copy an absolute or relative path, reveal it in Finder or File Explorer, or create, rename and remove files. A persistent + adds workspace folders, and root entries offer a dedicated root menu to launch terminals or remove folders. Drag any file or folder to insert an agent reference into the active terminal or agent. Adaptive fitting sizes the panel to content, context menus fit their text within window edges, and folders expand and collapse through native transitions. High-performance retained row chunking and incremental change tracking keep scrolling and tree updates fast. Files open in a center Tab by default; the header settings offer a center Pane or the right panel instead. Text uses the built-in read-only source viewer, with optional rich rendering through Preview Plus, including JSON, CSV and TSV in the combined community delivery.
 
 ![Files Plus](preview.png)
 
@@ -27,6 +27,18 @@ The optional [sidebar pointer patch](patches/sidebar-default-pointer.patch) chan
 Folders load lazily, directories sort first, hidden entries are included and `.git` is omitted. Symlinks appear as files and are not recursively followed. Visible rows are flattened and partitioned into retained chunks of 100 rows in child views inside a native scrolling container. Scrolling executes entirely in native Rust with zero JavaScript calls per frame. Unrelated live updates (such as agent ticks or terminal output in other panes) rebuild zero tree rows.
 
 Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Incremental filesystem watching via `watchFolder` maps changed paths back to their parent directories, debounces filesystem bursts by 200ms, lists at most four folders concurrently, and reloads only expanded affected folders. Internal `.git` lock churn is ignored, and Git status is throttled to once per repository every two seconds. Cached physical roots and repository discovery persist until context or config changes.
+
+### Filename and path search
+
+A 30px native input below the header searches files under the current single-folder root or every declared workspace root, including closed roots and unopened descendants. It uses 13px text, a 0.5px input border and existing Herdr theme colors. Results use 48px rows with a 13px basename and 12px relative path; multi-root results prefix that path with the root's display name. Duplicate display names use the logical root path instead. A tooltip preserves the full root, path and remote machine.
+
+Whitespace-separated terms must all occur in the root-relative path, case-insensitively and in any order. Use `/` for path separators. Punctuation, glob characters and regex characters are literal; `src/ report .ts` is a path query, not a content query. Directories are traversed but are not results. Hidden and Git-ignored files, including dependencies, stay searchable, matching the tree policy. Entries named `.git` are excluded at every depth. Symlinks are listed as files and are not followed recursively; a declared root may itself be a logical alias.
+
+The search scans complete directory listings, independently of the tree's 500-per-folder, 5,000-total and depth limits. It batches at most four directory reads per request and shows at most 200 matching files. Only a confirmed additional match produces “200+ results. Refine search.” Missing or unreadable directories show “Search incomplete” with details, while readable roots still contribute results. Large roots can take time, especially over a remote connection; results appear after the scan completes or reaches the result limit. There is no persistent index, content reading or new runtime dependency.
+
+Typing is debounced by 180ms. New queries, changed roots/spaces/machines and closing the view invalidate pending replies. The query is re-run against changed roots; focus movement within an unchanged workspace retains it. Filesystem events and existing safety polls refresh an active search, including changes below unopened folders. A running scan finishes before a later poll can restart it; files changing during a scan are not an atomic snapshot and are picked up by subsequent refreshes.
+
+Up/down moves the selection and scrolls it into view. Enter or a result click calls the existing file-open path, preserving machine/root identity, Tab/Pane reuse, Preview Plus handoff and the saved opening preference. Clear or Escape returns to the same retained tree and expansion state. An internal source preview's Back returns to the search first. Search adds no global shortcut or key binding.
 
 ### Built-in source preview and Preview Plus handoff
 
@@ -89,7 +101,7 @@ files-plus/
   licenses/
   mods/files-plus/
     main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
-    roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js
+    roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js, search.js
     mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
   tests/
 ```
@@ -106,7 +118,7 @@ Keep tree state, incremental local watchers, Git marks and read-only previews in
 }
 ```
 
-No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged.
+No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It reuses `workspace.js` directory listing with the tree-only entry cap disabled; it never populates or expands the tree as a side effect.
 
 The baseline is native Herdr 0.1.11. Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/focus/settings, `shared`, `setShared`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `pickFolder`, overlays and `run`. Commands are `pane.focus`, `terminal.paste`, `tab.new` and optional `layout.select`.
 
@@ -194,15 +206,17 @@ Files Plus works alone. Preview Plus is an available separate package; installin
 }
 ```
 
-With Inside right panel selected, both the prop and installed receiver, `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg` and `.pdf` publish the captured target and select `preview-plus`. Ordinary text stays in Files Plus. The receiver returns with `layout.select {stack:"files",child:"files-plus-tree"}`. Files Plus retains its expansions while hidden. Without the receiver, fall back to source preview. Stale asynchronous reads and receiver checks cannot replace a newer selection or another space.
+With Inside right panel selected, both the prop and installed receiver, `.md`, `.markdown`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`, `.pdf`, `.json`, `.csv` and `.tsv` publish the captured target and select `preview-plus` in the combined community delivery. Ordinary text stays in Files Plus. The receiver returns with `layout.select {stack:"files",child:"files-plus-tree"}`. Files Plus retains its expansions while hidden. Without the receiver, fall back to source preview. Stale asynchronous reads and receiver checks cannot replace a newer selection or another space. JSON/CSV/TSV routing is the root-owned integration change `cee18f3`; the filename-search branch intentionally leaves the existing rich-extension list unchanged until integration.
 
 ### Attribution
 
 The Files tree, editor and original SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). The settings SVG comes from Herdr 0.1.12's workspace-chrome Lucide icon. Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
 
+Filename search takes interaction concepts from [cybertron288's filetree](https://github.com/cybertron288/herdr-mods/tree/main/filetree) and [Mantiq's Telescope](https://github.com/Mantiq-com/herdr-telescope): search alongside browsing and keyboard selection of file results. The implementation uses this package's existing listing and opening contracts. No source, assets or dependencies from those projects are copied.
+
 ## Watch out
 
-Keep the inherited limits: 500 entries per folder, 5,000 loaded entries across all roots, 40 nested tree levels, 400,000 preview characters and Herdr's 1 MiB text-read ceiling. Binary, missing, unreadable and oversized files show explicit source-preview states. Preview Plus owns rich rendering, links, images and PDF conversion.
+Keep the inherited tree/preview limits: 500 entries per folder, 5,000 loaded tree entries across all roots, 40 nested tree levels, 400,000 preview characters and Herdr's 1 MiB text-read ceiling. Filename search has its separate 200-result bound and does not inherit the tree traversal limits. Binary, missing, unreadable and oversized files show explicit source-preview states. Preview Plus owns rich rendering, links, images, PDF conversion and structured-data views.
 
 Workspace management supports local POSIX spaces; Windows and remote spaces retain single-folder browsing. Windows/Linux/remote native interactions need verification on those systems. Clipboard operations can restore previous text, but not a previous non-text clipboard. Tests do not install into the person's normal app home, replace their layout or change shortcuts.
 
@@ -223,5 +237,6 @@ Build and exercise these observable behaviors using disposable folders:
 11. Unrelated live updates rebuild no retained rows. Watches reload only expanded affected parents, lock churn does no work, unchanged data does not redraw, and loaded entries never exceed the budget.
 12. Both menu kinds fit their text and remain inside window edges at 100% and zoomed scale. Herdr colors, configured UI/code fonts and native overlay frames apply to the relevant controls, including same-appearance theme changes. The panel border, corners, header, row sizes and title weight match shipped Files/Changes defaults at the same zoom; generic GPUI tokens cannot change them. An open source preview follows configured fonts without a file reread. Selection persists after Back. Opt-in fitting keeps width stable on folder toggles and respects ratio/pixel caps and manual divider overrides.
 13. A short press remains a click. Drag to show the pill, then click outside Files to insert one reference without Enter and restore clipboard text; clicking inside, Escape and right-click cancel. Check direct release delivery on the installed Herdr version and retain click completion when the original view keeps the mouse grab.
+14. Search finds unopened nested files, including beyond the tree entry/depth limits; identical relative paths across roots stay distinguishable. Literal terms, hidden/ignored policy, empty/error states and honest result truncation agree with the contract above. Delayed queries and changed roots cannot open stale targets. Native typing, arrows, Enter, result clicks, Clear and Escape work, and the original expanded tree survives. `node files-plus/tests/check-search.mjs` checks a populated native search description without starting a window; `native-search.mjs` prepares the separate runtime acceptance report.
 
-The committed package also includes automated and isolated native test drivers. Their commands are in [README.md](README.md); they are development tools, not runtime dependencies. Actual results and remaining platform/manual checks are in the [implementation plan](../docs/plans/files-plus.md#implementation-and-acceptance).
+The committed package also includes automated and isolated native test drivers. Their commands are in [README.md](README.md); they are development tools, not runtime dependencies. The 2026-11-06 search addition has automated tests and mod checks; its native interaction run and screenshot are pending root-coordinated permission. The existing preview is an earlier capture and does not show search. Actual results and remaining platform/manual checks are in the [implementation plan](../docs/plans/files-plus.md#filename-and-path-search-2026-11-06).
