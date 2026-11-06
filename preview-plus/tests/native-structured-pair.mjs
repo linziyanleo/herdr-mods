@@ -55,11 +55,15 @@ await command("layout.set", { layout: { id: "root", type: "row", children: [
 ] } });
 await until(files, value => Boolean(value.entries?.[root]), "Files Plus tree");
 await filesRequest({ type: "open-location", value: "internal" });
-await filesRequest({ type: "toggle", path: path.join(root, "structured") });
+if (!(await files()).folders.includes(path.join(root, "structured"))) {
+  await filesRequest({ type: "toggle", path: path.join(root, "structured") });
+}
 const reports = [];
 for (const [name, text] of samples) {
   const file = path.join(root, "structured", name);
   await filesRequest({ type: "preview", path: file, root });
+  // Hidden test windows may not paint a changed stack until resized.
+  await command("window.maximize");
   const value = await until(preview, value => value.selected?.file === file && !value.loading && !value.error && !value.dataError && value.structuredRows > 0, name);
   assert.equal(value.selected.root, root);
   assert.equal(value.selected.on, null);
