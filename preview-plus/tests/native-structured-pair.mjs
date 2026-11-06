@@ -71,6 +71,7 @@ for (const [name, text] of samples) {
   assert.equal(value.source, false);
   assert.equal(value.text, text);
   assert.deepEqual(value.history, []);
+  await command("window.maximize");
   await execute("herdr-app", ["shot", path.join(info.base, `paired-${name.split(".").pop()}.png`)], { env });
   await back();
   await filesRequest({ type: "snapshot" });
