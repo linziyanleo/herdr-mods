@@ -26,7 +26,8 @@ export function markdownView(panel, colors) {
         if (block.error) return v_flex().gap(6).flex_none().text_size(12)
           .child(div().text_color(colors.ansi1).child(`Mermaid: ${block.error}`))
           .child(TextView.markdown(`preview-diagram-source-${index}`, block.text).selectable(true).scrollable(false).w_full());
-        return div().id(`preview-diagram-${index}`).w_full().flex_none().overflow_x_scrollbar()
+        // The native scrollbar wrapper otherwise defaults to the full available height.
+        return div().id(`preview-diagram-${index}`).w_full().h(block.media.height).flex_none().overflow_x_scrollbar()
           .child(image(block.media.path).w(block.media.width).h(block.media.height));
       }
       if (!block.media) return TextView.markdown(`preview-markdown-${panel.selected.file}-${index}`, block.text)

@@ -15,6 +15,34 @@ test("heading anchors handle duplicate/colliding slugs, Unicode, setext and fenc
   assert.equal(fences.diagrams.length, 2); assert.equal(fences.diagrams[0].closed, true); assert.equal(fences.diagrams[1].closed, false);
 });
 
+test("nested headings and fences keep the surrounding list in one native Markdown block", async t => {
+  const state = await runtime(t), { markdownStructure } = await state.load("markdown-structure.js");
+  const { stageMarkdown } = await state.load("markdown.js"), file = path.join(state.dir, "lists.md");
+  const lists = [
+    '- First\n  ## Nested heading\n  Continuation\n- Second',
+    '- First\nlazy continuation\n  ## Nested heading\n- Second',
+    '1. First\n   Nested setext\n   ---\n2. Second',
+    '- First\n\n  ## Nested heading\n\n- Second',
+    '- First\n  ```mermaid\n  flowchart LR\n  A-->B\n  ```\n- Second',
+    '- First\n  > ## Nested quote\n- Second',
+    '-\tFirst\n\t## Nested heading\n- Second',
+  ];
+  for (const source of lists) {
+    const parsed = markdownStructure(source);
+    assert.equal(parsed.headings.length, 0, source); assert.equal(parsed.diagrams.length, 0, source);
+    const staged = await stageMarkdown(source, { file, root: state.dir, on: null }, { colors: state.theme, font: "Geist" });
+    assert.equal(staged.blocks.length, 1, source); assert.equal(staged.blocks[0].text, source);
+    const after = markdownStructure(source + '\n\n## After list\n\n  ## Indented top-level\n');
+    assert.deepEqual(Array.from(after.headings, h => h.slug), ["after-list", "indented-top-level"]);
+  }
+  assert.deepEqual(Array.from(markdownStructure('- Item\n---\n  ## After break\n').headings, h => h.slug), ["after-break"]);
+  assert.equal(markdownStructure('- Item\n\n```mermaid\nflowchart LR\nA-->B\n```\n').diagrams.length, 1);
+  await fs.writeFile(file, lists[0]); state.props = { file }; const panel = await state.start();
+  const body = find(state.render(), `preview-markdown-${file}-top`);
+  assert.equal(body.nodes.length, 1); assert.equal(body.nodes[0].kind, "markdown"); assert.equal(body.nodes[0].value, lists[0]);
+  assert.equal(panel.headings.length, 0);
+});
+
 test("same-document anchors and contents retain editor, draft, source and heading history", async t => {
   const state = await runtime(t), file = path.join(state.dir, "readme.md");
   await fs.writeFile(file, "# Top\n\n## Details\n\nOriginal.\n\n## Details\n\nSecond.\n"); state.props = { file };
