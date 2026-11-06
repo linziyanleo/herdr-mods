@@ -174,6 +174,7 @@ def local_state(manager, pkg):
             manager.records[pkg["id"]] = {
                 "id": pkg["id"], "repo": pkg["repo"], "subdir": pkg["subdir"],
                 "commit": pkg.get("commit") or tree.get("HEAD", "unknown"),
+                "ref": pkg["branch"], "source": dict(pkg),
                 "mods": mods, "layouts": layouts, "files": expected,
                 "installed": True, "enabled": True, "associated": True, "association_version": 2,
             }
@@ -188,7 +189,7 @@ def local_state(manager, pkg):
 
 def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
     packages = []
-    for pkg in official_packages(manager):
+    for pkg in available_packages(manager):
         if kind_filter and pkg["kind"] != kind_filter:
             continue
         pkg.update(local_state(manager, pkg))
@@ -202,9 +203,24 @@ def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
     return sorted(packages, key=lambda p: (p["installed"] is not True, -p["stars"], p["name"]))
 
 
+def available_packages(manager):
+    try:
+        packages = official_packages(manager)
+    except Exception as exc:
+        manager.catalog_errors = [str(exc)]
+        packages = []
+    ids = {p["id"] for p in packages}
+    for pkg_id, record in manager.records.items():
+        if record.get("installed") and record.get("source") and pkg_id not in ids:
+            pkg = dict(record["source"])
+            pkg.update(commit=record.get("commit"), mods=record["mods"], layouts=record["layouts"])
+            packages.append(pkg)
+    return packages
+
+
 def media(manager, ids):
     wanted = set(ids)
-    packages = [p for p in official_packages(manager) if p["id"] in wanted]
+    packages = [p for p in available_packages(manager) if p["id"] in wanted]
     def fetch(pkg):
         result = {"id": pkg["id"]}
         for field in ("preview", "avatar"):
@@ -234,13 +250,21 @@ def media(manager, ids):
 
 
 def details(manager, pkg_id):
-    pkg = next((p for p in build_catalog(manager) if p["id"] == pkg_id), None)
+    record = manager.records.get(pkg_id, {})
+    pkg = next((p for p in available_packages(manager) if p["id"] == pkg_id), None)
     if not pkg:
-        raise LookupError("Package is no longer in the official catalog")
+        pkg = next((p for p in manager.discover(pkg_id)["packages"] if p["id"] == pkg_id), None)
+    if not pkg:
+        raise LookupError("No package found at this repository folder")
+    pkg.update(local_state(manager, pkg))
     prefix = pkg["subdir"] + "/" if pkg["subdir"] else ""
-    recipe = manager.raw_content(pkg["repo"], pkg["branch"], prefix + "RECIPE.md").decode("utf-8", "replace")
-    assets = media(manager, [pkg_id])
+    recipe = pkg.get("recipe") or manager.raw_content(pkg["repo"], pkg["branch"], prefix + "RECIPE.md").decode("utf-8", "replace")
+    stored_recipe = os.path.join(manager.packages_dir, pkg_id.replace("/", "-"), "RECIPE.md")
+    if record.get("installed") and os.path.isfile(stored_recipe):
+        with open(stored_recipe, encoding="utf-8") as f:
+            recipe = f.read()
+    assets = media(manager, [pkg_id]) if pkg.get("collection") != "direct" else []
     if assets:
         pkg.update(assets[0])
-    pkg.update(recipe=recipe, prompt=manager.generate_prompt(pkg_id, recipe)["text"])
+    pkg.update(recipe=recipe, prompt=manager.generate_prompt(pkg_id, recipe, source=pkg)["text"])
     return pkg

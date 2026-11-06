@@ -21,7 +21,8 @@ function setup() {
   const values = new Map();
   const source = fs.readFileSync(path.join(__dirname, '../mods/mods-plus/main.js'), 'utf8')
     .replace(/^import .*;$/gm, '').replace('export default class ModsPlus', 'class ModsPlus');
-  const runtime = { View: class {}, div: element, h_flex: element, v_flex: element, svg: element,
+  const runtime = { View: class {}, div: element, h_flex: element, v_flex: element, svg: element, image: element,
+    TextView: { markdown: (_id, value) => element().child(value) }, Select: { new: element }, Popup: { new: element }, notify() {},
     Switch: { new: id => element().id(id) }, Input: { new: () => element() },
     InputState: { new: ({ value }) => ({ text: value, events: {}, value() { return this.text; },
       set_value(value) { this.text = value; }, on(event, fn) { this.events[event] = fn; } }) },
@@ -32,8 +33,9 @@ function setup() {
   const view = new Mod();
   Object.assign(view, { settings: { auto_update: false, interval_value: 24, interval_unit: 'hr' }, workDepth: 0,
     entry: false, checking: false, savingSettings: false, preparedCount: 0, packages: [],
-    media: {}, loadingMedia: false, query: '', limit: 24, tab: 'mod', collection: 'community', filter: 'all' });
+    media: {}, loadingMedia: false, query: '', limit: 24, tab: 'mod', collection: 'community', filter: 'all', width: 1000 });
   view.initIntervalInput();
+  view.initSourceInput();
   const tasks = [];
   function context(persistent = false) {
     return { valid: true, notify() { assert.ok(this.valid || persistent, 'expired cx'); },
@@ -87,6 +89,83 @@ test('settings toggles and intervals survive await, refresh and reject repeated 
   assert.equal(view.settings.interval_value, 6);
   assert.equal(view.settings.interval_unit, 'min');
   assert.equal(view.message, null);
+  assert.equal(view.busy, null);
+});
+
+const importedPackage = { id: 'owner/repo/one', repo: 'owner/repo', subdir: 'one', kind: 'mod',
+  collection: 'direct', branch: 'main', name: 'One', author: 'owner', description: '', stars: 0, pushed: '',
+  source_url: 'https://github.com/owner/repo/tree/main/one', install_prompt: 'Install One', installed: false };
+function proposal(operation = 'install') {
+  return { id: importedPackage.id, operation, token: 'review-token', branch: 'main', commit: 'abcdef123', active: false,
+    changes: [{ path: 'mods/one/main.js', status: 'add' }], mod_changes: [{ path: 'one', status: 'add' }],
+    layout_changes: [], conflicts: [], locally_modified: [],
+    shortcuts: [{ section: 'global', key: 'cmd-shift-x', action: 'mod.open:one', current: 'app.palette', status: 'conflict' }] };
+}
+
+test('GitHub input submits discovery, shows both kinds and keeps errors actionable', async () => {
+  const { view, drain, context } = setup();
+  const calls = [];
+  view.sourceInput.set_value('owner/repo');
+  view.helper = async args => { calls.push(Array.from(args)); return { branch: 'main', packages: [importedPackage,
+    { ...importedPackage, id: 'owner/repo/two', kind: 'layout' }] }; };
+  const cx = context();
+  view.sourceInput.events.submit({}, cx); cx.valid = false;
+  await drain();
+  assert.deepEqual(calls, [['discover', 'owner/repo']]);
+  assert.equal(view.collection, 'direct');
+  assert.equal(view.visiblePackages().length, 1);
+  view.tab = 'layout';
+  assert.equal(view.visiblePackages()[0].id, 'owner/repo/two');
+  view.helper = async () => { throw new Error('Use an HTTPS github.com URL'); };
+  await view.discoverSource(context(true));
+  assert.match(view.message, /github.com/);
+  assert.equal(view.packages.length, 2);
+});
+
+test('details require review, cancellation writes nothing, confirmation binds the reviewed token', async () => {
+  const { view, click, drain } = setup();
+  view.selected = importedPackage;
+  view.view = 'details';
+  const calls = [];
+  view.helper = async args => { calls.push(Array.from(args)); return proposal(); };
+  assert.equal(find(view.renderDetails({}), 'confirm-review'), undefined);
+  click(find(view.renderDetails({}), 'review-install'));
+  await drain();
+  const rendered = view.renderDetails({});
+  assert.match(textOf(find(rendered, 'package-review')), /mods\/one\/main.js/);
+  assert.match(textOf(find(rendered, 'package-review')), /Keep existing: app.palette/);
+  click(find(rendered, 'cancel-review'));
+  assert.equal(view.review, null);
+  assert.deepEqual(calls, [['review', importedPackage.id]]);
+  click(find(view.renderDetails({}), 'review-install'));
+  await drain();
+  view.showDetails = async () => {};
+  view.loadCatalog = async () => {};
+  view.helper = async args => { calls.push(Array.from(args)); return { ok: true }; };
+  const confirm = find(view.renderDetails({}), 'confirm-review');
+  click(confirm); click(confirm);
+  await drain();
+  assert.deepEqual(calls.at(-1), ['install', 'owner/repo', 'one', '--review', 'review-token']);
+  assert.equal(calls.filter(args => args[0] === 'install').length, 1);
+  assert.equal(calls.filter(args => args[0] === 'enable').length, 0);
+});
+
+test('updates require review and stale-review failures preserve the selected package', async () => {
+  const { view, click, drain } = setup();
+  view.selected = { ...importedPackage, installed: true, has_update: true, enabled: true };
+  view.view = 'details';
+  const calls = [];
+  view.helper = async args => {
+    calls.push(Array.from(args));
+    return args[0] === 'review' ? proposal('update') : { ok: false, error: 'Candidate changed since review' };
+  };
+  click(find(view.renderDetails({}), 'review-update'));
+  await drain();
+  click(find(view.renderDetails({}), 'confirm-review'));
+  await drain();
+  assert.deepEqual(calls, [['review', importedPackage.id, '--update'], ['apply-update', importedPackage.id, '--review', 'review-token']]);
+  assert.match(view.message, /changed since review/);
+  assert.equal(view.selected.has_update, true);
   assert.equal(view.busy, null);
 });
 

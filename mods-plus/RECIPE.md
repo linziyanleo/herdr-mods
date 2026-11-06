@@ -11,7 +11,9 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
 - Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Images load in batches of 24 as more cards are requested.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
-- Apply update and Remove sit beside the detail title using the Herdr theme accent and matching foreground colors. The action group wraps below the title on narrow panels. Remove keeps its existing second-click confirmation and uses the theme warning color while confirming.
+- Review update and Remove sit beside the detail title using the Herdr theme accent and matching foreground colors. Review install appears for an uninstalled package. The action group wraps below the title on narrow panels. Remove keeps its existing second-click confirmation and uses the theme warning color while confirming.
+- Add from GitHub opens an inline native input with a Find packages action; Enter submits it. Results use the same cards and Mod/Layout tabs under Imported. A repository can yield several independently selectable packages.
+- Reviews stay in details and hide the large preview to bring the changes into view. They show the source branch and commit, file additions/changes/removals, mod/layout changes, local edits and each proposed shortcut with any preserved conflict. Confirm, Refresh review and Cancel follow the list. The review uses 12px body text, a 16px heading and 0.5px borders in the current theme.
 - Settings has an automatic-check switch and a custom interval: a positive whole number followed by min / hr controls. Enter or leaving the number field saves the interval; clicking a unit saves the final number/unit pair. Existing hour settings are preserved. Saving disables repeated actions and displays failures. Loading and checking use native rotating indicators.
 - Plugins shows a right-aligned count of verified update candidates. The count refreshes after automatic or manual checks, application and removal. In the collapsed rail the count replaces the Plugins icon when updates are available.
 - Card status occupies one line: Update Available replaces Installed when a candidate is available. Settings uses an arrow-only Back button. The footer count uses a 12px-high badge and 8px text, reduced at the user's request.
@@ -19,8 +21,13 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 ## How it behaves
 
 - **Separation of Install and Activation**:
-  - Clicking **Install** clones or downloads package files into `data/mods-plus/stage/`, runs `herdr-app check` on runtime mods, and saves verified files to `data/mods-plus/packages/<pkg-id>/`.
+  - **Review install** reads a fresh file list and the proposed keys, without executing downloaded code or changing installations. Confirming **Install** downloads the reviewed files into `data/mods-plus/stage/`, runs `herdr-app check` on runtime mods, and saves verified files to `data/mods-plus/packages/<pkg-id>/`.
   - Files are kept outside `~/.config/herdr-app/mods/` and `layouts/` until the user explicitly selects **Enable** or **Use layout**.
+  - A review token binds the commit, manifest, relevant records, active files and current shortcuts. Source or local drift requires another review. Activation rechecks name ownership and stored file hashes. Existing shortcut conflicts are preserved; added bindings are tracked, and later rebindings survive update/removal.
+- **Direct sources**:
+  - Accept public `owner/repo[/folder]`, `https://github.com/owner/repo`, and `/tree/<default-branch>/folder` URLs. Ref overrides, non-GitHub hosts, traversal, encoded paths and ambiguous branch URLs are refused explicitly. Use shorthand for a default branch containing `/`.
+  - Find package roots by `RECIPE.md` plus runtime mods or layout JSON files; exclude nested packages from their parent's manifest. Every runtime mod folder needs `main.js`. Files are read via GitHub blob identities; commit identity is kept separately from the Git tree hash.
+  - Install saves source metadata, the selected default branch, revision and file ownership in the existing package record. Checks continue to follow that recorded branch. Installed direct sources remain browsable during official catalog outages and reuse the existing enable/update/removal flows. Uninstalled discoveries remain local to the current dialog. Direct previews are omitted.
 - **Automatic Association without Manual Adopt**:
   - Scans installed files in `mods/` and `layouts/`.
   - Associates a complete package only when every upstream runtime file matches its git blob hash. Additional local caches and attribution files do not invalidate the match and are not added to the ownership baseline.
@@ -36,6 +43,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
   - Candidates are validated with `herdr-app check`.
   - A three-way merge check compares baseline hashes, local active files, and candidate files.
   - Local edits are preserved. If a conflict occurs, the candidate is held back without touching active files.
+  - **Review update** describes the prepared candidate. Applying verifies its exact file set/hashes and rechecks local state. The merged bytes are checked and written, including compatible layout edits, instead of discarding the merge result. Removed owned files are removed; unmanaged extra files are retained. Stored-only packages stay inactive. A prepared candidate can be applied at its reviewed commit even if upstream subsequently advances.
 - **Scheduled Background Checks**:
   - While the layout with the Plugins entry is active, `cx.timer` checks for overdue work once per minute, supporting intervals as short as one minute.
   - Switching layouts or quitting Herdr pauses scheduling without background daemon services.
@@ -50,7 +58,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - **GPUI Elements**: `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `Switch`, `TextView` from `gpui-base`.
 - **Herdr APIs**: `exec`, `appHome`, `props`, `closeOverlay`, `notify`, `theme`, `window`, `run`, `knownAgents`, `shared`, `setShared`. Async settings and update actions receive the context from `cx.spawn`; native `spin` and opacity transitions provide feedback without animation timers.
 - **Official Gallery**: `https://assets.herdr.dev/mods/index.json` and `https://assets.herdr.dev/layouts/index.json`. Examples use the cards embedded in `https://herdr.dev/mods/` and `https://herdr.dev/layouts/`, enriched with identities from those same indexes. Community previews use only the official moderated URLs; avatars use GitHub. Metadata is cached for one hour with stale-cache warnings on refresh failure. Search, status filters and sorting run locally.
-- **Backend Helper**: `helper.py` and `catalog.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `difflib`, `shutil`, `fcntl`).
+- **Backend Helper**: `helper.py`, `catalog.py` and `review.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `shutil`, `fcntl`); `diff3` merges local text edits.
 - **Network transport**: `curl` is required for official catalog, preview and avatar requests. GitHub file evidence uses the existing GitHub API client. No credentials are sent to the gallery or avatar endpoints.
 - **Icons**: bundled Herdr SVGs rendered through native `svg()`; the star outline is an original local SVG.
 - **Data Storage**: `<appHome>/data/mods-plus/` for `packages.json`, `settings.json`, `cache/`, `stage/`, `packages/`, `updates/`, and `backups/`.
@@ -60,6 +68,8 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - Never copy newly installed mods directly into `<appHome>/mods/` during installation; Herdr automatically docks new folders on appearance.
 - Bundled Herdr mods and layouts (recorded in `installed.json`) must remain read-only and excluded from community package management.
 - Always check layout references across all layout files before deleting any mod folder.
+- Review is a concrete change list, not a security assessment. Community mods are trusted code. Preview runs no downloaded code; install confirmation and the existing update preparation stage run `herdr-app check`.
+- Direct import currently refuses repositories containing symlinks or submodules, and supports no non-default ref override. GitHub availability is required for discovery and fresh installation reviews. The recorded branch is retained if the repository later changes its default branch.
 
 ## Done when
 
@@ -74,6 +84,14 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 9. Prompt copy and Agent tab launch functions work as expected.
 10. Mod removal is protected when layouts still reference the mod.
 11. `python3 mods-plus/tests/updates.test.py` and `node --test mods-plus/tests/ui.test.cjs` pass (Node.js 18+ is needed only for the UI event tests).
+12. `python3 mods-plus/tests/review.test.py` passes for multi-package discovery, preview without installation writes, invalid source rejection, revision/local drift, shortcut preservation, persisted sources, actual merges and stored-only updates.
+13. In an isolated native home, enter a source, select both package kinds, cancel and refresh reviews, confirm install, enable separately, review/apply an update and remove it. Inspect narrow/wide and light/dark states plus a `herdr-app shot` screenshot. `tests/native-fixture.mjs` prepares the home without launching it; `tests/native-verify.mjs` drives its production handlers after the coordinating agent launches it. Pointer/keyboard acceptance is separate from handler automation.
+
+## Review and import verification (2026-11-06)
+
+On macOS 27.2 with Herdr 0.1.13, the source check and disposable native driver/review-render checks pass. The Python suites cover 36 cases and the Node event suite covers nine. Tests use local/fake repositories, temporary homes and intercepted layout switching; no real user package or shortcut was changed. Native window execution and screenshots remain for the coordinating agent's serial acceptance under the existing authorization. The prior preview image is retained until that capture is available.
+
+UX references: [herdr-customize app documentation](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) for direct input and review of a specific commit, and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager) for review and preserving shortcut conflicts. This implementation reuses Mods Plus's own Python/GPUI architecture; no source code or assets were copied from those projects and no new runtime library was added.
 
 ## Repair verification
 
