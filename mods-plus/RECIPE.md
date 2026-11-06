@@ -100,6 +100,8 @@ On macOS 27.2 with Herdr 0.1.13, the source and disposable review-render checks 
 
 The ownership follow-up passes 20 affected Python cases. Only layouts recorded as actually activated may be updated or removed. Older records without that evidence preserve existing layouts; matching source bytes alone do not establish ownership. Independently created same-name layouts remain untouched.
 
+The combined source includes the concurrent helper-timeout repair. All 48 affected Python cases and 13 UI event cases pass, including review tokens through short job RPCs and imported packages in the cache-only catalog. A real job completed a live public install review without installation. Runtime distribution includes both `review.py` and `jobs.py`.
+
 UX references: [herdr-customize app documentation](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) for direct input and review of a specific commit, and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager) for review and preserving shortcut conflicts. This implementation reuses Mods Plus's own Python/GPUI architecture; no source code or assets were copied from those projects and no new runtime library was added.
 
 ## Repair verification

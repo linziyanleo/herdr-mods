@@ -177,6 +177,10 @@ Physical keyboard/pointer dispatch, scrolling and additional platform/theme comb
 
 Independent review identified list-context loss when an indented heading split a Markdown list. Fix `e10edde` retains list continuations, nested headings and fences in the original TextView. The same commit gives diagram scrollbar wrappers their natural image height after native screenshots exposed the host wrapper's full-height default. The 26 affected tests and source check pass. `/tmp/pp.LO38y5/rich-final.png` was visually inspected and copied to `preview.png`; it shows Contents, two decoded SVG diagrams, unsupported-diagram feedback and the real JSON/CSV views together. The three paired structured screenshots were also inspected after load and redraw.
 
+Follow-up `e12a208` limits lazy list continuation to paragraphs so a heading or fenced item cannot swallow the next top-level Setext heading; `d1a630f` includes short hyphen underlines in that boundary. Ten focused tests passed for the continuation change, then all five anchor cases and the native source check passed for the final underline correction. The existing rich/structured fixtures do not use these list cases, so their earlier native results and inspected screenshots remain applicable.
+
+Final independent review of `d1a630f752c80eddf6c3a3281569d872ee96fefa` passed the five anchor cases and found no validated defects. Runtime code is unchanged by the subsequent acceptance-documentation commit.
+
 ### Native fixture remount correction
 
 Each test control directory has one driver owner. Superseded instances stop publishing, watch registration precedes request reads, and receipt transport failures stay separate from action failures. Only changed control-file snapshots receive bounded retries; document saves never use this helper. The rich verifier waits for a new driver identity after remounts. Five deterministic interleaving tests pass, followed by the successful native reruns above.
