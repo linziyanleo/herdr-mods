@@ -9,6 +9,7 @@ Browse Herdr catalogs or import a public GitHub package. Review the files, revis
 - The sidebar footer shows Plugins above Settings and Add machine. Each row uses a 14px native icon, 13px text, 28px height and the native hover style. The 97px footer preserves update badges and hides labels when the sidebar is collapsed. The shortcut is preserved; there is no header entry.
 - The dialog uses the native theme, 0.5px borders and four text sizes, 12, 13, 16 and 28px. Mods / Layouts and All / Installed / Not installed occupy the first row.
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
+- Update all sits at the right of the home page title. It is disabled during loading/checking/updating and reports completion, agent handoff or failures below the catalog.
 - Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Each page reveals 24 cards; images arrive four cards at a time. Unavailable images do not block later cards.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
 - Review update and Remove sit beside the detail title using the Herdr theme accent and matching foreground colors. Review install appears for an uninstalled package. The action group wraps below the title on narrow panels. Remove keeps its existing second-click confirmation and uses the theme warning color while confirming.
@@ -55,6 +56,10 @@ Before removing a mod, the helper checks every file in `layouts/`. A remaining r
 Update checks download candidates into `data/mods-plus/updates/<pkg-id>/candidate/` and validate their mods with `herdr-app check`. A three-way merge compares the baseline, local active files and candidate files. Conflicts leave active files unchanged.
 
 Review update describes the prepared candidate. Apply update verifies its file set and hashes, rechecks local state, validates the merged mods and writes the merged files. It applies compatible local layout edits, removes files the package owns and no longer ships, and retains unmanaged files. Only layouts recorded as activated can change. Stored packages stay inactive. An update can use the reviewed candidate even if upstream has since advanced.
+
+Update all checks every installed package across both kinds and all sources, independently of the visible catalog. It reviews the full batch before applying anything. A changed recipe, added/removed mods or layouts, or newly conflicting shortcuts on an active package requires agent integration; review/merge conflicts also require an agent. This is a conservative signal: Mods Plus does not interpret arbitrary recipe instructions. When any package needs an agent, it copies one complete prompt for all pending updates and leaves the batch unapplied. The prompt contains source URLs, tracked branches, old/new commits, active and stored paths, candidate directories, file and shortcut changes, local edits, reasons and full candidate recipes. A copy is retained at `data/mods-plus/update-prompt.txt`; clipboard failures show that path.
+
+Direct batches reuse per-package review tokens, backups, native validation, three-way merging and ownership checks. Preflight detects packages proposing different actions for the same shortcut. Reviews refresh between writes because packages share shortcuts. The manager updates itself last. Check/preflight failures apply nothing. A later apply failure stops the batch and reports completed packages; this is not a cross-package transaction. Update badges refresh without reloading the catalog or resetting search/filters. Stored-only packages remain inactive. Automatic scheduling still only prepares candidates.
 
 ### Schedule checks
 
@@ -104,6 +109,8 @@ The agent-tab activation prompt includes the repository, revision, installed pat
 14. `python3 mods-plus/tests/jobs.test.py` passes, including a real 31-second task after its launcher exits, duplicate requests, failed-task retry, and timeout cleanup of descendants.
 
 ## Verification record
+
+The Update all follow-up passed 53 Python cases across helper, catalog, updates, review and acceptance suites, 15 UI event cases, and the source native check on macOS with Herdr 0.1.13. Twelve isolated native flows include a two-package mod/layout update, keeping a stored layout inactive, and copying a full batch prompt without applying it. The macOS clipboard matched the saved prompt exactly. [The native screenshot](update-all-preview.png) shows the home action, pending marker and agent handoff result. Physical pointer/keyboard and additional narrow/dark states were not exercised in this follow-up. See the [bulk-update record](../docs/plans/mods-plus.md#bulk-updates-2026-11-06) for scope and evidence.
 
 The combined review, import and background-task implementation passed 48 Python cases and 13 UI event cases on macOS with Herdr 0.1.13. Nine isolated native checks covered discovery, review cancellation, install, separate activation, update and removal. The preview shows an inspected install review with preserved shortcut conflicts. A live public GitHub discovery and install review also completed without installing the package.
 

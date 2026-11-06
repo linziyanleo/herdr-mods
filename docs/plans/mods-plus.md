@@ -66,9 +66,11 @@ Do not treat an agent launch as completed activation. Re-read the resulting file
 
 Manual updates are the default. Settings provides an automatic-check switch and a configurable interval in minutes or hours.
 
-Automatic checks download and verify candidates. Applying a candidate requires an explicit review and confirmation in details; activation and app startup do not silently apply updates. Scheduled downloads leave the running interface unchanged.
+Automatic checks download and verify candidates. Individual updates require review and confirmation in details. The home page's Update all action explicitly requests checking and applying every installed mod/layout update, regardless of catalog filters. Activation and app startup do not silently apply updates. Scheduled downloads leave the running interface unchanged.
 
-Protect local modifications in both manual and automatic updates. Apply a reviewed candidate only after explicit confirmation, and preserve compatible local edits through a three-way merge. Leave the current installation intact when a merge, validation, or ownership check fails, and explain what needs attention in details. Recheck files before applying a prepared update because they may have changed since download.
+Protect local modifications in both manual and automatic updates. Apply a reviewed candidate after individual confirmation or the explicit Update all action, and preserve compatible local edits through a three-way merge. Leave the current installation intact when a merge, validation, or ownership check fails. Recheck files before applying a prepared update because they may have changed since download.
+
+Update all preflights the complete batch. If an active package has a changed recipe, added/removed mods or layouts, newly conflicting shortcuts, or a review/merge conflict, copy a complete prompt covering all pending updates instead of applying the batch. Include candidate recipes in full, revisions, source and local paths, active layout, ownership boundaries, changes, conflicts and verification instructions. Recipe changes are a conservative signal for agent configuration, not a claim that every documentation change needs configuration. Stored-only packages stay inactive. Direct application reuses the existing per-package validation and backups; later failures report completed packages without claiming batch atomicity.
 
 Stage and check candidates before changing active files, retain a backup, and preserve Herdr's directory-watching behavior when updating an existing mod. Keep package records consistent with the files actually applied. Coordinate the entry and dialog so they cannot perform competing mutations.
 
@@ -110,6 +112,20 @@ Final integration preserves concurrent main commit `3451c39` (the helper timeout
 Final independent review of runtime commit `a4188ffe2feb40f8d40fc727eef62f7767acc5e2` found no validated defects. It separately passed 13 UI cases, six targeted Python cases, a real cached-query job from a temporary runtime package and association-record persistence assertions. Final changes after that review are documentation only.
 
 Attribution: UX references are [herdr-customize/docs/app.md](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager). No third-party code/assets were copied, and no license decision or new library dependency is introduced. Review/check output is not a security certification.
+
+## Bulk updates (2026-11-06)
+
+The requested home action checks all installed mods/layouts and either applies the verified batch or copies a complete agent update prompt. It ignores visible search, category and installation filters. The implementation keeps manual scheduling, inactive packages, existing ownership checks, backups and compatible local edits intact. Changed active recipes and integration structure conservatively select agent handoff; competing proposed shortcuts are detected before any apply. Per-package validation still runs immediately before writes, and later failures report partial completion explicitly.
+
+The user authorized commit, push, mainline integration and loading into the normal Herdr installation. Runtime commit `e0204c75d3f2bdd4ec72897b7286d2740627ea4e` was developed on `agent/mods-plus-update-all`, based on `ce3f5fc73978f8f5e9029f8fd7e298228886aa39`. It was fast-forwarded through an isolated integration checkout into local `main` and pushed to `linziyanleo/herdr-mods`; remote `main` was read back at that exact SHA. The primary checkout's existing `.gitignore` edit and original preview are preserved; [the added preview](../../mods-plus/update-all-preview.png) captures the new action in a disposable fixture.
+
+Verification on macOS / Herdr 0.1.13:
+
+- Helper, catalog, updates, review and acceptance suites pass 53 Python cases; UI event coverage passes 15 cases. Coverage includes both package kinds, inactive storage, local-edit preservation, complete recipes without truncation, clipboard failure recovery, failed checks, partial application, changed configuration and competing shortcuts. `herdr-app check` and `git diff --check` pass.
+- The final isolated native run passes 12 flows. Two packages update together, the stored layout remains inactive, and a later recipe change copies both pending packages without applying either. `pbpaste` exactly matches the full saved prompt. Native status reports no runtime errors. The final receipt is `/tmp/mp.O1ja9v/native-report.json`; inspected screenshots are in the same fixture directory. The fixture suppresses first-run release notes so screenshots show the tested surface.
+- Native verification drives production handlers and the real helper with local source fixtures. Physical pointer/keyboard and additional narrow/dark states remain unverified. The jobs supervisor was unchanged; its long-duration suite was not repeated. Disposable test windows were closed after verification.
+
+Normal-app loading: all seven installed runtime files matched the baseline before synchronization. The two changed files, `helper.py` and `main.js`, were backed up under `data/mods-plus/backups/local-bulk-update-20261106-162915-e0204c7/` and copied from the clean, pushed integration tree. All seven installed runtime files then matched the delivery source byte for byte. The installed `herdr-app check` passed, and native status reported the `mods-plus` overlay open with no errors. The `fanghu` layout and `keys.json` hashes stayed unchanged. No installed community package update was applied during delivery. Daily-window screenshot capture continued to return an older frame, and native pointer control reported `noWindowsAvailable`; the inspected isolated screenshots remain the UI evidence for this change.
 
 ## Implementation sequence
 

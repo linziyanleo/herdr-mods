@@ -18,6 +18,10 @@ Import supports public repositories on their default branch. The selected branch
 
 Checks download and validate update candidates without changing active files. Review update shows the prepared changes before Apply update. A three-way merge preserves compatible local edits; conflicts or changes since review block application. Mods Plus backs up managed files before changing them.
 
+Choose Update all on the home page to check every installed mod and layout, regardless of the current filters. If all updates can be applied directly, the button applies them together. Stored packages stay inactive. If an active package has a changed recipe, added/removed mods or layouts, a new shortcut conflict, or an update conflict, the button copies a complete update prompt for the whole pending batch instead. Paste it into your agent to complete the update. The prompt includes revisions, paths, file and shortcut changes, local conflicts and every full candidate recipe. If copying fails, the status shows the saved prompt file. Check failures leave active files unchanged; an apply failure reports completed packages and stops the remaining batch.
+
+[Update all and agent handoff preview](update-all-preview.png), captured in the disposable native fixture.
+
 Checks are manual by default. Settings can enable automatic checks with an interval in minutes or hours. The Plugins sidebar entry schedules checks while its layout is loaded. Checks pause when that layout closes or Herdr quits. Long operations run as bounded tasks, with progress and errors in the dialog. The sidebar count shows verified update candidates.
 
 Removal checks every local layout for references. It retains shared mods and blocks removal when a layout still uses the package. When integration needs an agent, Copy copies the displayed prompt and Open Agent tab passes the package and target context to the configured agent.
