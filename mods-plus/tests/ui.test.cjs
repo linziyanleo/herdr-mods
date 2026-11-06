@@ -28,7 +28,7 @@ function setup() {
       set_value(value) { this.text = value; }, on(event, fn) { this.events[event] = fn; } }) },
     shared: key => values.get(key), setShared: (key, value) => values.set(key, value),
     props: () => ({ entry: true, footer: true }), layout: () => ({ id: 'sidebar', size: { px: 240 } }),
-    updates: () => ({ app: {} }), run() {}, appHome: () => '/fixture' };
+    updates: () => ({ app: {} }), settings: () => ({ zoom: 1 }), theme: () => ({}), run() {}, appHome: () => '/fixture' };
   const Mod = vm.runInNewContext(source + '\nModsPlus', runtime);
   const view = new Mod();
   Object.assign(view, { settings: { auto_update: false, interval_value: 24, interval_unit: 'hr' }, workDepth: 0,
@@ -350,4 +350,59 @@ test('invalid interval does not write settings and can be corrected', async () =
   await drain();
   assert.equal(writes, 1);
   assert.equal(view.intervalError, null);
+});
+
+test('home Update all covers both kinds regardless of filters, blocks duplicate clicks and refreshes badges', async () => {
+  const { view, click, drain, values } = setup();
+  view.view = 'catalog';
+  view.query = 'no matching cards';
+  view.tab = 'layout';
+  view.filter = 'not_installed';
+  view.packages = [{ ...importedPackage, installed: true, has_update: true }];
+  let calls = 0;
+  view.helper = async args => {
+    calls++;
+    assert.deepEqual(Array.from(args), ['update-all']);
+    await Promise.resolve();
+    return { ok: true, updated: ['owner/repo/one', 'owner/repo/two'], errors: [], needs_agent: false,
+      settings: { ...view.settings, prepared_updates_count: 0, prepared_update_ids: [] } };
+  };
+  const button = find([view.render()], 'update-all');
+  assert.equal(textOf(button), 'Update all');
+  click(button); click(button);
+  await drain();
+  assert.equal(calls, 1);
+  assert.match(view.message, /Updated all 2/);
+  assert.equal(view.busy, null);
+  assert.equal(values.get('mods-plus.updates').count, 0);
+  assert.equal(view.packages[0].has_update, false);
+  assert.equal(view.query, 'no matching cards');
+  assert.equal(view.tab, 'layout');
+  assert.equal(view.filter, 'not_installed');
+});
+
+test('bulk prompt, clipboard failure, partial errors and empty results are distinguished', async () => {
+  const { view, context } = setup();
+  const result = { updated: [], errors: [], settings: { ...view.settings, prepared_update_ids: ['one', 'two'], prepared_updates_count: 2 },
+    needs_agent: true, pending: ['one', 'two'], copied: true, prompt_path: '/fixture/update-prompt.txt' };
+  view.helper = async () => result;
+  await view.updateAll(context(true));
+  assert.match(view.message, /Full update prompt copied for 2/);
+  assert.doesNotMatch(view.message, /Updated all|up to date/);
+  result.copied = false;
+  await view.updateAll(context(true));
+  assert.match(view.message, /Could not copy.*\/fixture\/update-prompt.txt/);
+  result.needs_agent = false;
+  result.updated = ['one'];
+  result.errors = [{ id: 'two', error: 'offline' }];
+  await view.updateAll(context(true));
+  assert.match(view.message, /Updated 1 package.*two: offline/);
+  result.updated = [];
+  result.errors = [];
+  await view.updateAll(context(true));
+  assert.match(view.message, /up to date/);
+  view.helper = async () => { throw new Error('update-all: Task exceeded deadline'); };
+  await view.updateAll(context(true));
+  assert.match(view.message, /Task exceeded deadline/);
+  assert.equal(view.busy, null);
 });

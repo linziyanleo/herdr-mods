@@ -394,6 +394,25 @@ export default class ModsPlus extends View {
     });
   }
 
+  async updateAll(cx) {
+    if (this.busy || this.checking) return;
+    await this.work(cx, "Updating all mods and layouts…", async () => {
+      const res = await this.helper(["update-all"], cx);
+      this.acceptSettings(res.settings);
+      this.review = null;
+      const updated = res.updated.length;
+      if (res.needs_agent) {
+        this.message = `${updated ? `Updated ${updated} package(s). ` : ""}${res.copied
+          ? `Full update prompt copied for ${res.pending.length} package(s). Paste it into your agent to finish updating.`
+          : `Could not copy the update prompt. The full prompt is saved at ${res.prompt_path}.`}`;
+      } else if (res.errors.length) {
+        this.message = `${updated ? `Updated ${updated} package(s). ` : "No updates applied. "}${res.errors.map(e => `${e.id}: ${e.error}`).join("\n")}`;
+      } else {
+        this.message = updated ? `Updated all ${updated} package(s).` : "All installed packages are up to date.";
+      }
+    });
+  }
+
   async copyActivationPrompt(pkg, cx) {
     await this.work(cx, "Copying prompt…", async () => {
       const res = await this.helper(["copy-prompt", pkg.id, "--catalog"], cx);
@@ -960,6 +979,8 @@ export default class ModsPlus extends View {
           .items_center()
           .child(div().text_size(16).font_semibold().pr(8).child("Plugins"))
           .child(div().flex_1())
+          .when(this.view === "catalog", el => el.child(this.button(t, "update-all", "Update all",
+            cx => cx.spawn(cx => this.updateAll(cx)), { primary: true, disabled: Boolean(this.busy) || this.checking })))
           .child(
             div()
               .text_size(12)

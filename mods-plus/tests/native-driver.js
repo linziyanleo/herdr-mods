@@ -27,6 +27,7 @@ export default class NativeDriver extends ModsPlus {
             else if (request.action === "enable") await this.enablePackage(this.selected, cx);
             else if (request.action === "check") await this.runUpdateCheck(cx);
             else if (request.action === "apply") await this.applyUpdate(this.selected, cx);
+            else if (request.action === "update-all") await this.updateAll(cx);
             else if (request.action === "remove") await this.removePackage(this.selected, cx);
             else if (request.action === "cancel") this.review = null;
             else if (request.action === "back") this.view = "catalog";

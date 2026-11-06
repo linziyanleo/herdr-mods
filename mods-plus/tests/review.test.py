@@ -295,6 +295,141 @@ class ReviewTest(unittest.TestCase):
         for name in ("a", "b"):
             self.assertEqual((self.home / f"layouts/{name}.json").read_bytes(), before[name])
 
+    def bulk_pair(self, active_layout=True):
+        mod_id = self.installed(active=True)
+        proposal = self.mgr.review_install(self.repo, "two")
+        self.assertTrue(self.mgr.install(self.repo, "two", reviewed=proposal["token"])["ok"])
+        layout_id = self.repo + "/two"
+        if active_layout:
+            with patch.object(helper.subprocess, "run"):
+                self.assertTrue(self.mgr.use_layout(layout_id)["ok"])
+        self.content["one/mods/one/main.js"] = self.code.replace(b"v1", b"v2")
+        self.content["two/layouts/two.json"] = self.content["two/layouts/two.json"].replace(b'"root"', b'"updated"')
+        self.revision = "b" * 40
+        self.update_tree()
+        return mod_id, layout_id
+
+    def test_update_all_applies_mod_and_layout_and_preserves_local_edits(self):
+        ids = self.bulk_pair()
+        layout_path = self.home / "layouts/two.json"
+        # Local, unmanaged mod files and declined shortcuts survive the batch.
+        extra = self.home / "mods/one/local.txt"
+        extra.write_text("keep me")
+        with patch.object(self.mgr, "copy_text", side_effect=AssertionError("No agent needed")):
+            result = self.mgr.update_all()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["updated"], list(ids))
+        self.assertFalse(result["needs_agent"])
+        self.assertEqual(result["settings"]["prepared_updates_count"], 0)
+        self.assertEqual((self.home / "mods/one/main.js").read_bytes(), self.content["one/mods/one/main.js"])
+        self.assertEqual(layout_path.read_bytes(), self.content["two/layouts/two.json"])
+        self.assertEqual(extra.read_text(), "keep me")
+        self.assertEqual(json.loads((self.home / "keys.json").read_text())["global"]["cmd-shift-x"], "app.palette")
+        self.assertTrue(list(Path(self.mgr.backups_dir).iterdir()))
+        self.assertTrue(all(self.mgr.records[pkg_id]["commit"] == self.revision for pkg_id in ids))
+        self.assertEqual(self.mgr.update_all()["updated"], [])
+
+    def test_update_all_keeps_stored_layout_inactive(self):
+        _, layout_id = self.bulk_pair(active_layout=False)
+        result = self.mgr.update_all()
+        self.assertTrue(result["ok"], result)
+        self.assertFalse((self.home / "layouts/two.json").exists())
+        self.assertFalse(self.mgr.records[layout_id]["enabled"])
+        stored = Path(self.mgr.packages_dir) / layout_id.replace("/", "-") / "layouts/two.json"
+        self.assertEqual(stored.read_bytes(), self.content["two/layouts/two.json"])
+
+    def test_update_all_copies_complete_batch_for_changed_recipe_without_applying(self):
+        ids = self.bulk_pair()
+        recipe = "# New recipe\nConfigure the new panel before using it.\n" + "Full instructions.\n" * 100
+        self.content["one/RECIPE.md"] = recipe.encode()
+        self.update_tree()
+        before = {name: (self.home / name).read_bytes() for name in ("mods/one/main.js", "layouts/two.json", "keys.json")}
+        with patch.object(self.mgr, "copy_text", return_value=True) as copy:
+            result = self.mgr.update_all()
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["needs_agent"])
+        self.assertEqual(result["pending"], list(ids))
+        self.assertEqual(result["updated"], [])
+        self.assertEqual(result["settings"]["prepared_updates_count"], 2)
+        prompt = copy.call_args.args[0]
+        self.assertEqual(prompt, result["prompt"])
+        self.assertEqual(Path(result["prompt_path"]).read_text(), prompt)
+        for text in [*ids, recipe, str(self.home), "a" * 40, "b" * 40, "herdr-app check", "herdr-app shot",
+                     "layouts/two.json", "mods/one/main.js", "Prepared candidate:", "Shortcut review:"]:
+            self.assertIn(text, prompt)
+        for name, value in before.items():
+            self.assertEqual((self.home / name).read_bytes(), value)
+
+    def test_update_all_merge_conflict_and_clipboard_failure_preserve_all_packages(self):
+        ids = self.bulk_pair()
+        local = self.home / "mods/one/main.js"
+        local.write_bytes(self.code.replace(b"v1", b"local"))
+        with patch.object(self.mgr, "copy_text", return_value=False):
+            result = self.mgr.update_all()
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["needs_agent"])
+        self.assertFalse(result["copied"])
+        self.assertEqual(result["updated"], [])
+        self.assertIn("Local edit conflict", result["prompt"])
+        self.assertIn(ids[1], result["prompt"])
+        self.assertEqual(Path(result["prompt_path"]).read_text(), result["prompt"])
+        self.assertIn(b"local", local.read_bytes())
+        self.assertTrue(all(self.mgr.records[pkg_id]["commit"] == "a" * 40 for pkg_id in ids))
+
+    def test_update_all_check_failure_never_applies_stale_candidates(self):
+        ids = self.bulk_pair()
+        self.assertTrue(self.mgr.check_updates()["ok"])
+        with patch.object(self.mgr, "branch_tree", side_effect=OSError("offline")), \
+             patch.object(self.mgr, "apply_update", side_effect=AssertionError("Must not apply")):
+            result = self.mgr.update_all()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["updated"], [])
+        self.assertEqual(len(result["errors"]), 2)
+        self.assertTrue(all(self.mgr.records[pkg_id]["commit"] == "a" * 40 for pkg_id in ids))
+
+    def test_update_all_reports_partial_apply_failure(self):
+        ids = self.bulk_pair()
+        apply = self.mgr.apply_update
+        def fail_second(pkg_id, reviewed=None):
+            return {"ok": False, "error": "Validation failed"} if pkg_id == ids[1] else apply(pkg_id, reviewed)
+        with patch.object(self.mgr, "apply_update", side_effect=fail_second):
+            result = self.mgr.update_all()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["updated"], [ids[0]])
+        self.assertEqual(result["errors"], [{"id": ids[1], "error": "Validation failed"}])
+        self.assertEqual(result["settings"]["prepared_update_ids"], [ids[1]])
+
+    def test_update_all_new_mod_and_conflicting_shortcut_require_agent(self):
+        self.installed(active=True)
+        self.content["one/mods/new/main.js"] = self.code
+        self.content["one/keys.json"] = b'{"global":{"cmd-shift-x":"mod.open:new"}}'
+        self.revision = "b" * 40
+        self.update_tree()
+        with patch.object(self.mgr, "copy_text", return_value=True):
+            result = self.mgr.update_all()
+        self.assertTrue(result["needs_agent"])
+        self.assertEqual(result["updated"], [])
+        self.assertIn("Mods or layouts were added or removed", result["prompt"])
+        self.assertIn("Shortcut conflict", result["prompt"])
+        self.assertFalse((self.home / "mods/new").exists())
+
+    def test_update_all_preflights_competing_shortcuts_without_applying(self):
+        ids = self.bulk_pair()
+        keys = json.loads(self.content["one/keys.json"])
+        keys["global"]["cmd-shift-z"] = "mod.open:one"
+        self.content["one/keys.json"] = json.dumps(keys).encode()
+        self.content["two/keys.json"] = b'{"global":{"cmd-shift-z":"layout.switch:two"}}'
+        self.update_tree()
+        with patch.object(self.mgr, "copy_text", return_value=True):
+            result = self.mgr.update_all()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["updated"], [])
+        self.assertEqual(result["pending"], list(ids))
+        self.assertIn("Packages propose different shortcuts: global / cmd-shift-z", result["prompt"])
+        self.assertIn("## " + ids[0], result["prompt"])
+        self.assertTrue(all(self.mgr.records[pkg_id]["commit"] == "a" * 40 for pkg_id in ids))
+        self.assertNotIn("cmd-shift-z", json.loads((self.home / "keys.json").read_text())["global"])
+
     def test_commit_identity_is_not_a_tree_hash_and_previews_reject_traversal(self):
         mgr = helper.PackageManager(self.temp.name)
         with patch.object(mgr, "_gh_api", side_effect=[{"sha": "commit-identity"}, {"sha": "tree-identity", "tree": []}]):

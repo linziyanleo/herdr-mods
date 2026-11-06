@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const base = await fs.mkdtemp("/tmp/mp."), app = path.join(base, "app"), control = path.join(app, "data", "native-control");
 const runtime = fileURLToPath(new URL("../mods/mods-plus/", import.meta.url));
@@ -39,6 +40,8 @@ await fs.writeFile(path.join(app, "mods-plus-fixture.json"), JSON.stringify({ co
 await fs.writeFile(path.join(app, "keys.json"), '{"global":{"cmd-shift-x":"app.palette"}}');
 await fs.writeFile(path.join(app, "settings.json"), JSON.stringify({ telemetry: false, sounds: { enabled: false } }));
 await fs.writeFile(path.join(app, "shared.json"), JSON.stringify({ "frame.welcomed": "skipped" }));
+const version = execFileSync("herdr-app", ["--version"], { encoding: "utf8" }).trim().split(/\s+/).at(-1);
+await fs.writeFile(path.join(app, "update-notes.json"), JSON.stringify({ last_run: version, presented: [version] }));
 await fs.writeFile(path.join(app, "layouts/mods-plus-test.json"), JSON.stringify({ id: "root", type: "block",
   content: { mod: "mods-plus-driver", props: { control } } }, null, 2));
 const info = { base, app, control, layout: "mods-plus-test", env: { HERDR_APP_HOME: app, XDG_STATE_HOME: path.join(base, "s"),
