@@ -1,12 +1,12 @@
 # Preview Plus implementation plan
 
-Status: implemented, merged into `main`, installed and verified in the current Herdr, and published to the public GitHub repository on 2026-11-01. Runtime source, installation instructions, native acceptance fixtures and a real screenshot are in `preview-plus/`. The repository has the `herdr-mod` topic. The latest checked Herdr catalog predates publication and does not yet list Preview Plus; see the publication record below.
+Status: the original preview/editor release is delivered. The 2026-11-06 contents/anchors, Mermaid and structured-data extension is implemented in the assigned `agent/preview-plus-community` worktree and prepared for the root task's serial native acceptance and integration. It is not installed in the normal Herdr home. Earlier publication and installation records below are historical.
 
 This plan merges the previous `markdown-preview` and `media-preview` plans into one mod (`preview-plus`) that works standalone or alongside [Files Plus](files-plus.md).
 
 ## Goal
 
-Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) that renders Markdown, images, and PDF pages inside the Files area or in a standalone pane, without requiring `files-plus`.
+Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) for Markdown with contents/heading links/native Mermaid, JSON trees, CSV/TSV tables, images and PDF pages inside the Files area or a standalone pane, without requiring `files-plus`. Rich previews use the existing editable-source and guarded-save workflow.
 
 ## Operating modes (decoupled from Files Plus)
 
@@ -14,7 +14,7 @@ Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) that renders 
 
 1. **Standalone Files panel mode** (mounted in the `files` block without `props.previewStack` or `props.file`)
    - Keeps the standard single-folder file tree for the focused terminal's directory.
-   - Clicking a file replaces the tree view in place: `.md` and `.markdown` open in the Markdown view, supported images and `.pdf` open in the media view, and other text files open in the read-only `Editor` source view.
+   - Clicking a file replaces the tree view in place: `.md`/`.markdown` open in Markdown, `.json`/`.csv`/`.tsv` in structured previews, supported images/`.pdf` in media, and other text in the source editor. Complete local UTF-8 text is editable; remote/truncated text remains read-only.
    - Clicking `←` returns to the folder tree.
 
 2. **Paired with Files Plus** (`props.previewStack` set, for example `{ "previewStack": "files" }`)
@@ -38,6 +38,8 @@ Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) that renders 
 - For local relative images inside Markdown, stage referenced images in `mods/preview-plus/.cache/` if the native renderer requires application-relative image paths.
 
 ### Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`) and PDFs (`.pdf`)
+
+Markdown additionally provides a Contents toggle, same/cross-document heading anchors and native Mermaid fenced diagrams. JSON/CSV/TSV provide bounded virtual rows and the same Source toggle. The [recipe](../../preview-plus/RECIPE.md) specifies syntax subsets, display limits and the heading-from-section host constraint; the November 6 record below contains current verification scope.
 
 - Support local files (`on === null`); show an explicit unsupported note for remote machines.
 - Stage local images under `mods/preview-plus/.cache/` because `image()` resolves paths from `appHome()`. Include the source path and modification time/size in the cache filename so edits on disk never serve stale cached images.
@@ -147,3 +149,28 @@ Files Plus dialog primary actions use native opacity feedback instead of switchi
 The workspace-creation button belongs to the existing personal `multi-root-spaces` clone, outside the distributed mod sources. `files-plus/patches/sidebar-default-pointer.patch` records its one-line cursor correction. It applies cleanly to the cloned mod and passes a native check in the disposable home; no retired package is restored.
 
 All 79 automated tests pass across both mods (56 Files Plus, 23 Preview Plus), including six focused button regressions for hover/pressed declarations, cursor stability, event propagation, disabled states and media/page bounds. Source checks and whitespace checks pass. The original full native verifier remains incomplete at its background-window paired handoff, as recorded above. A fresh static comparison in the same disposable home renders the sidebar, Files Plus, Markdown with a local image and a two-page PDF without errors; `/tmp/pp.LMFM9j/controls-final.png` is the package preview. Light/Geist Mono/120% comparison and the configured 15px native editor size are checked separately. Mouse-driven hover/cursor shape inspection is not claimed because Computer Use pointer input reports `noWindowsAvailable`; the actual style declarations and disabled handlers are covered by the regressions.
+
+## Contents, diagrams and structured data (2026-11-06)
+
+The user authorized all three capabilities, scoped to `preview-plus/**` and this record in `.agent-worktrees/preview-plus-community/herdr-mods`, based on `1f82759aea1cd8c78c9de36fe624a27cab5c2253`. Local commits are authorized; the root owns mainline integration and push. Normal app-home installation/layout switching is excluded. The root confirmed the user's existing full-verification authorization covers isolated native acceptance and owns serial hc/window execution; this task does not launch a window. No extra agents were created.
+
+The implementation keeps existing document ownership, draft storage, guarded Save, conflict handling and keyboard bindings. JSON/CSV/TSV are derived previews of the retained source; no parsed-data serializer participates in saving. The shared target stays `{ file, root, on }`. Files Plus adds `.json`, `.csv` and `.tsv` routing separately in integration. Its paired native tests must set `files-plus.open-location` to `internal`, since its current default is Tab.
+
+Markdown extracts top-level ATX/setext headings and all fence boundaries before staging local images and Mermaid. Slugs deduplicate collisions and preserve Unicode. History records the heading, Contents visibility, source mode, media state and JSON expansion; same-document anchors retain the editor. Installed GPUI only scrolls virtual lists programmatically, and their deferred rows cannot carry Markdown link handlers. The selected approach renders from the requested heading with a Whole document action, retaining native Markdown links. This limitation is explicit in the README/recipe. No DOM or web view is introduced.
+
+Mermaid uses beautiful-mermaid 1.1.3 with elkjs 0.11.1 and entities 7.0.1, built through pinned public npm dependencies and esbuild 0.28.2. The QuickJS build patches and SVG CSS conversion adapt jjongkwann/herdr-files-plus under MIT; `ELK_PATCHES` assert exact upstream matches. The bundled renderer runs lazily in a spawned task, never in `render()` (an initial probe in render hit the host's execution budget; initialization executes all five fixtures successfully). The supported subset is flowchart, sequence, state, class and ER. Content/font/colors determine cache identity; stale requests cannot apply. Errors show source. Limits and manual disk cache eviction are documented. Runtime notices include MIT, EPL-2.0 and BSD-2-Clause licenses and the editable EPL source reconstruction procedure; no repository license is selected.
+
+Structured data separates pure parsing from GPUI rows. JSON uses stable escaped pointers and iterative bounded flattening; CSV/TSV use a strict quote-state parser. The approach and pointer escaping adapt/reference gsydler/cria-file-preview's Apache-2.0 modules with retained attribution. Native uniform lists create only requested rows and use list-level JSON disclosure handlers. Limits are 10,000 visible rows/records, 100 table columns, 64 JSON levels and 500 displayed characters per value/cell. These limits never change editable source. Malformed input, remote/read-only and truncated-source cases stay explicit.
+
+Validation on macOS with Herdr 0.1.13:
+
+- `node --experimental-vm-modules --test preview-plus/tests/*.test.mjs`: 49 tests passed, no failures/skips. Includes the existing native image/PDF and Python helper tests, new parser/anchor/draft tests, virtual-range rendering, five real bundled diagram families, failures/cache changes and stale result rejection.
+- `herdr-app check preview-plus/mods/preview-plus`: passed. The check covers initial rendering, not deferred rows or painted SVGs.
+- `node preview-plus/tests/check-mermaid.mjs`: passed. It copies only a synthetic probe and the actual bundle into a disposable check root and executes all five diagram families in QuickJS initialization. It does not start hc or a visible native session.
+- `npm ci --ignore-scripts --registry=https://registry.npmjs.org` and `npm run build -- --check` in `preview-plus`: passed, reproducing the bundled bytes from the public lockfile.
+
+The existing driver retains all prior state fields and adds heading/diagram/data diagnostics plus Contents and JSON-disclosure commands. `fixtures.mjs` supplies synthetic documents, diagrams, JSON and delimited data. `native-rich-verify.mjs` prepares heading/diagram states, data disclosure/scroll surfaces, draft/conflict/save readbacks and actual `pane.split` cases. Root reserves `native-structured-pair.mjs` in integration for real Files Plus handoff/back/retained-tree acceptance. `native-verify.mjs` now sets Internal open location explicitly. These window verifiers have not been run in this worktree. The existing `preview.png` remains unchanged and is not rich-view acceptance evidence.
+
+Implementation commit: `b8f37e3778621132adc3b590321784867d66a7cc` (`feat(preview-plus): add anchored Markdown and structured previews`). The generated renderer is intentionally tracked for installation. The build escapes multiline template strings without changing their contents, so both the generated artifact and authored sources pass whitespace checks. The README, recipe and this plan are delivered separately. No merge or push is performed from this assigned worktree.
+
+Next: root integrates the tested commits, runs the prepared native cases serially under existing authorization, visually inspects dark/light/narrow/wide screenshots and virtual scrolling, fixes any observed host boundary issue, and then performs its authorized merge/push. Preserve the task worktree until that handoff completes.

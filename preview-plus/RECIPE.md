@@ -1,10 +1,12 @@
 # Preview Plus
 
-Preview Markdown, edit local text, inspect images and browse PDF pages inside Herdr. Operate as an independent Files panel, pair with Files Plus in a layout stack, or open any file in its own split pane or tab. Markdown toggles between formatted preview and editable source, with native interleaved local images and link navigation. Save text with conflict protection and toggle soft wrapping. Multi-format image and macOS PDF viewing offer Fit, 100%, multi-level zoom, and page navigation controls. Local relative links resolve across documents and media with a complete in-memory history stack, while file watching reloads clean documents and preserves drafts.
+Preview Markdown with contents, heading links and native Mermaid diagrams, inspect JSON trees and CSV/TSV tables, edit local source, and browse images/PDF pages inside Herdr. Operate as an independent Files panel, pair with Files Plus in a layout stack, or open a file in its own split pane or tab. Rich previews toggle to the original editable source. Save with conflict protection and toggle soft wrapping. Image and macOS PDF views offer Fit, zoom and page controls. Local relative links resolve across documents, headings and media with an in-memory history stack; file watching reloads clean documents and preserves drafts.
 
 ![Preview Plus](preview.png)
 
 The preview is an unedited `herdr-app shot` of a disposable Herdr window showing the native text editor and compact top toolbar. All documents are synthetic. Preserve the capture's sRGB metadata.
+
+This screenshot predates contents, Mermaid and structured views. Their new window screenshots are pending serial native acceptance; the image is not evidence of those features.
 
 ## What you see
 
@@ -19,6 +21,8 @@ Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI
 Buttons retain the default arrow pointer. Hover changes only the control's own background and text color; selected modes retain their selection background, and pressed controls use the theme selection surface. Toolbar buttons have 6px corners. Disabled controls use `theme().dim`, have no hover/click action, and remain on the default pointer. Symbol controls have accessible names/tooltips. Media controls are disabled while unavailable, zoom steps disable at 5%/800%, PDF navigation disables at page bounds or while loading, and Refresh disables during a tree refresh. Button presses stop propagation to their container.
 
 ## How it behaves
+
+The rich Preview/Source toggle also applies to JSON, CSV and TSV. Markdown adds a Contents icon when it has headings. It opens a list above the document with 28px virtual rows, 12px text, 12px indentation per heading level and at most 180px height. Selecting a heading starts the document at that section, with a 28px Whole document action above it. JSON and delimited data use 28px virtual rows, 12px text, theme colors and 0.5px separators. JSON containers have disclosure glyphs; table row numbers occupy 48px, columns measure 80–320px and scroll horizontally. The first record is emphasized without discarding it or assuming a header. No editable cells or additional table toolbar are added.
 
 ### Three operating modes
 
@@ -40,7 +44,27 @@ Render local Markdown image references as native image blocks interleaved with t
 
 ### Relative link navigation and in-memory history stack
 
-Resolve local Markdown links against the current file's directory, including `..`, encoded names, and paths with spaces. Carry the owning root and machine through navigation. Save each previous target's source mode, page and zoom in memory. When navigating back, restore the previous document's exact source toggle, zoom level, and PDF page number. HTTP(S) links call `cx.open_url` without adding history. Fragment-only links leave the current view in place.
+Resolve local Markdown links against the current file's directory, including `..`, encoded names, and paths with spaces. Carry the owning root and machine through navigation. Save each previous target's source mode, page, zoom, heading, contents visibility and JSON expansion in memory. Back restores that state and the existing draft. HTTP(S) links call `cx.open_url` without adding history. Fragment-only links and cross-document fragments select headings; invalid/missing fragments show a visible message without discarding source. Same-document navigation retains the editor object and undo state.
+
+### Contents and heading anchors
+
+Extract top-level ATX and single-line setext headings while respecting all backtick/tilde fences and indented code. Strip common inline emphasis/link markup from labels, lowercase letters, keep Unicode letters/numbers, underscores and hyphens, remove punctuation, and replace whitespace with hyphens. Deduplicate slugs with numeric suffixes while avoiding collisions with literal suffixed headings. HTML/custom ids and headings nested in list/blockquote containers are outside this subset.
+
+The installed host exposes programmatic scrolling only for virtual lists, whose deferred rows cannot register Markdown link callbacks. Keep native link handlers by showing blocks from the selected heading onward in an ordinary scroll area with a distinct identity. Whole document restores earlier sections; Back also retraces same-document anchors. Parse headings from the current draft, not a separate disk read.
+
+### Native Mermaid diagrams
+
+Render top-level `mermaid` fences through beautiful-mermaid 1.1.3, bundled at build time with elkjs and entities. Supported families are `graph`/`flowchart`, `sequenceDiagram`, `stateDiagram`/`stateDiagram-v2`, `classDiagram` and `erDiagram`, within that library's syntax subset. Pie, gantt, mindmap, HTML labels and interactive diagram links are not supported. Ordinary/nested code fences stay source. Malformed, unsupported, oversized or unclosed diagrams show their original fenced source and an error.
+
+Translate SVG CSS variables and color mixing into literal native colors, preserve alpha, remove remote font imports and use the configured UI font. Write SVGs under `mods/preview-plus/.cache/diagrams/` and draw them with native `image()`, horizontally scrolling wide diagrams at natural size. Cache by exact source/colors/font in memory (24 entries) and a versioned content/theme key on disk. Request ownership and staging tokens reject stale document/theme results. Limit each diagram to 24,000 characters/300 lines and 32,768px per dimension; at most 24 diagrams render per document. Disk cache eviction is manual. No runtime Node, Chromium, browser worker or network request is used.
+
+### JSON and delimited previews
+
+Recognize `.json`, `.csv` and `.tsv` case-insensitively. JSON uses `JSON.parse` after removing a leading BOM; primitives and empty containers are valid. The root starts expanded. Keep expanded containers by escaped JSON Pointer, flatten iteratively to bounded visible rows, and handle disclosure clicks at the native list level. Show at most 10,000 rows and 64 levels; cap displayed scalar text at 500 characters. Number parsing follows JavaScript semantics; Source retains the exact original spelling.
+
+CSV selects comma or semicolon from the first record outside quoted fields; TSV always uses tab. Parse doubled quotes, quoted delimiters/newlines, LF/CRLF/CR and BOM. Preserve trailing empty cells, blank records and ragged rows. Reject unclosed/misplaced quotes and text after a closing quote. Retain at most 10,000 records and 100 columns with a visible limit notice. Sample the first 200 records for widths; show at most 500 characters per cell, displaying embedded newlines as a return symbol. Render only requested native virtual rows.
+
+Preview never writes parsed values back to source. Its toggle uses the retained editor and existing draft/save/conflict/discard path unchanged. Invalid data keeps Source accessible and editable for complete local files. The 400,000-character truncation guard blocks parsing and Save; remote data is read-only. Display-only row/depth/column limits leave complete local source editable.
 
 ### Multi-format image inspection
 
@@ -68,7 +92,10 @@ Agent working, blocked, done and idle displays remain the surrounding Herdr UI's
 preview-plus/
   RECIPE.md, README.md, preview.png, licenses/
   mods/preview-plus/
-    main.js, tree.js, paths.js, markdown.js, media.js, appearance.js, mod.json, icons/
+    main.js, tree.js, paths.js, markdown.js, markdown-structure.js, markdown-view.js,
+    structured.js, structured-view.js, mermaid.js, mermaid.bundle.js,
+    media.js, appearance.js, mod.json, icons/, licenses/, THIRD_PARTY.md
+  build/, package.json, package-lock.json
   tests/
 ```
 
@@ -109,6 +136,10 @@ Shared state contract when paired with Files Plus:
 }>
 ```
 
+The routing extension contract adds `.json`, `.csv` and `.tsv` to Markdown/media without changing this object. Files Plus owns dispatch; choose its Internal open location for the paired stack. Older versions may still route these files to source. The separate integration change and its actual Files-to-Preview acceptance belong to the root task.
+
+`markdown-structure.js` owns heading/fence offsets, `markdown.js` stages images and diagrams, and `markdown-view.js` owns rich document/contents rendering. `structured.js` owns pure parsing and JSON rows; `structured-view.js` owns virtual rows with `uniform_list` and `Scrollbar`. `mermaid.js` owns bounded SVG conversion and content/theme caching, using Herdr's restricted `fs/promises.mkdir` to prepare its cache directory. The renderer loads lazily through a module import. Rebuild from public npm with `cd preview-plus && npm ci --ignore-scripts && npm run build`; `npm run build -- --check` compares the generated bytes. The install includes the bundle and its runtime license notices, not Node dependencies.
+
 `on_size_change` reports window points, while builder dimensions receive Herdr's app zoom. Divide measured dimensions by `settings().zoom || 1` before computing fit sizes. Put Markdown images inside an interactive `div` so native clicks are reliably delivered.
 
 ### External programs and files
@@ -123,6 +154,8 @@ The cache contains copies of viewed files. It is local, disposable and excluded 
 
 Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Earlier releases used a Radix palette; its [MIT notice](licenses/Radix-MIT.txt) is retained. The current mod reads Herdr's theme instead. [Git Graph](https://github.com/rabeeh-ta/herdr-git-graph) is a reference for the integration pattern; no third-party source is imported. Test landscapes, diagrams and PDFs are original generated fixtures. No repository license is selected or changed.
 
+The Mermaid build/SVG adapter adapts [jjongkwann/herdr-files-plus](https://github.com/jjongkwann/herdr-files-plus) under MIT. beautiful-mermaid 1.1.3 (MIT), elkjs 0.11.1 (EPL-2.0) and entities 7.0.1 (BSD-2-Clause) are bundled. JSON Pointer escaping and the pure parser approach reference/adapt [gsydler/cria-file-preview](https://github.com/gsydler/cria-file-preview) under Apache-2.0. Full notices, exact source references, modifications and the EPL source reconstruction procedure are in [THIRD_PARTY.md](mods/preview-plus/THIRD_PARTY.md) and the runtime's `licenses/` directory. esbuild 0.28.2 is build-only.
+
 ## Watch out
 
 Herdr runs native GPUI JavaScript without a DOM, Node APIs or `setTimeout`. Use the installed type files as the API contract. A passing `check` covers only initial rendering; it does not prove deferred views, media decoding or interactions.
@@ -132,6 +165,10 @@ A native 0.1.11 probe rendered the same cached PNG through `image()` while both 
 Media is local-only, and PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Remote images, missing inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large images remain subject to the native decoder's resource limits.
 
 ## Done when
+
+Rich-view source validation (2026-11-06, macOS, Herdr 0.1.13): 49 automated tests pass, covering existing editor/media contracts plus heading duplicates/fences/history, strict malformed data, structured draft/save/conflict safety, virtual row ranges, Mermaid output/error/cache behavior and stale document/theme results. The real image/PDF/Python helper tests remain included. `herdr-app check preview-plus/mods/preview-plus` passes. `node preview-plus/tests/check-mermaid.mjs` renders flowchart, sequence, state, class and ER SVG strings during actual QuickJS initialization, with a passing native check. A public-registry `npm ci --ignore-scripts` followed by `npm run build -- --check` reproduces the checked-in bundle. These are not claims of painted SVGs or physical UI interactions.
+
+Native-session execution belongs to the root task's serial acceptance under the user's existing verification authorization. `native-rich-verify.mjs` is prepared for native heading/contents/diagram/source states, JSON disclosure, table rendering, draft conflicts, saves and real file-prop panes; it captures screenshots for inspection. The existing paired verifier now explicitly sets Files Plus open location to Internal. The root owns the separate `.json/.csv/.tsv` Files Plus routing and paired-rendering verifier. No normal app-home installation, layout switch, hc call, screenshot replacement, merge or push was performed by this task.
 
 Local editor verification (2026-11-03, macOS, Herdr 0.1.12): all 34 automated tests and the native check passed. The disposable native editor verifier passed text/save, wrapping/Markdown draft, conflict/discard and remount-recovery groups with `errors: []`. Real mouse/keyboard input separately verified Unicode paste, change events, `Cmd+S` with disk readback, undo, mode switching and soft wrapping in a 320px panel. The package screenshot shows Source on the left and Preview on the right, with one icon toolbar in each. Redo key verification was blocked by automatic action review and is not counted as passed. The older complete native verifier passed its first three groups but timed out at the background-window paired handoff; it is not a full native-suite pass. See the [implementation record](../docs/plans/preview-plus.md) for scope and receipts.
 
@@ -155,3 +192,6 @@ Build and verify these observable behaviors using disposable files:
 12. External command dispatching via `preview-plus.<command>` executes back, source, preview, save, wrap, refresh, fit, zoom-in, zoom-out, next and previous.
 13. `herdr-app status` reports zero mod or layout errors, and `preview.png` is captured with `herdr-app shot` from the live running window.
 14. Edit Unicode text, save exact contents, toggle wrapping without adding newlines, preview an unsaved Markdown draft, and recover drafts after navigation/remount. While dirty, external edits/deletions and failed saves preserve both the draft and disk version. Discard requires confirmation. Remote/truncated files have no Save action. Check the top toolbar and tooltips in a narrow panel as well as a full-width pane.
+15. Use Contents and same/cross-document anchors with duplicate and Unicode headings; Back restores the prior section/source/draft. Fenced headings remain code. Missing fragments show an error; Whole document restores earlier sections.
+16. Inspect native Mermaid flowchart, sequence, state, class and ER pictures in light/dark/custom-color themes. Unsupported/malformed/oversized/unclosed input retains its source. Theme changes refresh picture colors and late renders cannot replace a newer file.
+17. Expand/collapse JSON and scroll CSV/TSV virtual rows horizontally/vertically. Inspect malformed, empty, primitive, deep and bounded-data cases. Toggle source, edit, preview without writing, save/read back exact bytes, and confirm external changes retain the draft and reject stale writes. Exercise actual paired Files Plus dispatch and standalone panes for all three extensions.
