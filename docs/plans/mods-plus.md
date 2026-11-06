@@ -1,6 +1,6 @@
 # Mods Plus implementation plan
 
-Status: implemented locally. The 2026-11-03 gallery repair uses the official catalogs, corrects installed detection, and renders the official gallery structure with native GPUI. The subsequent user request authorizes committing and pushing Mods Plus to `main`, including the user-updated preview image.
+Status: review and direct-import implementation is ready for local delivery on `agent/mods-plus-community`, based on `1f82759aea1cd8c78c9de36fe624a27cab5c2253`. The 2026-11-06 user request authorizes implementation and commits; the coordinating agent owns integration into `main`, push and serial native acceptance under the existing verification authorization. Normal-home installation and layout switching are excluded. This worker does not launch native windows.
 
 ## Goal and delivery
 
@@ -66,7 +66,7 @@ Do not treat an agent launch as completed activation. Re-read the resulting file
 
 Manual updates are the default. Settings provides an automatic-update switch and a configurable check interval.
 
-For automatic updates, download and verify a candidate first. Apply it on the next explicit activation or the next Herdr start when Mods Plus loads. Also provide a manual action to apply a prepared update immediately. Do not apply a scheduled update to the running interface as soon as the download finishes.
+Automatic checks download and verify candidates. Applying a candidate requires an explicit review and confirmation in details; activation and app startup do not silently apply updates. Scheduled downloads leave the running interface unchanged.
 
 Protect local modifications in both manual and automatic updates. Automatically apply only changes that can be made without losing local edits. Leave the current installation intact when a merge, validation, or ownership check fails, and explain what needs attention in details. Recheck files before applying a prepared update because they may have changed since download.
 
@@ -84,6 +84,24 @@ Catalog or update-check failures must not change installed detection or report u
 - Reuse existing download, comparison, validation, and merge mechanisms where suitable. Preserve required attribution if third-party code is reused.
 - Include `RECIPE.md`, a real `herdr-app shot` preview, and reproducible installation instructions when the mod is implemented, following [Contributing](../../CONTRIBUTING.md).
 - Implement Mods Plus independently. Any replacement or removal of the installed herdr-pkg is a separate action.
+
+## Review and direct import (2026-11-06)
+
+The user requested complete install/update review and direct public GitHub import in this mod's isolated worktree. Changes are confined to `mods-plus/**` and this record. The unrelated `mods-plus-timeout` worktree owns execution/timeout work; this task does not absorb it or redesign helper dispatch. No additional agents are used.
+
+The existing details flow now exposes Review install/Review update, then the concrete files, mods, layouts, keys and local edits, followed by confirmation or cancellation. Preview reads GitHub metadata/blobs and may populate caches; it does not modify package records, installed files, keys or layouts, or run downloaded code. Install confirmation retains the native staged checks and separate activation. Review tokens bind the exact commit/manifest and relevant current local state. Installation refuses a moved source; updates apply the exact reviewed prepared candidate and reject replaced candidates or local drift.
+
+Add from GitHub accepts a public repository or subfolder on its default branch. Discovery lists each valid recipe/runtime package separately and excludes nested packages from parent manifests. Other hosts, traversal, encoded paths and non-default/ambiguous refs produce explicit failures. The selected branch is stored and followed on future checks. Source descriptors live in the existing `packages.json` records and reappear under Imported when absent from the official catalog, including during outages. GitHub remains necessary for discovery and new install reviews. Symlinks/submodules are currently unsupported; unmoderated preview images are not downloaded.
+
+The apply path now writes the actual three-way merge result and checks the merged mods before active writes. It also handles additions/removals and layout content, preserves local/unmanaged files, backs up affected files, verifies candidate contents and rechecks state after validation. Available package shortcuts are added only on activation (or an explicitly applied active update); conflicts and later user rebindings remain unchanged. Removal reverses only bindings the package still owns. Stored-only packages cannot claim active same-name files.
+
+CLI integration contracts: `discover SOURCE` returns package descriptors; `review ID [--update]` returns a review with `token`; `install REPO [SUBDIR] --review TOKEN` and `apply-update ID --review TOKEN` require it. The runtime distribution gains `review.py`; the installer copy list and manual instructions include it. Existing helper execution and mutation locking remain in place. These are the contracts the coordinating agent must preserve when integrating execution/timeout changes.
+
+Validation: 36 Python cases (helper 4, catalog 12, updates 8, acceptance 1, review/import 11) and nine Node event cases pass. The added cases verify source parsing, multiple packages, no preview writes/execution, shortcut conflicts, commit versus tree identity, source persistence/offline catalog access, reviewed revision/candidate/local drift, merge output, layout edits and install versus activation. Herdr 0.1.13 on macOS 27.2 passes the source check and isolated native driver/review-render checks. `git diff --check` passes. The eager native review check verifies renderable controls, not actual pointer interaction.
+
+Remaining native acceptance: `node mods-plus/tests/native-fixture.mjs` prepares an isolated home without starting a window/core. After the coordinating agent launches it with its printed environment, `node mods-plus/tests/native-verify.mjs <session.json>` drives the production view and helper against local fixtures and emits screenshots/report. Inspect real source input/Enter, review scrolling/cancel/confirm, conflict messages and install/enable/update/remove controls with pointer/keyboard, narrow/wide sizing and light/dark themes. Capture `herdr-app shot`; replace the preview only after an actual suitable capture. This worker does not run the window driver, call `hc`, install to the normal home or switch its layout.
+
+Attribution: UX references are [herdr-customize/docs/app.md](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager). No third-party code/assets were copied, and no license decision or new library dependency is introduced. Review/check output is not a security certification.
 
 ## Implementation sequence
 
