@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -214,6 +215,8 @@ class ReviewTest(unittest.TestCase):
         self.content["one/layouts/one.json"] = b'{\n "id": "root",\n "type": "block",\n "background": "surface",\n "padding": 8,\n "min": 0,\n "max": 500,\n "hidden": false,\n "size": {"px": 100},\n "content": {"mod": "one"}\n}\n'
         self.update_tree()
         pkg_id = self.installed(active=True)
+        with patch.object(helper.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            self.assertTrue(self.mgr.use_layout(pkg_id)["ok"])
         layout = self.home / "layouts/one.json"
         layout.parent.mkdir(exist_ok=True)
         layout.write_bytes(self.content["one/layouts/one.json"].replace(b'"surface"', b'"chrome"'))
@@ -225,6 +228,60 @@ class ReviewTest(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(json.loads(layout.read_text())["background"], "chrome")
         self.assertEqual(json.loads(layout.read_text())["size"]["px"], 200)
+
+    def layout_pair(self):
+        self.content["one/layouts/a.json"] = b'{"id":"a","type":"block","background":"surface"}'
+        self.content["one/layouts/b.json"] = b'{"id":"b","type":"block","background":"surface"}'
+        self.update_tree()
+        pkg_id = self.installed()
+        with patch.object(helper.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as command:
+            result = self.mgr.use_layout(pkg_id)
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(command.call_args.args[0], ["herdr-app", "do", "layout.switch", "--name", "a"])
+        self.assertEqual(helper.PackageManager(self.temp.name).records[pkg_id]["active_layouts"], ["a"])
+        self.assertFalse((self.home / "layouts/b.json").exists())
+        # Identical bytes are not ownership evidence: the user creates this file independently.
+        (self.home / "layouts/b.json").write_bytes(self.content["one/layouts/b.json"])
+        return pkg_id
+
+    def test_update_and_remove_only_own_the_layout_actually_enabled(self):
+        pkg_id = self.layout_pair()
+        unrelated = (self.home / "layouts/b.json").read_bytes()
+        for name in ("a", "b"):
+            path = f"one/layouts/{name}.json"
+            self.content[path] = self.content[path].replace(b"surface", b"raised")
+        self.prepare_update()
+        proposal = self.mgr.review_update(pkg_id)
+        self.assertEqual(proposal["conflicts"], [])
+        self.assertTrue(self.mgr.apply_update(pkg_id, reviewed=proposal["token"])["ok"])
+        self.assertEqual(json.loads((self.home / "layouts/a.json").read_bytes())["background"], "raised")
+        self.assertEqual((self.home / "layouts/b.json").read_bytes(), unrelated)
+        self.assertEqual((Path(self.mgr.packages_dir) / "owner-suite-one/layouts/b.json").read_bytes(), self.content["one/layouts/b.json"])
+        self.assertEqual(helper.PackageManager(self.temp.name).records[pkg_id]["active_layouts"], ["a"])
+        self.assertTrue(self.mgr.remove(pkg_id)["ok"])
+        self.assertFalse((self.home / "layouts/a.json").exists())
+        self.assertEqual((self.home / "layouts/b.json").read_bytes(), unrelated)
+
+    def test_legacy_enabled_flag_never_infers_layout_ownership(self):
+        pkg_id = self.layout_pair()
+        del self.mgr.records[pkg_id]["active_layouts"]
+        self.mgr._save_records()
+        self.mgr = helper.PackageManager(self.temp.name)
+        self.wire(self.mgr)
+        before = {name: (self.home / f"layouts/{name}.json").read_bytes() for name in ("a", "b")}
+        for name in ("a", "b"):
+            path = f"one/layouts/{name}.json"
+            self.content[path] = self.content[path].replace(b"surface", b"raised")
+        self.content["one/mods/one/main.js"] = self.code.replace(b"v1", b"v2")
+        self.prepare_update()
+        proposal = self.mgr.review_update(pkg_id)
+        self.assertTrue(self.mgr.apply_update(pkg_id, reviewed=proposal["token"])["ok"])
+        self.assertEqual(self.mgr.records[pkg_id]["active_layouts"], [])
+        self.assertEqual((self.home / "mods/one/main.js").read_bytes(), self.content["one/mods/one/main.js"])
+        self.assertFalse(self.mgr.use_layout(pkg_id)["ok"], "An existing layout needs recorded ownership even after an update")
+        self.assertTrue(self.mgr.remove(pkg_id)["ok"])
+        for name in ("a", "b"):
+            self.assertEqual((self.home / f"layouts/{name}.json").read_bytes(), before[name])
 
     def test_commit_identity_is_not_a_tree_hash_and_previews_reject_traversal(self):
         mgr = helper.PackageManager(self.temp.name)

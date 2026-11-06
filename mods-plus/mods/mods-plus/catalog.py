@@ -176,6 +176,7 @@ def local_state(manager, pkg):
                 "commit": pkg.get("commit") or tree.get("HEAD", "unknown"),
                 "ref": pkg["branch"], "source": dict(pkg),
                 "mods": mods, "layouts": layouts, "files": expected,
+                "active_layouts": list(layouts),
                 "installed": True, "enabled": True, "associated": True, "association_version": 2,
             }
             manager._save_records()
