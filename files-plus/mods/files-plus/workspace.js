@@ -11,6 +11,7 @@ import { panelWidth, fittedWidth, shouldFit, findNode } from "./fit.js";
 import { dragMove } from "./drag.js";
 import { OPEN_LOCATION, openLocation } from "./preferences.js";
 import { findOpenFile, focusOpenFile } from "./open-files.js";
+import { FileSearch } from "./search.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -19,7 +20,7 @@ const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 export function changedDirectories(paths, roots, expanded) {
-  const directories = new Set(); let git = false;
+  const directories = new Set(); let git = false, search = false;
   for (const source of paths) for (const root of roots) {
     const base = [root.path, root.physical].filter(Boolean).find(path => contains(path, source));
     if (!base) continue;
@@ -29,10 +30,11 @@ export function changedDirectories(paths, roots, expanded) {
       continue;
     }
     git = true;
+    if (!relative.split("/").includes(".git")) search = true;
     if (expanded.has(dirname(path))) directories.add(dirname(path));
     if (expanded.has(path)) directories.add(path);
   }
-  return { paths: directories, git };
+  return { paths: directories, git, search };
 }
 
 export function location(previous) {
@@ -45,14 +47,16 @@ export function location(previous) {
   return { space: space?.id, cwd, on, entry, key: entry ? JSON.stringify([space.id, entry.folders]) : JSON.stringify([space?.id, cwd, on]) };
 }
 
-export async function directory(path, on) {
+export async function directory(path, on, limit = PER_FOLDER) {
   if (!on && appWindow().platform === "windows") {
-    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
+    const take = limit === null ? "" : ` | Select-Object -First ${limit + 1}`;
+    const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", "& { param($p) $ErrorActionPreference='Stop'; @(Get-ChildItem -LiteralPath $p -Force | Where-Object Name -ne '.git'" + take + " | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }", path]);
     if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
     const result = JSON.parse(r.stdout || "[]");
     return Array.isArray(result) ? result : [result];
   }
-  const script = 'n=0; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ] && [ ! -L "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1)); [ "$n" -gt 500 ] && break; done; test -d "$1"';
+  const bound = limit === null ? "" : ` [ "$n" -gt ${limit} ] && break;`;
+  const script = 'n=0; [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ] || exit 1; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ] && [ ! -L "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1));' + bound + ' done; test -d "$1"';
   const r = await exec("sh", ["-c", script, "files-plus", path], { on });
   if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
   const fields = r.stdout.split("\0"), out = [];
@@ -72,6 +76,7 @@ export class FilesPanel extends View {
     this.look = appearance();
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
+    this.search = new FileSearch(this, directory, cx);
     this.revision = shared(REVISION);
     this.refresh(cx);
     cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
@@ -152,6 +157,7 @@ export class FilesPanel extends View {
   }
   refresh(cx, options = {}) {
     const loc = this.location(), context = loc.key;
+    const changedContext = context !== this.context;
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
@@ -161,6 +167,7 @@ export class FilesPanel extends View {
       this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
     }
+    if (changedContext || this.search.active && (!options.paths || options.paths.size || options.search)) this.search.refresh(cx);
     this.watchConfig(loc.space, loc.entry?.file, cx);
     if (this.loading === context) {
       const queued = this.refreshAgain;
@@ -466,7 +473,7 @@ export class FilesPanel extends View {
             openOverlay({ mod: "files-plus", kind: "dialog", modal: true, width: 360, height: 264, props: { role: "settings" } });
           }).child(svg("mods/files-plus/settings.svg").size(14))))
       .when(Boolean(entry?.error), el => el.child(div().px(14).py(8).text_size(12).text_color(t.ansi1).child(entry.error)))
-      .when(!this.file, el => el.child(this.treeView))
+      .when(!this.file, el => el.child(this.search.renderInput(t)).child(this.search.active ? this.search.renderResults(t) : this.treeView))
       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
         .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
@@ -474,5 +481,6 @@ export class FilesPanel extends View {
   close() {
     this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
     this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
+    this.search?.close();
   }
 }

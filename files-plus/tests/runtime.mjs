@@ -69,9 +69,12 @@ export async function runtime(t) {
     } });
     return el;
   }
-  const input = options => ({ text: options?.value || "", value() { return this.text; }, set_value(text) { this.text = text; }, set_selected_range() {}, on() {}, focus() {}, release() {} });
+  const input = options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; }, set_selected_range() {}, on(event, fn) { this.handlers[event] = fn; }, focus() {}, release() { this.released = true; } });
   const kit = { View: class {}, div: () => builder("div"), svg: file => builder("svg", file) };
   const base = { v_flex: () => builder("column"), h_flex: () => builder("row"), InputState: { new: input }, Input: { new: value => builder("input", value) },
+    VirtualListScrollHandle: { new: () => ({ scroll_to_item(index) { this.index = index; }, release() { this.released = true; } }) },
+    Scrollbar: { vertical: id => builder("scrollbar", id) },
+    v_virtual_list: (id, count, height, key, render) => builder("virtual-list", { count, height, key }).id(id).children(render({ start: 0, end: count })),
     EditorState: { new: options => ({ ...options, release() { this.released = true; } }) }, Editor: { new: value => builder("editor", value) } };
   const context = vm.createContext({ console, window: { viewport_size: () => state.viewport || { width: 1600, height: 1000 } } });
   const cache = new Map();
