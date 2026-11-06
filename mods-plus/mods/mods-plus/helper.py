@@ -359,6 +359,11 @@ class PackageManager:
     def discover(self, value):
         return review.discover(self, value)
 
+    @staticmethod
+    def _active_layouts(record):
+        # Legacy enabled=True records cannot identify which layout was copied.
+        return set(record.get("active_layouts", [])) if record.get("enabled") else set()
+
     def _name_conflicts(self, pkg_id, mods, layouts):
         record = self.records.get(pkg_id, {})
         errors = []
@@ -368,7 +373,7 @@ class PackageManager:
             for name in names:
                 key = name if kind == "mod" else "layout:" + name
                 path = os.path.join(self.root, "mods", name) if kind == "mod" else os.path.join(self.root, "layouts", name + ".json")
-                owned = name in record.get(kind + "s", []) and record.get("enabled")
+                owned = name in self._active_layouts(record) if kind == "layout" else name in record.get("mods", []) and record.get("enabled")
                 if key in self.shipped:
                     errors.append(f"Built-in {kind}: {name}")
                 elif any(other != pkg_id and rec.get("installed") and name in rec.get(kind + "s", [])
@@ -386,7 +391,8 @@ class PackageManager:
             if not isinstance(json.loads(self.blob_bytes(repo, files[f"layouts/{name}.json"])), dict):
                 raise ValueError(f"Layout must be a JSON object: {name}")
         local = review.local_snapshot(self, record, files)
-        conflicts = self._name_conflicts(pkg_id, mods, layouts)
+        active_layouts = self._active_layouts(record)
+        conflicts = self._name_conflicts(pkg_id, mods, [name for name in layouts if name in active_layouts] if operation == "update" else layouts)
         if operation == "update":
             _, merge_conflicts = self._update_contents(record, files)
             conflicts.extend("Local edit conflict: " + p for p in merge_conflicts)
@@ -401,7 +407,8 @@ class PackageManager:
                   "mod_changes": review.changes(units("mod", record.get("mods", []), baseline), units("mod", mods, files)),
                   "layout_changes": review.changes(units("layout", record.get("layouts", []), baseline), units("layout", layouts, files)),
                   "shortcuts": review.shortcut_review(current_keys, proposed, record.get("owned_keys")),
-                  "locally_modified": [p for p, sha in local.items() if p in baseline and sha != baseline[p] and record.get("enabled")],
+                  "locally_modified": [p for p, sha in local.items() if p in baseline and sha != baseline[p] and record.get("enabled")
+                                       and (not p.startswith("layouts/") or p[len("layouts/"):-5] in active_layouts)],
                   "active": bool(record.get("enabled")), "keys": proposed}
         # Include all affected state, even unchanged bindings; a stale review must be redone.
         result["token"] = review.token({"review": result, "local": local, "keys": current_keys, "record": record})
@@ -484,6 +491,7 @@ class PackageManager:
             "layouts": proposal["layouts"],
             "installed": True,
             "enabled": False,
+            "active_layouts": [],
             "at": time.strftime("%Y-%m-%d"),
         }
         self._save_records()
@@ -540,12 +548,14 @@ class PackageManager:
 
         slug = pkg_id.replace("/", "-")
         pkg_store = os.path.join(self.packages_dir, slug)
-        layouts_dir = os.path.join(pkg_store, "layouts")
         if not record.get("layouts"):
             return {"ok": False, "error": "This package has no layout"}
+        self._verify_files(pkg_store, record["files"])
         target_layout = record["layouts"][0]
         target_path = os.path.join(self.root, "layouts", target_layout + ".json")
-        if os.path.exists(target_path):
+        if os.path.lexists(target_path):
+            if target_layout not in self._active_layouts(record):
+                return {"ok": False, "error": f"Local layout already exists: {target_layout}. Layout ownership is not recorded; preserving local files."}
             baseline = record.get("files", {}).get(f"layouts/{target_layout}.json")
             if self.file_hash(target_path) != baseline:
                 return {"ok": False, "error": f"Local layout changed: {target_layout}. Preserving local files."}
@@ -555,18 +565,11 @@ class PackageManager:
         if not enabled["ok"]:
             return enabled
 
-        target_layout = None
-        if os.path.isdir(layouts_dir):
-            for l in sorted(os.listdir(layouts_dir)):
-                if l.endswith(".json"):
-                    src = os.path.join(layouts_dir, l)
-                    dst = os.path.join(self.root, "layouts", l)
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copyfile(src, dst)
-                    target_layout = l[:-5]
-                    break
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        shutil.copyfile(os.path.join(pkg_store, "layouts", target_layout + ".json"), target_path)
 
         record["enabled"] = True
+        record["active_layouts"] = sorted(self._active_layouts(record) | {target_layout})
         self._save_records()
 
         # Switch layout
@@ -648,7 +651,7 @@ class PackageManager:
                     shutil.copytree(p, os.path.join(backup_dir, "mods", mod_name))
                     rmtree(p)
 
-        for layout_name in layouts if record.get("enabled") else []:
+        for layout_name in self._active_layouts(record):
             p = os.path.join(self.root, "layouts", f"{layout_name}.json")
             if os.path.isfile(p):
                 os.makedirs(os.path.join(backup_dir, "layouts"), exist_ok=True)
@@ -901,8 +904,8 @@ Instructions:
             review.safe_path(rel)
             path = os.path.join(self.root, rel)
             base, new, local = baseline.get(rel), files.get(rel), self.file_hash(path)
-            # A staged layout is not activated by updating an enabled companion mod.
-            if rel.startswith("layouts/") and local is None:
+            # Presence, even an exact baseline match, does not grant layout ownership.
+            if rel.startswith("layouts/") and (rel[len("layouts/"):-5] not in self._active_layouts(record) or local is None):
                 continue
             if new == base or local == new:
                 continue
@@ -1049,6 +1052,7 @@ Instructions:
         record["files"] = meta["cand_hashes"]
         record["mods"] = proposal["mods"]
         record["layouts"] = proposal["layouts"]
+        record["active_layouts"] = sorted(self._active_layouts(record) & set(proposal["layouts"]))
         record.pop("associated", None)
         if record.get("source"):
             record["source"].update(commit=meta["latest_commit"], mods=proposal["mods"], layouts=proposal["layouts"],
