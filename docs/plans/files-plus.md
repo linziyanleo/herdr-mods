@@ -35,7 +35,7 @@ Validation: the 66-test Files Plus suite passed; the five focused reuse tests al
 
 ## Open-location settings (2026-11-03)
 
-Requested behavior: replace the Files heading with the current directory name, place settings at the far right, and let file clicks open in a center Tab (default), a center Pane, or inside the right panel. The app-wide persisted preference and viewer props are defined in the [recipe](../../files-plus/RECIPE.md#built-in-source-preview-and-preview-plus-handoff).
+Requested behavior: replace the Files heading with the current directory name, place settings at the far right, and let file clicks open in a center Tab (default), a center Pane, or inside the right panel. The app-wide persisted preference and viewer props are defined in the [recipe](../../files-plus/RECIPE.md#text-editing-and-preview-plus-handoff).
 
 The implementation reuses Files Plus's source editor for independent Tab/Pane viewers and Preview Plus's existing fixed-file props for rich files. Internal mode keeps the existing optional stack handoff. Opening a preview retains the sidebar's browsing directory instead of falling back to the space's original folder. No new runtime package, layout changes, or shortcuts are needed.
 
@@ -49,18 +49,18 @@ Working installation: five runtime files were updated in `~/.config/herdr-app/mo
 
 The disposable space and app were closed after verification. Herdr 0.1.12's copied test bundle had redirected `~/.local/bin/herdr-app` to itself; cleanup restored the symlink to the running installed bundle under `~/Applications/Herdr.app` after verifying identical executable hashes.
 
-The [Files Plus recipe](../../files-plus/RECIPE.md#folder-context-and-saved-workspaces) defines the workspace config format and persisted shared-state contracts. This plan also defines how `files-plus` optionally hands off rich previews to [Preview Plus](preview-plus.md) while remaining usable on its own.
+The [Files Plus recipe](../../files-plus/RECIPE.md#folder-context-and-saved-workspaces) defines the workspace config format and persisted shared-state contracts. This plan defines how Files Plus passes all file types to [Preview Plus](preview-plus.md) while retaining its standalone read-only viewer.
 
 ## Goal
 
-Provide one Files panel (`files-plus`) that combines single-folder browsing, workspace folder browsing and management, read-only source previews, a complete right-click file manager context menu, and optional view handoff to `preview-plus`.
+Provide one Files panel for folder and workspace browsing, filename/path search and file management. Use Preview Plus for editing and dedicated previews when installed, with a read-only source viewer as the fallback.
 
 ## Design
 
-- Keep the file tree, workspace helpers and config handling in `files-plus/mods/files-plus/`. Retain lazy loading (500 per folder, 5,000 total), Git status marks, symlink handling, `watchFolder` plus 10-second refresh, and read-only `Editor` text preview.
+- Keep the file tree, workspace helpers and config handling in `files-plus/mods/files-plus/`. Retain lazy loading (500 per folder, 5,000 total), Git status marks, symlink handling, `watchFolder` plus a 60-second visible local safety poll or a 10-second remote poll, and read-only `Editor` text preview.
 - Keep `files-plus` and `preview-plus` independently installable:
   - **Installed alone**: `files-plus` replaces the Files block (`"mod": "files-plus"`). Text and Markdown use the built-in read-only `Editor` in the configured location: a Tab by default, a split Pane, or inside the panel.
-  - **Installed with `preview-plus`**: Tab and Pane pass fixed `{file, root, on}` props directly to Preview Plus for rich files. Inside right panel uses `props.previewStack` (for example `{ "previewStack": "files" }` in a 2-child stack `files-plus-tree` + `preview-plus`): rich files write `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and call `run("layout.select", { stack: props().previewStack, child: "preview-plus" })`. Other text files use Files Plus's source viewer.
+  - **Installed with `preview-plus`**: Tab and Pane pass every file through fixed `{file, root, on}` props. Inside right panel requires a `previewStack` prop naming a stack with `files-plus-tree` and `preview-plus` children. It writes the target to `shared("preview-plus.target")[spaceId]` and selects the preview child. Preview Plus decides whether to show its editor, dedicated preview or unsupported-file state. Without the receiver or internal stack, Files Plus uses its read-only source viewer.
 - Keep workspace actions (`+` Add folder in the header, and root right-click actions) directly in `files-plus`, using the persisted shared-state contract. No additional runtime mod is required for workspace browsing and root actions.
 - Keep the context menu and action dialogs inside the `files-plus` runtime, selected by `props().role`:
   - default (no `role`): the Files panel (`place: "right"`, `size: 320`)

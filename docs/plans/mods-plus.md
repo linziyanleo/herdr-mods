@@ -1,6 +1,6 @@
 # Mods Plus implementation plan
 
-Status: install/update review and direct GitHub import are implemented and verified in the combined source release. Development used `agent/mods-plus-community`, based on `1f82759aea1cd8c78c9de36fe624a27cab5c2253`, under the user's authorization to verify, integrate into `main` and push. Normal-home installation and layout switching are excluded.
+Status: install/update review, direct GitHub import and background helper tasks are implemented. The combined release reached `main` at `e7134d9` and was installed in the normal Herdr home on 2026-11-06 under the user's subsequent installation request. The installed check passed and Herdr reported no errors. Layouts and shortcuts were unchanged. Earlier scope and installation notes below describe their respective delivery stages.
 
 ## Goal and delivery
 
@@ -19,7 +19,7 @@ Deliver one independent mod under `mods-plus/mods/mods-plus/`, with an installat
 - In **All**, place installed packages first. Apply the filter separately within each tab.
 - Match the official [Mods](https://herdr.dev/mods/) and [Layouts](https://herdr.dev/layouts/) gallery style with native GPUI preview cards, package names, authors, and descriptions.
 - Mark installed cards **Installed** at the bottom right. Clicking a card opens its details.
-- Details show the preview, description, source, recipe, and applicable actions: **Install**, **Enable** or **Use layout**, **Update**, and **Remove**. Keep the distinction between installing files and changing the current window clear.
+- Details show the preview, description, source, recipe and applicable actions. Review install or Review update leads to confirmation; Enable or Use layout activates the package separately. Remove checks existing references. Keep the distinction between installing files and changing the current window clear.
 - Show operation progress and actionable failures without adding a separate maintenance dashboard. Do not expose Adopt, clone, personal, or untracked as catalog statuses.
 
 ## Catalog and existing installations
@@ -64,11 +64,11 @@ Do not treat an agent launch as completed activation. Re-read the resulting file
 
 ## Updates and settings
 
-Manual updates are the default. Settings provides an automatic-update switch and a configurable check interval.
+Manual updates are the default. Settings provides an automatic-check switch and a configurable interval in minutes or hours.
 
 Automatic checks download and verify candidates. Applying a candidate requires an explicit review and confirmation in details; activation and app startup do not silently apply updates. Scheduled downloads leave the running interface unchanged.
 
-Protect local modifications in both manual and automatic updates. Automatically apply only changes that can be made without losing local edits. Leave the current installation intact when a merge, validation, or ownership check fails, and explain what needs attention in details. Recheck files before applying a prepared update because they may have changed since download.
+Protect local modifications in both manual and automatic updates. Apply a reviewed candidate only after explicit confirmation, and preserve compatible local edits through a three-way merge. Leave the current installation intact when a merge, validation, or ownership check fails, and explain what needs attention in details. Recheck files before applying a prepared update because they may have changed since download.
 
 Stage and check candidates before changing active files, retain a backup, and preserve Herdr's directory-watching behavior when updating an existing mod. Keep package records consistent with the files actually applied. Coordinate the entry and dialog so they cannot perform competing mutations.
 
@@ -82,7 +82,7 @@ Catalog or update-check failures must not change installed detection or report u
 - Resolve the active app home through `appHome()` and support `HERDR_APP_HOME` in scripts.
 - Store package contents, records, prepared updates, and backups under the app's `data/mods-plus/` directory.
 - Reuse existing download, comparison, validation, and merge mechanisms where suitable. Preserve required attribution if third-party code is reused.
-- Include `RECIPE.md`, a real `herdr-app shot` preview, and reproducible installation instructions when the mod is implemented, following [Contributing](../../CONTRIBUTING.md).
+- Maintain `RECIPE.md`, a native `herdr-app shot` preview and reproducible installation instructions, following [Contributing](../../CONTRIBUTING.md).
 - Implement Mods Plus independently. Any replacement or removal of the installed herdr-pkg is a separate action.
 
 ## Review and direct import (2026-11-06)

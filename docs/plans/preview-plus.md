@@ -23,9 +23,9 @@ This plan merges the previous `markdown-preview` and `media-preview` plans into 
 
 ## Goal
 
-Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) for Markdown with contents/heading links/native Mermaid, JSON trees, CSV/TSV tables, images and PDF pages inside the Files area or a standalone pane, without requiring `files-plus`. Rich previews use the existing editable-source and guarded-save workflow.
+Provide a viewer and editor in `preview-plus/mods/preview-plus/` that works with or without Files Plus. Edit complete local UTF-8 text and preview Markdown with contents and Mermaid diagrams, JSON, CSV, TSV, images and PDF pages. Dedicated text previews share the source editor and conflict-checked save.
 
-## Operating modes (decoupled from Files Plus)
+## Operating modes
 
 `preview-plus` supports three modes so it and `files-plus` can each be installed alone or used together:
 
@@ -54,9 +54,13 @@ Provide one unified viewer mod (`preview-plus/mods/preview-plus/`) for Markdown 
   - External `http(s)` links open in the system browser via `cx.open_url`.
 - For local relative images inside Markdown, stage referenced images in `mods/preview-plus/.cache/` if the native renderer requires application-relative image paths.
 
-### Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`) and PDFs (`.pdf`)
+Markdown also has Contents, heading links and Mermaid diagrams. Selecting a heading shows that section and the rest of the document.
 
-Markdown additionally provides a Contents toggle, same/cross-document heading anchors and native Mermaid fenced diagrams. JSON/CSV/TSV provide bounded virtual rows and the same Source toggle. The [recipe](../../preview-plus/RECIPE.md) specifies syntax subsets, display limits and the heading-from-section host constraint; the November 6 record below contains current verification scope.
+### JSON, CSV and TSV
+
+JSON has expandable containers. CSV and TSV use virtual table rows. All three formats share the source editor. The [recipe](../../preview-plus/RECIPE.md#json-and-delimited-previews) defines parsing and display limits.
+
+### Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`) and PDFs (`.pdf`)
 
 - Support local files (`on === null`); show an explicit unsupported note for remote machines.
 - Stage local images under `mods/preview-plus/.cache/` because `image()` resolves paths from `appHome()`. Include the source path and modification time/size in the cache filename so edits on disk never serve stale cached images.
@@ -166,6 +170,14 @@ Files Plus dialog primary actions use native opacity feedback instead of switchi
 The workspace-creation button belongs to the existing personal `multi-root-spaces` clone, outside the distributed mod sources. `files-plus/patches/sidebar-default-pointer.patch` records its one-line cursor correction. It applies cleanly to the cloned mod and passes a native check in the disposable home; no retired package is restored.
 
 All 79 automated tests pass across both mods (56 Files Plus, 23 Preview Plus), including six focused button regressions for hover/pressed declarations, cursor stability, event propagation, disabled states and media/page bounds. Source checks and whitespace checks pass. The original full native verifier remains incomplete at its background-window paired handoff, as recorded above. A fresh static comparison in the same disposable home renders the sidebar, Files Plus, Markdown with a local image and a two-page PDF without errors; `/tmp/pp.LMFM9j/controls-final.png` is the package preview. Light/Geist Mono/120% comparison and the configured 15px native editor size are checked separately. Mouse-driven hover/cursor shape inspection is not claimed because Computer Use pointer input reports `noWindowsAvailable`; the actual style declarations and disabled handlers are covered by the regressions.
+
+## Earlier editor and media verification
+
+These results were originally recorded in the recipe. They describe earlier releases and do not replace the November 6 acceptance scope.
+
+Local editor verification (2026-11-03, macOS, Herdr 0.1.12): all 34 automated tests and the native check passed. The disposable native editor verifier passed text/save, wrapping/Markdown draft, conflict/discard and remount-recovery groups with `errors: []`. Real mouse/keyboard input separately verified Unicode paste, change events, `Cmd+S` with disk readback, undo, mode switching and soft wrapping in a 320px panel. The screenshot captured then showed Source on the left and Preview on the right, with one icon toolbar in each. Redo key verification was blocked by automatic action review and is not counted as passed. The older complete native verifier passed its first three groups but timed out at the background-window paired handoff; it is not a full native-suite pass. See the [implementation record](../docs/plans/preview-plus.md) for scope and receipts.
+
+Local zoom/drag verification (2026-11-02, macOS, Herdr 0.1.11): all 26 runtime tests and `herdr-app check` passed. A fresh disposable window rendered the centered percentage and fitted image, with no status errors or runtime log output; its `herdr-app shot` was the package preview for that release. Event tests cover percentage submission/blur, pixel and line scrolling, drag/release/exit, Fit reset and app zoom compensation. Physical mouse/trackpad interaction remains unverified.
 
 ## Contents, diagrams and structured data (2026-11-06)
 

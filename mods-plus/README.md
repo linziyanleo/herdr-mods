@@ -1,68 +1,63 @@
 # Mods Plus
 
-A native Herdr desktop mod and local package manager for browsing, installing, enabling, updating, and removing community mods and layouts.
+Browse Herdr mods and layouts, import public GitHub packages, and review files and shortcuts before installing or updating. Installation stores a checked package; Enable or Use layout activates it separately.
 
 ![Mods Plus](preview.png)
 
-See [the recipe](RECIPE.md) for detailed UI specifications, interactions, safety contracts, and acceptance checks. The [implementation plan](../docs/plans/mods-plus.md) defines the agreed release architecture.
+## Browse and install
 
-## Features
+Open Plugins from the sidebar or its configured shortcut. Browse Community and Examples, switch between Mods and Layouts, filter by installation status, or search and sort the catalog. Details show the recipe, source, preview and available actions.
 
-- **Plugins Dialog**: Browse the official Community and Examples catalogs with large preview cards, author avatars, stars, local search and Popular / Newest sorting.
-- **Mod and Layout Tabs**: Dedicated tabs with **All**, **Installed**, and **Not installed** filters. Installed packages appear first in **All**.
-- **Separate Install and Activation**: Package files are staged, checked with `herdr-app check`, and recorded outside active directories until explicit **Enable** or **Use layout** is selected.
-- **Reference-Safe Removal**: Inspects all local layouts before removing a mod. If an active layout still references a mod, removal is blocked with a guided cleanup prompt. Shared mods are retained.
-- **Protected Updates**: Manual updates by default, with an automatic-check switch and a custom numeric interval in min or hr. Package checks and file downloads run with bounded concurrency. Candidates are staged and checked first without modifying running files. Three-way merge protects local edits.
-- **Details**: Large previews, descriptions, author information, a copyable installation prompt, source links, package actions and the rendered recipe.
-- **Review before changes**: Review install or update inside details. See the exact revision, file additions/changes/removals, mods, layouts, local edits and shortcut conflicts before confirming. A stale review is rejected. Conflicting shortcuts stay bound to their existing actions.
-- **Add from GitHub**: Enter `owner/repo[/folder]` or an HTTPS GitHub repository/default-branch folder URL. Choose a discovered package, review it, then install. Installed sources remain available under Imported even outside the official catalog or during a catalog outage.
-- **Agent Integration Actions**: **Copy** copies the displayed installation prompt; **Open Agent tab** passes the fuller activation context to the configured agent.
-- **Sidebar Plugins Entry**: A native icon-and-label row above Settings, with a synchronized update count on the right. A collapsed sidebar shows the count when updates are available and the icon otherwise.
-- **Universal Shortcut**: Global shortcut (`Cmd+Shift+X` on macOS) to open the dialog from any layout.
+Choose Review install to see the source revision, file changes, mods, layouts and shortcuts. Cancel leaves the installation unchanged. Confirming Install runs `herdr-app check` and stores the package outside the active mod and layout directories. Enable or Use layout then activates it while preserving existing shortcut conflicts.
 
-## Installation
+Add from GitHub accepts `owner/repo[/folder]` or an HTTPS GitHub repository or default-branch folder URL. If a repository contains several packages, choose one before reviewing it. Installed imports remain listed under Imported during catalog outages.
 
-Run the provided installation script:
+Import supports public repositories on their default branch. The selected branch remains the source for later update checks. Other hosts, non-default refs, ambiguous URLs, encoded paths, symlinks and submodules are unsupported. Use shorthand when the default branch name contains `/`. Each package needs `RECIPE.md` and runtime mods or layouts. Direct imports show source links and recipe text without downloading unmoderated preview images.
+
+## Update and remove
+
+Checks download and validate update candidates without changing active files. Review update shows the prepared changes before Apply update. A three-way merge preserves compatible local edits; conflicts or changes since review block application. Mods Plus backs up managed files before changing them.
+
+Checks are manual by default. Settings can enable automatic checks with an interval in minutes or hours. The Plugins sidebar entry schedules checks while its layout is loaded. Checks pause when that layout closes or Herdr quits. Long operations run as bounded tasks, with progress and errors in the dialog. The sidebar count shows verified update candidates.
+
+Removal checks every local layout for references. It retains shared mods and blocks removal when a layout still uses the package. When integration needs an agent, Copy copies the displayed prompt and Open Agent tab passes the package and target context to the configured agent.
+
+Reviews read metadata and files without running downloaded code. Install confirmation and update preparation run native mod checks. These checks do not establish that community code is safe.
+
+## Install Mods Plus
+
+Requires Python 3, `curl`, `diff3` and `herdr-app`. Use `${HERDR_APP_HOME:-$HOME/.config/herdr-app}` as the app home.
+
+Check for an existing `mods/mods-plus/` first. Back up a previous installation and compare local changes before updating it. For a fresh installation, or an update after that comparison, run from the repository root:
 
 ```sh
 ./mods-plus/install.sh
 ```
 
-Or install manually:
+The script copies the runtime, adds `cmd-shift-x` only when unbound, and places Plugins above Settings in a compatible personal layout. It leaves bundled layouts unchanged.
 
-1. Check `${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/mods-plus` for conflicts.
-2. Copy only `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py`, `jobs.py` and `star.svg` into `mods/mods-plus/`. Python 3, `curl` and `diff3` must be available.
-3. In `keys.json`, add `"cmd-shift-x": "mod.open:mods-plus"` under `"global"`.
-4. In your personal layout, set the `sidebar-footer` content to `{"mod":"mods-plus","props":{"entry":true,"footer":true}}` and its height to 97px. This footer contains Plugins, Settings and Add machine. Remove any previous header entry.
-5. Verify the installation:
-   ```sh
-   herdr-app check ~/.config/herdr-app/mods/mods-plus
-   ```
+To install manually:
 
-## Verification
+1. Copy `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py`, `jobs.py` and `star.svg` into `<app-home>/mods/mods-plus/`.
+2. Add `"cmd-shift-x": "mod.open:mods-plus"` to the `global` section of `keys.json` only if that key is available. This is `Cmd+Shift+X` on macOS.
+3. In a personal layout, set `sidebar-footer` content to `{"mod":"mods-plus","props":{"entry":true,"footer":true}}` and its height to 97px. The footer contains Plugins, Settings and Add machine. Remove an older Plugins header entry if present.
+4. Run `herdr-app check <app-home>/mods/mods-plus` and inspect `herdr-app status`.
 
-Run the automated test suites:
+## Development checks
 
 ```sh
-# Unit tests
 python3 mods-plus/tests/helper.test.py
 python3 mods-plus/tests/catalog.test.py
 python3 mods-plus/tests/updates.test.py
 python3 mods-plus/tests/review.test.py
-python3 mods-plus/tests/jobs.test.py # includes a real 31-second operation
-
-# Async UI event tests (Node.js 18+, no dependencies)
-node --test mods-plus/tests/ui.test.cjs
-
-# Acceptance test suite
+python3 mods-plus/tests/jobs.test.py
 python3 mods-plus/tests/acceptance.test.py
-
-# Mod structure check
+node --test mods-plus/tests/ui.test.cjs
 herdr-app check mods-plus/mods/mods-plus
 ```
 
-Direct import supports public repositories and the repository's default branch at installation. That branch is persisted for subsequent update checks. Other hosts, explicit non-default refs, ambiguous branch URLs, encoded paths and traversal are refused. For a default branch containing `/`, use `owner/repo[/folder]`. A package needs `RECIPE.md` and at least one `mods/*/main.js` or `layouts/*.json`; repositories containing symlinks or submodules are currently refused. Imported packages use source links and recipe text, without downloading unmoderated preview images.
+The jobs suite includes a real 31-second operation. UI event tests require Node.js 18 or newer and no extra dependencies.
 
-Review only reads metadata/content and may fill the download cache. It does not run downloaded code, install files, merge keys or switch layouts. Confirming Install runs the existing native checks and stores the reviewed files. Enable/Use layout adds available shortcuts while retaining conflicts. Update checks may run the existing candidate check stage; applying still requires a review of that candidate. These checks do not establish that community code is safe.
+For native checks, `node mods-plus/tests/native-fixture.mjs` prepares a disposable home and prints its session file. It does not start Herdr or herdr-core. Launch that home with the printed environment, then run `node mods-plus/tests/native-verify.mjs <session.json>`. The driver uses the production view and helper with a local fixture repository. It records results and screenshots. Keep it out of the normal app home.
 
-For isolated native acceptance, `node mods-plus/tests/native-fixture.mjs` prepares a disposable home and prints its session file without starting Herdr or herdr-core. After the coordinating agent launches that home with the printed environment, run `node mods-plus/tests/native-verify.mjs /tmp/mp.<id>/session.json`. The driver uses the production view/helper with a local fake repository. It produces screenshots and a result file; physical pointer/keyboard and light/dark appearance still require inspection. Do not point the fixture at a normal app home.
+See the [recipe](RECIPE.md) for implementation contracts and acceptance criteria. The [verification record](../docs/plans/mods-plus.md#review-and-direct-import-2026-11-06) covers the combined review, import and background-task implementation. Physical input and additional sizing/theme combinations remain unverified for this release.
