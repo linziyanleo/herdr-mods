@@ -1,10 +1,13 @@
 import { View, div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, TextView, Editor, EditorState, Input, InputState } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
-import { target, dirname, basename, extension, kind, resolveLink, imageSize, normalize } from "./paths.js";
+import { target, dirname, basename, extension, kind, richText, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
+import { markdownView } from "./markdown-view.js";
+import { structuredPreview } from "./structured.js";
+import { structuredView } from "./structured-view.js";
 import { Tree } from "./tree.js";
 
 const TEXT_LIMIT = 400000;
@@ -22,6 +25,7 @@ const contextKey = () => JSON.stringify(context());
 
 const ICONS = {
   "preview-back": "back", "preview-open": "open",
+  "preview-contents": "contents",
   "preview-wrap": "wrap", "preview-save": "save", "preview-discard": "undo", "preview-cancel-discard": "close", "preview-refresh": "refresh",
 };
 
@@ -52,6 +56,7 @@ export default class PreviewPlus extends View {
       }
     } catch { this.draftError = "Saved drafts could not be read."; }
     this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
+    this.anchor = ""; this.contents = false; this.expanded = new Set([""]);
     this.viewport = { width: 400, height: 500 }; this.zoom = null; this.page = 1; this.total = 0;
     this.pan = { x: 0, y: 0 };
     this.zoomInput = InputState.new({ value: "" });
@@ -128,26 +133,45 @@ export default class PreviewPlus extends View {
   setSource(source, cx) {
     this.source = source;
     if (!source && this.selected && kind(this.selected.file) === "markdown") this.refreshMarkdown(cx);
+    else if (!source && this.selected && richText(kind(this.selected.file))) this.refreshData();
     cx.notify();
+  }
+
+  refreshData() { this.dataPreview = structuredPreview(kind(this.selected.file), this.text || "", this.truncated); }
+
+  toggleJson(path, cx) {
+    if (this.expanded.has(path)) this.expanded.delete(path); else this.expanded.add(path);
+    cx.notify();
+  }
+
+  acceptMarkdown(staged, look, cx) {
+    this.markdownBlocks = staged.blocks; this.headings = staged.headings; this.imageWarning = staged.unavailable;
+    this.markdownLook = JSON.stringify(look);
+    if (this.anchor && !this.headings.some(h => h.slug === this.anchor)) {
+      this.actionError = `Heading not found: #${this.anchor}`; this.anchor = "";
+    }
+    this.watchTargets(this.selected.on ? [] : [this.selected.file, ...staged.files], cx);
   }
 
   refreshMarkdown(cx) {
     const request = this.request, text = this.text, selected = this.selected;
+    const look = appearance();
     const token = this.markdownRequest = {};
-    this.markdownBlocks = [{ text: text || "" }];
+    this.markdownBusy = true;
     cx.spawn(async cx => {
       try {
-        const staged = await stageMarkdown(text || "", selected);
+        const staged = await stageMarkdown(text || "", selected, look);
         if (!this.current(request) || this.markdownRequest !== token || this.text !== text) return;
-        this.markdownBlocks = staged.blocks; this.imageWarning = staged.unavailable;
-        this.watchTargets(selected.on ? [] : [selected.file, ...staged.files], cx);
+        if (JSON.stringify(appearance()) !== JSON.stringify(look)) { this.refreshMarkdown(cx); return; }
+        this.acceptMarkdown(staged, look, cx);
         cx.notify();
       } catch (error) { if (this.current(request) && this.markdownRequest === token) { this.actionError = String(error.message || error); cx.notify(); } }
+      finally { if (this.markdownRequest === token) { this.markdownBusy = false; cx.notify(); } }
     });
   }
 
   toggleWrap(cx) {
-    if (!this.code || (kind(this.selected.file) === "markdown" && !this.source)) return;
+    if (!this.code || (richText(kind(this.selected.file)) && !this.source)) return;
     this.wrap = !this.wrap;
     localStorage.setItem("preview-plus.wrap", String(this.wrap));
     this.updateEditor(); cx.notify();
@@ -182,11 +206,17 @@ export default class PreviewPlus extends View {
     if (event.keystroke === saveKey && this.document) { cx.stop_propagation(); this.save(cx); }
   }
 
-  show(value, cx, remember = false, notify = true) {
+  remember() {
+    this.history.push({ target: this.selected, source: this.source, zoom: this.zoom, page: this.page, anchor: this.anchor,
+      contents: this.contents, expanded: [...this.expanded] });
+  }
+
+  show(value, cx, remember = false, notify = true, anchor = "") {
     const next = target(value);
     if (!next) return;
-    if (remember && this.selected) this.history.push({ target: this.selected, source: this.source, zoom: this.zoom, page: this.page });
+    if (remember && this.selected) this.remember();
     this.selected = next; this.source = false; this.zoom = null; this.page = 1; this.total = 0;
+    this.anchor = anchor; this.contents = false; this.expanded = new Set([""]);
     this.load(cx, notify);
   }
 
@@ -194,6 +224,7 @@ export default class PreviewPlus extends View {
     if (!this.selected) return;
     const selected = this.selected, type = kind(selected.file), request = { owner: this.owner, selected, page: this.page };
     this.request = request; this.releaseEditor(); this.document = null; this.confirmDiscard = false; this.text = null; this.markdownBlocks = null; this.media = null;
+    this.markdownRequest = null; this.markdownBusy = false; this.markdownLook = null; this.headings = []; this.dataPreview = null;
     this.zoomDirty = false; this.zoomEditing = false;
     this.pan = { x: 0, y: 0 }; this.drag = null;
     this.error = null; this.actionError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
@@ -224,11 +255,11 @@ export default class PreviewPlus extends View {
             }
           }
           if (type === "markdown") {
-            const staged = await stageMarkdown(this.text, selected);
+            const text = this.text, look = appearance();
+            const staged = await stageMarkdown(text, selected, look);
             if (!this.current(request)) return;
-            this.markdownBlocks = staged.blocks; this.imageWarning = staged.unavailable;
-            this.watchTargets(selected.on ? [] : [selected.file, ...staged.files], cx);
-          }
+            if (text === this.text) this.acceptMarkdown(staged, look, cx);
+          } else if (richText(type)) this.refreshData();
           if (!this.current(request)) return;
           this.updateEditor();
         }
@@ -308,15 +339,22 @@ export default class PreviewPlus extends View {
     try {
       const link = resolveLink(this.selected.file, href);
       if (link.url) cx.open_url(link.url);
-      else if (link.file && link.file !== this.selected.file) this.show({ ...this.selected, file: link.file }, cx, true);
+      else if (link.file && link.file !== this.selected.file) this.show({ ...this.selected, file: link.file }, cx, true, true, link.anchor || "");
+      else if (link.anchor !== undefined && kind(this.selected.file) === "markdown") {
+        if (link.anchor && !this.headings?.some(h => h.slug === link.anchor)) throw new Error(`Heading not found: #${link.anchor}`);
+        if (this.anchor === link.anchor && !this.source) return;
+        this.remember(); this.anchor = link.anchor; this.source = false; this.actionError = null; cx.notify();
+      }
     } catch (error) { this.actionError = String(error.message || error); cx.notify(); }
   }
 
   back(cx) {
     if (this.history.length) {
       const previous = this.history.pop();
+      const same = this.selected?.file === previous.target.file && this.selected?.on === previous.target.on;
       this.selected = previous.target; this.source = previous.source; this.zoom = previous.zoom; this.page = previous.page; this.total = 0;
-      this.load(cx);
+      this.anchor = previous.anchor || ""; this.contents = previous.contents || false; this.expanded = new Set(previous.expanded || [""]);
+      if (same && this.code) { this.actionError = null; this.setSource(this.source, cx); } else this.load(cx);
     } else if (this.owner.mode === "paired") run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
     else if (this.owner.mode === "files") {
       this.selected = null; this.request = null; this.releaseEditor(); this.document = null; this.media = null; this.error = null; this.actionError = null;
@@ -416,6 +454,11 @@ export default class PreviewPlus extends View {
       });
     }
     const { colors, font } = appearance(), file = this.selected?.file, type = file ? kind(file) : null, media = type === "image" || type === "pdf";
+    if (type === "markdown" && !this.source && !this.loading && !this.error && !this.markdownBusy && this.markdownLook !== JSON.stringify(appearance())) {
+      // Appearance changes also invalidate diagrams, including custom colors in
+      // the same light/dark appearance. Keep render itself free of host mutations.
+      cx.spawn(async cx => { if (!this.closed && this.selected?.file === file && !this.markdownBusy) this.refreshMarkdown(cx); });
+    }
     const panelFrame = this.owner.mode !== "pane";
     return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background)
       .when(panelFrame, el => el.rounded(10).border_1().border_color(colors.border)).text_color(colors.foreground).font_family(font).text_size(13)
@@ -428,10 +471,12 @@ export default class PreviewPlus extends View {
         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
           .tooltip(this.selected.on ? "Remote file is read-only" : "Truncated file is read-only").accessibility_label("Read-only")
           .child(svg("mods/preview-plus/icons/lock.svg").size(12))))
-        .when(type === "markdown", el => el
+        .when(type === "markdown" && !this.source && Boolean(this.headings?.length), el => el
+          .child(button("preview-contents", "Contents", colors, cx => { this.contents = !this.contents; cx.notify(); }, true, this.contents)))
+        .when(richText(type), el => el
           .child(button("preview-mode", this.source ? "Preview" : "Source", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? "preview" : "code")))
         .when(Boolean(file) && !media, el => el
-          .child(button("preview-wrap", "Wrap lines", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (type !== "markdown" || this.source), this.wrap)))
+          .child(button("preview-wrap", "Wrap lines", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (!richText(type) || this.source), this.wrap)))
         .when(Boolean(this.document), el => el
           .when(this.dirty(), el => el.child(button("preview-discard", this.confirmDiscard ? "Confirm discard" : "Discard changes", colors, cx => this.discard(cx), !this.document.saving, this.confirmDiscard, this.confirmDiscard ? "check" : "undo")))
           .when(Boolean(this.confirmDiscard), el => el.child(button("preview-cancel-discard", "Cancel discard", colors, cx => { this.confirmDiscard = false; cx.notify(); })))
@@ -479,15 +524,8 @@ export default class PreviewPlus extends View {
         .on_size_change((size, cx) => this.measure(size, cx))
         .child(image(this.media.path).absolute().left(x).top(y).w(size.width).h(size.height));
     }
-    if (type === "markdown" && !this.source) return v_flex().id("preview-markdown").flex_1().min_h(0).overflow_y_scrollbar().p(16).gap(12)
-      .on_size_change((size, cx) => this.measure(size, cx))
-      .children((this.markdownBlocks || [{ text: this.text || "" }]).map((block, index) => {
-        if (!block.media) return TextView.markdown(`preview-markdown-${this.selected.file}-${index}`, block.text)
-          .selectable(true).scrollable(false).w_full().flex_none().text_size(13).text_color(colors.foreground).on_link_click((url, cx) => this.follow(url, cx));
-        const width = Math.min(block.media.width, Math.max(1, this.viewport.width - 32));
-        return div().id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_default()
-          .on_click((_event, cx) => this.follow(block.href, cx)).child(image(block.media.path).size_full());
-      }));
+    if (type === "markdown" && !this.source) return markdownView(this, colors);
+    if (richText(type) && !this.source) return structuredView(this, type, colors);
     return this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1();
   }
 
