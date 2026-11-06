@@ -68,6 +68,12 @@ export default class NativeDriver extends FilesPlus {
           } else if (request.type === "settings") {
             this.requestOverlay = openOverlay({ mod: this.nativeMod, kind: "dialog", width: 360, height: 264, props: { role: "settings" } });
           } else if (request.type === "open-location") setShared("files-plus.open-location", request.value);
+          else if (request.type === "search") { this.search.setQuery(request.query, cx); if (request.focus) this.search.input.focus(); }
+          else if (request.type === "search-key") {
+            if (request.key === "enter") this.search.open(this.search.results[this.search.at]?.key, cx);
+            else this.search.key({ key: request.key }, cx);
+          }
+          else if (request.type === "search-open") this.search.open(request.key, cx);
           else if (request.type === "preview") this.openFile(request.path, request.root, cx);
           else if (request.type === "back") { this.show(null); cx.notify(); }
           else if (request.type === "toggle") {
@@ -99,6 +105,7 @@ export default class NativeDriver extends FilesPlus {
     if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
       selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
+      search: this.search ? { query: this.search.query, busy: this.search.busy, results: this.search.results, failures: this.search.failures, errors: this.search.errors, truncated: this.search.truncated, at: this.search.at } : null,
       treeLook: this.chunks[0] ? JSON.parse(this.chunks[0].key).slice(1) : null, previewStyle: this.previewStyle,
       dragStarts: shared("files-plus.native-drag"), motion: globalThis.__fpMotion });
     if (!this.role) Object.assign(value, { viewport: viewport(), metrics: metrics(), dark: settings().dark, look: settings(), colors: theme(), semantic: cx.theme(), windowActive: globalThis.window?.is_window_active?.(), windowBounds: globalThis.window?.bounds?.() });

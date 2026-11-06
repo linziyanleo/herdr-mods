@@ -1,6 +1,8 @@
 # Files Plus
 
-Enhance the Files panel by combining single-folder and workspace browsing with a complete right-click file manager menu (Add to agent `@`, Copy, Paste, Copy path, Copy relative path, Reveal in Finder/Explorer, and file/folder CRUD). The header shows the current directory name. Its rightmost settings button chooses where file clicks open: a center Tab (default), a center Pane, or inside the right panel. Works standalone with built-in text previews, or uses [Preview Plus](../preview-plus/README.md) for Markdown, images, and PDFs.
+Enhance the Files panel with single-folder and workspace browsing, filename/path search across unopened directories, and a complete right-click file manager menu (Add to agent `@`, Copy, Paste, Copy path, Copy relative path, Reveal in Finder/Explorer, and file/folder CRUD). The header shows the current directory name. Its rightmost settings button chooses where files open: a center Tab (default), a center Pane, or inside the right panel. Works standalone with built-in text previews, or uses [Preview Plus](../preview-plus/README.md) for Markdown, images, PDFs, JSON, CSV and TSV in the combined community delivery.
+
+Search uses case-insensitive literal terms against root-relative paths. It includes hidden and Git-ignored entries, skips `.git` and never descends through directory symlinks. Up/down selects a result; Enter opens it in the configured location. Clear or Escape restores the tree with its expansion intact. Results retain the logical root and machine; multiple roots show context beside the relative path. At most 200 results are displayed, with an explicit notice when more matches exist. Large or remote roots may take longer to scan; unavailable folders are reported separately from no matches.
 
 ![Files Plus](preview.png)
 
@@ -15,9 +17,12 @@ Run the automated tests from the repository root with Node.js 22 or newer:
 ```sh
 node --experimental-vm-modules --test files-plus/tests/*.test.mjs
 herdr-app check files-plus/mods/files-plus
+node files-plus/tests/check-search.mjs
 ```
 
 For native macOS acceptance in an isolated app home and core, run `node files-plus/tests/native-session.mjs`, then pass the printed `session.json` path to `node files-plus/tests/native-verify.mjs`. See the recipe for the remaining manual picker check and session cleanup.
+
+For the search addition, the root coordinator runs `node files-plus/tests/native-search.mjs <session.json>` serially in that same disposable session. It records `search-report.json` and `search-results.png`. Then verify real typing, arrow keys, Enter, Escape, Clear and result clicks, including scrolling selection into view, theme changes and existing Tab/Pane reuse. Driver commands exercise the control actions; they do not prove physical input dispatch. The 2026-11-06 search candidate has automated coverage and mod checks only; native execution and a refreshed preview remain pending. JSON/CSV/TSV routing is supplied by the root-owned integration commit `cee18f3`, not the search branch alone.
 
 Reuse one native test window for follow-up checks. Close each test window as soon as it is no longer needed with `HERDR_APP_HOME=<session-app-home> herdr-app do app.quit`; keep the person's normal window open. `native-verify.mjs <session.json> --installed` uses an already prepared runtime. `native-followup.mjs <session.json>` checks calibration, panel fitting, manual override, menus and dialogs in the foreground window. Continuous mouse drags remain a separate native interaction check.
 
