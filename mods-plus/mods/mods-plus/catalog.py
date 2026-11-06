@@ -12,10 +12,10 @@ from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 
 
-def download(url):
+def download(url, timeout=20):
     result = subprocess.run(
-        ["curl", "--fail", "--silent", "--show-error", "--location", "--max-time", "20", url],
-        capture_output=True,
+        ["curl", "--fail", "--silent", "--show-error", "--location", "--max-time", str(timeout), url],
+        capture_output=True, timeout=timeout + 2,
     )
     if result.returncode:
         raise LookupError(f"Could not load {url}: {result.stderr.decode('utf-8', 'replace').strip()}")
@@ -90,7 +90,8 @@ def normalize(item, kind, collection="community"):
 def official_packages(manager):
     packages = []
     manager.catalog_errors = []
-    for kind, plural in (("mod", "mods"), ("layout", "layouts")):
+    def fetch_group(source):
+        kind, plural, collection = source
         def community():
             index = json.loads(download(f"https://assets.herdr.dev/{plural}/index.json"))
             if not isinstance(index.get(plural), list):
@@ -104,13 +105,20 @@ def official_packages(manager):
                 return []
             return parser.items
 
-        groups = {}
-        for collection, fetcher in (("index", community), ("examples", examples)):
-            try:
-                cache_version = "-v2" if collection == "examples" else ""
-                groups[collection] = manager._cached(f"official-{plural}-{collection}{cache_version}.json", 3600, fetcher)
-            except Exception as exc:
-                manager.catalog_errors.append(str(exc))
+        try:
+            cache_version = "-v2" if collection == "examples" else ""
+            return manager._cached(f"official-{plural}-{collection}{cache_version}.json", 3600,
+                                   community if collection == "index" else examples)
+        except Exception as exc:
+            manager.catalog_errors.append(str(exc))
+            return []
+
+    sources = [(kind, plural, collection) for kind, plural in (("mod", "mods"), ("layout", "layouts"))
+               for collection in ("index", "examples")]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        fetched = dict(zip(sources, pool.map(fetch_group, sources)))
+    for kind, plural in (("mod", "mods"), ("layout", "layouts")):
+        groups = {collection: fetched[(kind, plural, collection)] for collection in ("index", "examples")}
         indexed = {p["id"]: p for p in groups.get("index", [])}
         packages.extend(p for p in indexed.values() if p["repo"] != "herdrdev/herdr-layout-examples")
         for example in groups.get("examples", []):
@@ -120,7 +128,7 @@ def official_packages(manager):
                 if key in identity:
                     example[key] = identity[key]
             packages.append(example)
-    if not packages:
+    if not packages and not manager.cache_only:
         raise LookupError("; ".join(manager.catalog_errors))
     return packages
 
@@ -177,7 +185,10 @@ def local_state(manager, pkg):
                 "mods": mods, "layouts": layouts, "files": expected,
                 "installed": True, "enabled": True, "associated": True, "association_version": 2,
             }
-            manager._save_records()
+            if manager.cache_only:
+                manager.stale = True
+            else:
+                manager.associate(pkg["id"], manager.records[pkg["id"]], record)
             state.update(installed=True, enabled=True)
         else:
             state["collision"] = "Local mod folder or layout exists, but the complete package does not match this source. Local files are preserved."
@@ -204,7 +215,13 @@ def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
 
 def media(manager, ids):
     wanted = set(ids)
-    packages = [p for p in official_packages(manager) if p["id"] in wanted]
+    # Browsing has already loaded the catalog; media must not refresh four feeds.
+    previous = manager.cache_only
+    manager.cache_only = True
+    try:
+        packages = [p for p in official_packages(manager) if p["id"] in wanted]
+    finally:
+        manager.cache_only = previous
     def fetch(pkg):
         result = {"id": pkg["id"]}
         for field in ("preview", "avatar"):
@@ -216,7 +233,7 @@ def media(manager, ids):
             path = os.path.join(manager.root, relative)
             try:
                 if not os.path.isfile(path):
-                    data = download(url)
+                    data = download(url, timeout=6)
                     os.makedirs(os.path.dirname(path), exist_ok=True)
                     with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), delete=False) as out:
                         out.write(data)
@@ -229,7 +246,7 @@ def media(manager, ids):
             except Exception:
                 pass
         return result
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         return list(pool.map(fetch, packages))
 
 

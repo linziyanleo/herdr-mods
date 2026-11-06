@@ -10,7 +10,7 @@ echo "=== Installing Mods Plus to $HERDR_APP ==="
 
 # 1. Copy runtime mod
 mkdir -p "$DEST_MOD"
-cp "$RUNTIME_SRC/main.js" "$RUNTIME_SRC/mod.json" "$RUNTIME_SRC/helper.py" "$RUNTIME_SRC/catalog.py" "$RUNTIME_SRC/star.svg" "$DEST_MOD/"
+cp "$RUNTIME_SRC/main.js" "$RUNTIME_SRC/mod.json" "$RUNTIME_SRC/helper.py" "$RUNTIME_SRC/catalog.py" "$RUNTIME_SRC/jobs.py" "$RUNTIME_SRC/star.svg" "$DEST_MOD/"
 chmod +x "$DEST_MOD/helper.py"
 echo "✓ Runtime files installed to $DEST_MOD"
 

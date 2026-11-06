@@ -99,6 +99,8 @@ class PackageManager:
         self.updates_dir = os.path.join(self.data_dir, "updates")
         self.backups_dir = os.path.join(self.data_dir, "backups")
         self.lock_file = os.path.join(self.data_dir, ".lock")
+        self.cache_only = False
+        self.stale = False
         self.records_file = os.path.join(self.data_dir, "packages.json")
         self.settings_file = os.path.join(self.data_dir, "settings.json")
 
@@ -259,6 +261,15 @@ class PackageManager:
                     return json.load(f)
             except (OSError, ValueError):
                 pass
+        if self.cache_only:
+            self.stale = True
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                except (OSError, ValueError):
+                    pass
+            raise LookupError("Catalog verification is pending refresh")
         # Fallback to pkg cache if available
         pkg_cache = os.path.join(self.root, "data", "pkg", "cache", filename)
         if not os.path.isfile(path) and os.path.isfile(pkg_cache):
@@ -273,8 +284,9 @@ class PackageManager:
 
         try:
             data = fetcher()
-            with open(path, "w", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile(mode="w", dir=self.cache_dir, delete=False) as f:
                 json.dump(data, f)
+            os.replace(f.name, path)
             return data
         except Exception as e:
             if filename.startswith("official-"):
@@ -316,6 +328,19 @@ class PackageManager:
 
     def build_catalog(self, query="", kind_filter=None, status_filter="all"):
         return gallery.build_catalog(self, query, kind_filter, status_filter)
+
+    def associate(self, pkg_id, record, previous):
+        # Browsing must not wait for a long update. Persist newly proven ownership
+        # only if no package operation has changed that record since inspection.
+        try:
+            with file_lock(self.lock_file, timeout=0.1):
+                current = self._load_records()
+                if current.get(pkg_id, {}) == previous:
+                    current[pkg_id] = record
+                    self.records = current
+                    self._save_records()
+        except TimeoutError:
+            self.stale = True
 
     def raw_content(self, repo: str, branch: str, path: str) -> bytes:
         """Fetches raw file content directly, cached on disk."""
@@ -416,7 +441,7 @@ class PackageManager:
         # 4. Run `herdr-app check` for runtime mods in stage
         for mod_name in mods_paths:
             staged_mod_dir = os.path.join(target_stage, "mods", mod_name)
-            check_proc = subprocess.run(["herdr-app", "check", staged_mod_dir], capture_output=True, text=True)
+            check_proc = subprocess.run(["herdr-app", "check", staged_mod_dir], capture_output=True, text=True, timeout=45)
             if check_proc.returncode != 0:
                 rmtree(target_stage)
                 err_msg = (check_proc.stderr or check_proc.stdout).strip() or "herdr-app check failed"
@@ -679,6 +704,7 @@ Instructions:
                 "count": settings["prepared_updates_count"], "errors": errors}
 
     def _check_update(self, pkg_id, record, trees, downloads):
+        cand_dir = None
         try:
             repo = record.get("repo")
             subdir = record.get("subdir", "")
@@ -728,7 +754,7 @@ Instructions:
             for mod_name in record.get("mods", []):
                 staged_mod = os.path.join(cand_dir, "mods", mod_name)
                 if os.path.isfile(os.path.join(staged_mod, "main.js")):
-                    chk = subprocess.run(["herdr-app", "check", staged_mod], capture_output=True, text=True)
+                    chk = subprocess.run(["herdr-app", "check", staged_mod], capture_output=True, text=True, timeout=45)
                     if chk.returncode != 0:
                         valid = False
                         break
@@ -770,8 +796,9 @@ Instructions:
                 "locally_modified": locally_modified,
                 "prepared_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-            with open(os.path.join(self.updates_dir, slug, "meta.json"), "w", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile(mode="w", dir=os.path.join(self.updates_dir, slug), delete=False) as f:
                 json.dump(cand_meta, f, indent=2)
+            os.replace(f.name, os.path.join(self.updates_dir, slug, "meta.json"))
 
             record["has_update"] = True
             return pkg_id, {
@@ -781,6 +808,10 @@ Instructions:
                 "locally_modified": locally_modified,
             }, None
         except Exception as error:
+            # Only a fully validated candidate receives metadata and a badge.
+            if cand_dir is not None:
+                record["has_update"] = False
+                rmtree(os.path.join(self.updates_dir, pkg_id.replace("/", "-")))
             return pkg_id, None, str(error)
 
     def _three_way_merge(self, local_path: str, base_sha: str, cand_sha: str, repo: str) -> bool:
@@ -905,6 +936,7 @@ def main():
     p_catalog.add_argument("--query", "-q", default="")
     p_catalog.add_argument("--kind", choices=["mod", "layout"])
     p_catalog.add_argument("--filter", choices=["all", "installed", "not_installed"], default="all")
+    p_catalog.add_argument("--cached", action="store_true", help="Return cached catalog without network access")
 
     p_media = sub.add_parser("media")
     p_media.add_argument("ids", help="JSON array of package IDs")
@@ -964,8 +996,9 @@ def main():
         if args.interval is not None and args.interval_value is not None:
             parser.error("Use either --interval or --interval-value with --interval-unit")
     mgr = PackageManager(args.app_home)
+    mgr.cache_only = args.command == "catalog" and args.cached
 
-    readonly = args.command == "media" or (args.command == "settings" and
+    readonly = args.command in ("catalog", "details", "media", "prompt", "copy-prompt") or (args.command == "settings" and
                args.auto_update is None and args.interval is None and args.interval_value is None and args.agent is None)
     with contextlib.nullcontext() if readonly else file_lock(mgr.lock_file):
         # Another helper may have committed records while this process waited.
@@ -974,7 +1007,7 @@ def main():
         result = None
         if args.command == "catalog":
             pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter)
-            result = {"packages": pkgs, "count": len(pkgs), "warnings": getattr(mgr, "catalog_errors", [])}
+            result = {"packages": pkgs, "count": len(pkgs), "warnings": getattr(mgr, "catalog_errors", []), "stale": mgr.stale}
         elif args.command == "media":
             result = {"media": gallery.media(mgr, json.loads(args.ids))}
         elif args.command == "details":

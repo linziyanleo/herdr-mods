@@ -3,8 +3,11 @@
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -151,6 +154,64 @@ class CatalogTests(unittest.TestCase):
     def test_repository_preview_is_png(self):
         preview = Path(__file__).parents[1] / "preview.png"
         self.assertTrue(preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_four_catalog_sources_refresh_in_parallel(self):
+        self.catalog.stop()
+        barrier = threading.Barrier(4, timeout=3)
+        def fetch(url):
+            barrier.wait()
+            if url.endswith("index.json"):
+                plural = "layouts" if "/layouts/" in url else "mods"
+                return json.dumps({plural: [{"fullName": "alice/suite", "owner": "alice", "name": "Suite"}]}).encode()
+            return b"<html></html>"
+        with patch.object(gallery, "download", side_effect=fetch):
+            self.assertEqual(len(gallery.official_packages(self.manager)), 2)
+
+    def test_browsing_during_mutation_does_not_overwrite_records(self):
+        self.write("mods/panel/main.js", "original")
+        with helper.file_lock(self.manager.lock_file):
+            self.assertTrue(self.manager.build_catalog()[0]["installed"])
+            self.assertFalse(Path(self.manager.records_file).exists())
+        self.manager.records = self.manager._load_records()
+        self.assertTrue(self.manager.build_catalog()[0]["installed"])
+        saved = json.loads(Path(self.manager.records_file).read_text())
+        self.assertTrue(saved[self.pkg["id"]]["associated"])
+
+    def test_catalog_cli_reads_while_package_lock_is_held(self):
+        for plural in ("mods", "layouts"):
+            for collection in ("index", "examples-v2"):
+                path = Path(self.manager.cache_dir) / f"official-{plural}-{collection}.json"
+                path.write_text(json.dumps([self.pkg] if (plural, collection) == ("mods", "index") else []))
+        with helper.file_lock(self.manager.lock_file):
+            result = subprocess.run([sys.executable, "-B", str(Path(helper.__file__)),
+                                     "--app-home", self.temp.name, "--json", "catalog"],
+                                    capture_output=True, text=True, timeout=3, check=True)
+        self.assertEqual(json.loads(result.stdout)["count"], 1)
+
+    def test_association_preserves_a_concurrent_record_change(self):
+        changed = {"installed": True, "files": {"local": "new"}}
+        Path(self.manager.records_file).write_text(json.dumps({self.pkg["id"]: changed}))
+        self.write("mods/panel/main.js", "original")
+        self.manager.build_catalog()
+        self.assertEqual(json.loads(Path(self.manager.records_file).read_text())[self.pkg["id"]], changed)
+
+    def test_cached_catalog_and_media_do_not_refresh_network_metadata(self):
+        self.catalog.stop()
+        path = Path(self.manager.cache_dir) / "official-mods-index.json"
+        path.write_text(json.dumps([self.pkg]))
+        os.utime(path, (0, 0))
+        self.manager.cache_only = True
+        with patch.object(gallery, "download", side_effect=AssertionError("Unexpected network refresh")) as fetch:
+            self.assertEqual(self.manager.build_catalog()[0]["id"], self.pkg["id"])
+            self.assertTrue(self.manager.stale)
+            fetch.assert_not_called()
+        self.manager.cache_only = False
+        with patch.object(gallery, "download", side_effect=OSError("image unavailable")) as fetch:
+            result = gallery.media(self.manager, [self.pkg["id"]])
+        self.assertEqual(result, [{"id": self.pkg["id"]}])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertTrue(all(call.kwargs == {"timeout": 6} for call in fetch.call_args_list))
+        self.assertFalse(self.manager.cache_only)
 
 
 if __name__ == "__main__":

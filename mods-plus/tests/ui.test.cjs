@@ -27,7 +27,7 @@ function setup() {
       set_value(value) { this.text = value; }, on(event, fn) { this.events[event] = fn; } }) },
     shared: key => values.get(key), setShared: (key, value) => values.set(key, value),
     props: () => ({ entry: true, footer: true }), layout: () => ({ id: 'sidebar', size: { px: 240 } }),
-    updates: () => ({ app: {} }), run() {} };
+    updates: () => ({ app: {} }), run() {}, appHome: () => '/fixture' };
   const Mod = vm.runInNewContext(source + '\nModsPlus', runtime);
   const view = new Mod();
   Object.assign(view, { settings: { auto_update: false, interval_value: 24, interval_unit: 'hr' }, workDepth: 0,
@@ -38,6 +38,7 @@ function setup() {
   function context(persistent = false) {
     return { valid: true, notify() { assert.ok(this.valid || persistent, 'expired cx'); },
       stop_propagation() { assert.ok(this.valid || persistent); },
+      async sleep() { assert.ok(this.valid || persistent); },
       spawn(fn) { assert.ok(this.valid || persistent); const task = Promise.resolve().then(() => fn(context(true))); tasks.push(task); return task; },
       timer: { after(ms, fn) { let cancelled = false;
         tasks.push(Promise.resolve().then(() => { if (!cancelled) return fn(context(true)); }));
@@ -51,7 +52,7 @@ function setup() {
     cx.valid = false;
   }
   async function drain() { while (tasks.length) await Promise.all(tasks.splice(0)); }
-  return { view, values, click, drain, context };
+  return { view, values, click, drain, context, runtime };
 }
 
 function find(nodes, id) {
@@ -66,6 +67,58 @@ function find(nodes, id) {
 function textOf(node) {
   return typeof node === 'string' ? node : (node?.nodes || []).map(textOf).join(' ');
 }
+
+test('helper polls short RPCs and labels terminal errors with the operation', async () => {
+  const { view, runtime, context } = setup();
+  const calls = [];
+  const replies = [{ id: 'job', state: 'running' }, { id: 'job', state: 'running' },
+    { id: 'job', state: 'done', result: { count: 1 } }];
+  runtime.exec = async (command, args) => {
+    calls.push(args);
+    assert.equal(command, 'python3');
+    return { code: 0, stdout: JSON.stringify(replies.shift()) };
+  };
+  assert.equal((await view.helper(['check-updates'], context(true))).count, 1);
+  assert.deepEqual(calls.map(args => args[4]), ['start', 'status', 'status']);
+  replies.push({ id: 'job', state: 'failed', error: 'Validation timed out' });
+  await assert.rejects(view.helper(['install', 'owner/pkg'], context(true)), /install: Validation timed out/);
+});
+
+test('cached catalog is visible before refresh finishes', async () => {
+  const { view, context } = setup();
+  let finish;
+  let started;
+  const refreshing = new Promise(resolve => { started = resolve; });
+  view.loadMedia = () => {};
+  view.helper = async args => args.includes('--cached')
+    ? { packages: [{ id: 'cached' }], stale: true }
+    : new Promise(resolve => { finish = resolve; started(); });
+  const task = view.loadCatalog(context(true));
+  await refreshing;
+  assert.equal(view.packages[0].id, 'cached');
+  finish({ packages: [{ id: 'fresh' }] });
+  await task;
+  assert.equal(view.packages[0].id, 'fresh');
+});
+
+test('media loads in small batches and a failed batch does not stop later cards', async () => {
+  const { view, context, drain } = setup();
+  view.packages = Array.from({ length: 9 }, (_, i) => ({ id: String(i), kind: 'mod', collection: 'community',
+    name: String(i), author: '', description: '', stars: 0 }));
+  const batches = [];
+  view.helper = async args => {
+    const ids = JSON.parse(args[1]); batches.push(ids);
+    if (batches.length === 1) throw new Error('image job stopped');
+    return { media: ids.map(id => ({ id, preview_path: id + '.png' })) };
+  };
+  view.loadMedia(context(true));
+  await drain();
+  assert.deepEqual(batches.map(ids => ids.length), [4, 4, 1]);
+  assert.equal(Object.keys(view.media).length, 9);
+  assert.equal(view.media['8'].preview_path, '8.png');
+  assert.equal(view.loadingMedia, false);
+  assert.equal(view.message, undefined);
+});
 
 test('settings toggles and intervals survive await, refresh and reject repeated clicks', async () => {
   const { view, click, drain } = setup();

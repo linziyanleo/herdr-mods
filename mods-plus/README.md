@@ -46,6 +46,7 @@ Run the automated test suites:
 python3 mods-plus/tests/helper.test.py
 python3 mods-plus/tests/catalog.test.py
 python3 mods-plus/tests/updates.test.py
+python3 mods-plus/tests/jobs.test.py # includes a real 31-second operation
 
 # Async UI event tests (Node.js 18+, no dependencies)
 node --test mods-plus/tests/ui.test.cjs
