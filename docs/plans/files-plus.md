@@ -1,6 +1,6 @@
 # Files Plus implementation plan
 
-Status: the 2026-11-06 filename/path search and structured-preview routing are implemented and verified in the combined source release. The current package preview shows search results in an isolated Herdr 0.1.13 window. Normal-home installation and community-catalog refresh are outside this delivery. Earlier installation and publication records below are historical.
+Status: the 2026-11-06 all-file routing update sends ordinary text to the same Preview Plus editor as rich-format source. See the [current implementation and delivery record](preview-plus.md#all-file-editor-routing-2026-11-06) for boundaries, tests and the authorized main push / normal-home reload. The current package preview shows a Files Plus tree beside an editable TypeScript file. Earlier installation and publication records below are historical; community-catalog changes are outside this update.
 
 ## Filename and path search (2026-11-06)
 

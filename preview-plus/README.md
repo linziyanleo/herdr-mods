@@ -66,7 +66,7 @@ Pass `on` with the machine name for remote Markdown and text. Images and PDFs ar
 
 ## Edit and save
 
-Use the code icon to edit Markdown, JSON, CSV or TSV source; it becomes an eye icon that returns to Preview. Ordinary local text opens in the native editor. The top toolbar uses icon buttons with tooltips for this mode toggle, Wrap lines, Save and Open. Wrap lines stays in the same position, disabled in rich Preview and enabled in Source. A small dot beside the filename means there are unsaved changes. Save with the disk icon or `Cmd+S` on macOS (`Ctrl+S` elsewhere) while the editor has focus. No global shortcuts are installed.
+Use the code icon to edit Markdown, JSON, CSV or TSV source; it becomes an eye icon that returns to Preview. Ordinary local text opens in the native editor regardless of its extension, including source code, configuration, hidden files and extensionless files. Files Plus now sends these files to the same editor in Tab, Pane and paired internal-panel mode. The top toolbar uses icon buttons with tooltips for this mode toggle, Wrap lines, Save and Open. Wrap lines stays in the same position, disabled in rich Preview and enabled in Source. A small dot beside the filename means there are unsaved changes. Save with the disk icon or `Cmd+S` on macOS (`Ctrl+S` elsewhere) while the editor has focus. No global shortcuts are installed.
 
 Wrap lines changes only the display. The preference is remembered. Herdr currently exposes wrapping and code appearance at editor creation only, so toggling wrap or changing the code theme/font rebuilds the editor: text is preserved, but selection, scroll position and undo history may reset. Native selection, copy/paste and undo/redo are otherwise provided by Herdr.
 

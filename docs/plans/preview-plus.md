@@ -1,6 +1,21 @@
 # Preview Plus implementation plan
 
-Status: the 2026-11-06 contents/anchors, Mermaid and structured-data extension is implemented in the combined source release. Native rich-preview and Files Plus handoff checks pass. The normal Herdr home is not installed or reconfigured by this delivery. Earlier publication and installation records below are historical.
+Status: all-file routing from Files Plus is implemented and verified on 2026-11-06. Complete local text shares the existing Preview Plus editor without an extension allowlist. Main delivery and normal-home hot reload are authorized for this update; the delivery receipt below tracks their completion. Earlier publication and installation records below are historical.
+
+## All-file editor routing (2026-11-06)
+
+The user authorized complete development, testing, commits, push to main and reload into the current Herdr view, within the previously agreed text/binary/remote/size boundaries. Files Plus now sends all targets to installed Preview Plus in Tab, Pane and paired internal-panel modes. This removes only the dispatch allowlist; the editor, guarded save, drafts, confirmed discard, native undo/redo and external Open remain owned by Preview Plus. Existing Tab/Pane reuse, root/machine identity, newer-request precedence and missing-receiver fallback remain intact. Standalone Files Plus without Preview Plus or an internal stack keeps its read-only fallback.
+
+Rich previews remain Markdown, JSON, CSV, TSV, PNG/JPEG/WebP/SVG and PDF. Complete local UTF-8 source/configuration/hidden/extensionless/unknown-extension text is editable; remote and truncated text remains read-only. Images/PDFs retain preview and Open; other binary files retain their explicit state and local Open. The 400,000-character guard, host 1 MiB read limit and wrap/style rebuild resetting selection/scroll/undo are unchanged.
+
+Validation on macOS / Herdr 0.1.13:
+
+- Combined Files Plus / Preview Plus automated run: 143 of 145 tests passed initially. One old routing expectation was updated to the authorized new contract; one new binary test now waits for the asynchronous reload error. Both affected files then passed all 23 tests. The remaining 122 passing results apply unchanged to the final source. Coverage includes both center destinations, paired internal targets, missing-receiver fallback, stale handoffs, exact Unicode/CRLF saves, wrap, discard, binary Open and remote/size boundaries.
+- Both runtime `herdr-app check` commands pass. Syntax checks pass for the native session and paired verifier.
+- In `/tmp/pp.0W5oi9`, `native-structured-pair.mjs` passed eight real paired handoff groups: JSON/CSV/TSV previews, plus `.ts`, `.yaml`, `.env`, `Dockerfile` and `.custom` edit/wrap/save/discard, exact disk readback, target identity, Back and retained folders. `native-editor-verify.mjs` passed all four groups for Unicode drafts, wrapping/Markdown preview, navigation/save, external-edit conflicts/discard and persistent draft recovery. Both report `errors: []`.
+- `all-text-editor.png` was captured with `herdr-app shot` from that disposable session and inspected. It shows the real Files Plus tree and an ordinary TypeScript file in Preview Plus. CUA could not identify the isolated window (`cgWindowNotFound`), including after restarting the same session with a distinct copy of the signed app; those native driver receipts do not establish physical input dispatch.
+
+Delivery receipt: source validation complete; main integration/push, normal-home hot reload and physical-input smoke verification pending.
 
 This plan merges the previous `markdown-preview` and `media-preview` plans into one mod (`preview-plus`) that works standalone or alongside [Files Plus](files-plus.md).
 
