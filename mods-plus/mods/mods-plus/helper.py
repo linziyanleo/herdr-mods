@@ -28,6 +28,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import catalog as gallery
+import review
 
 HERDR_APP = os.environ.get("HERDR_APP_HOME") or os.path.expanduser("~/.config/herdr-app")
 SKIP_DIRS = {"__pycache__", "node_modules", ".git"}
@@ -218,7 +219,8 @@ class PackageManager:
 
     def active_layout_name(self) -> str:
         try:
-            out = subprocess.run(["herdr-app", "status"], capture_output=True, text=True, timeout=2)
+            out = subprocess.run(["herdr-app", "status"], capture_output=True, text=True, timeout=2,
+                                 env={**os.environ, "HERDR_APP_HOME": self.root})
             if out.returncode == 0:
                 data = json.loads(out.stdout)
                 return data.get("layout", "main")
@@ -286,11 +288,14 @@ class PackageManager:
 
     def branch_tree(self, repo: str, branch: str = "HEAD", refresh=False):
         def fetch():
-            t = self._gh_api(f"repos/{repo}/git/trees/{urllib.parse.quote(branch, safe='')}?recursive=1")
+            commit = self._gh_api(f"repos/{repo}/commits/{urllib.parse.quote(branch, safe='')}")["sha"]
+            t = self._gh_api(f"repos/{repo}/git/trees/{commit}?recursive=1")
             if t.get("truncated"):
                 raise ValueError("Upstream file listing is incomplete")
+            if any(e.get("mode") in ("120000", "160000") for e in t.get("tree", [])):
+                raise ValueError("Repositories containing symlinks or submodules are not supported")
             return {**{e["path"]: e["sha"] for e in t.get("tree", []) if e.get("type") == "blob"},
-                    "HEAD": t.get("sha", "unknown")}
+                    "HEAD": commit}
         if refresh:
             return fetch()
         slug = repo.replace("/", "-")
@@ -344,88 +349,126 @@ class PackageManager:
     def get_details(self, pkg_id):
         return gallery.details(self, pkg_id)
 
+    @staticmethod
+    def file_hash(path):
+        if not os.path.isfile(path):
+            return None
+        with open(path, "rb") as f:
+            return blob_sha(f.read())
+
+    def discover(self, value):
+        return review.discover(self, value)
+
+    def _name_conflicts(self, pkg_id, mods, layouts):
+        record = self.records.get(pkg_id, {})
+        errors = []
+        if any(other != pkg_id and other.replace("/", "-") == pkg_id.replace("/", "-") for other in self.records):
+            errors.append("Another source uses this package storage name")
+        for kind, names in (("mod", mods), ("layout", layouts)):
+            for name in names:
+                key = name if kind == "mod" else "layout:" + name
+                path = os.path.join(self.root, "mods", name) if kind == "mod" else os.path.join(self.root, "layouts", name + ".json")
+                owned = name in record.get(kind + "s", []) and record.get("enabled")
+                if key in self.shipped:
+                    errors.append(f"Built-in {kind}: {name}")
+                elif any(other != pkg_id and rec.get("installed") and name in rec.get(kind + "s", [])
+                         for other, rec in self.records.items()):
+                    errors.append(f"Another package owns {kind}: {name}")
+                elif os.path.lexists(path) and not owned:
+                    errors.append(f"Local {kind} already exists: {name}")
+        return errors
+
+    def _review(self, pkg_id, repo, subdir, branch, commit, files, mods, layouts, operation):
+        record = self.records.get(pkg_id, {})
+        current_keys = review.read_keys(os.path.join(self.root, "keys.json"))
+        proposed = review.validate_keys(json.loads(self.blob_bytes(repo, files["keys.json"]))) if "keys.json" in files else {}
+        for name in layouts:
+            if not isinstance(json.loads(self.blob_bytes(repo, files[f"layouts/{name}.json"])), dict):
+                raise ValueError(f"Layout must be a JSON object: {name}")
+        local = review.local_snapshot(self, record, files)
+        conflicts = self._name_conflicts(pkg_id, mods, layouts)
+        if operation == "update":
+            _, merge_conflicts = self._update_contents(record, files)
+            conflicts.extend("Local edit conflict: " + p for p in merge_conflicts)
+        baseline = record.get("files", {}) if operation == "update" else {}
+        def units(kind, names, hashes):
+            if kind == "layout":
+                return {name: hashes.get(f"layouts/{name}.json") for name in names}
+            return {name: review.token({p: sha for p, sha in hashes.items() if p.startswith(f"mods/{name}/")}) for name in names}
+        result = {"id": pkg_id, "repo": repo, "subdir": subdir, "branch": branch,
+                  "commit": commit, "operation": operation, "files": files, "mods": mods, "layouts": layouts,
+                  "changes": review.changes(baseline, files), "conflicts": conflicts,
+                  "mod_changes": review.changes(units("mod", record.get("mods", []), baseline), units("mod", mods, files)),
+                  "layout_changes": review.changes(units("layout", record.get("layouts", []), baseline), units("layout", layouts, files)),
+                  "shortcuts": review.shortcut_review(current_keys, proposed, record.get("owned_keys")),
+                  "locally_modified": [p for p, sha in local.items() if p in baseline and sha != baseline[p] and record.get("enabled")],
+                  "active": bool(record.get("enabled")), "keys": proposed}
+        # Include all affected state, even unchanged bindings; a stale review must be redone.
+        result["token"] = review.token({"review": result, "local": local, "keys": current_keys, "record": record})
+        return result
+
+    def review_install(self, repo, subdir="", ref=None):
+        parsed_repo, parsed_subdir, branch = review.source(self, repo + ("/" + subdir if subdir else ""))
+        if ref and ref != branch:
+            raise ValueError("Only the repository default branch is supported")
+        tree = self.branch_tree(parsed_repo, branch, refresh=True)
+        files, mods, layouts = review.package_files(self, tree, parsed_subdir)
+        if "RECIPE.md" not in files:
+            raise ValueError("Package folder must contain RECIPE.md")
+        pkg_id = parsed_repo + ("/" + parsed_subdir if parsed_subdir else "")
+        if self.records.get(pkg_id, {}).get("installed"):
+            raise ValueError("Package is already installed; review its update instead")
+        result = self._review(pkg_id, parsed_repo, parsed_subdir, branch, tree["HEAD"], files, mods, layouts, "install")
+        result["source"] = review.descriptor(self, parsed_repo, parsed_subdir, branch, tree)
+        return result
+
     # -------------------------------- Install & Activation --------------------------------
 
-    def install(self, repo: str, subdir: str = "", ref: str = None) -> dict:
+    def install(self, repo: str, subdir: str = "", ref: str = None, reviewed: str = None) -> dict:
         """Stages files, validates with `herdr-app check`, saves to packages_dir, marks Installed."""
-        pkg_id = f"{repo}/{subdir}" if subdir else repo
+        if not reviewed:
+            return {"ok": False, "error": "Review this package before installing"}
+        proposal = self.review_install(repo, subdir, ref)
+        if proposal["token"] != reviewed:
+            return {"ok": False, "error": "Source or local files changed since review. Review again before installing."}
+        if proposal["conflicts"]:
+            return {"ok": False, "error": "; ".join(proposal["conflicts"])}
+        pkg_id, repo, subdir = proposal["id"], proposal["repo"], proposal["subdir"]
         slug = pkg_id.replace("/", "-")
         target_stage = os.path.join(self.stage_dir, slug)
         rmtree(target_stage)
         os.makedirs(target_stage, exist_ok=True)
 
-        # 1. Resolve tree and blobs
-        target_ref = ref or "HEAD"
-        tree = self.branch_tree(repo, target_ref)
-        sub_prefix = (subdir + "/") if subdir else ""
-
-        # Check for matching mods and layouts
-        mods_paths = {}
-        layouts_paths = {}
-        for path, sha in tree.items():
-            if sub_prefix and not path.startswith(sub_prefix):
-                continue
-            rel = path[len(sub_prefix):]
-            m = re.match(r"mods/([^/]+)/", rel)
-            if m:
-                mods_paths.setdefault(m.group(1), {})[rel] = sha
-            m = re.fullmatch(r"layouts/([^/]+)\.json", rel)
-            if m:
-                layouts_paths[m.group(1)] = (rel, sha)
-
-        if not mods_paths and not layouts_paths:
-            rmtree(target_stage)
-            return {"ok": False, "error": f"No mods or layouts found in {pkg_id}"}
-
-        # 2. Check conflict with existing unmanaged active files
-        for mod_name in mods_paths:
-            if mod_name in self.shipped:
-                rmtree(target_stage)
-                return {"ok": False, "error": f"Cannot install: '{mod_name}' is a built-in Herdr mod."}
-            active_path = os.path.join(self.root, "mods", mod_name)
-            if os.path.exists(active_path) and not self.records.get(pkg_id, {}).get("installed"):
-                rmtree(target_stage)
-                return {"ok": False, "error": f"Conflict: a local mod '{mod_name}' already exists. Preserving local files."}
-
-        for layout_name in layouts_paths:
-            if f"layout:{layout_name}" in self.shipped:
-                rmtree(target_stage)
-                return {"ok": False, "error": f"Cannot install: '{layout_name}' is a built-in Herdr layout."}
-            active_path = os.path.join(self.root, "layouts", f"{layout_name}.json")
-            if os.path.exists(active_path) and not self.records.get(pkg_id, {}).get("installed"):
-                rmtree(target_stage)
-                return {"ok": False, "error": f"Conflict: a local layout '{layout_name}.json' already exists. Preserving local layout."}
-
-        # 3. Stage all package files
-        file_hashes = {}
-        for path, sha in tree.items():
-            if path == "HEAD":
-                continue
-            if sub_prefix and not path.startswith(sub_prefix):
-                continue
-            rel = path[len(sub_prefix):]
-            if ignored(rel):
-                continue
+        file_hashes = proposal["files"]
+        for rel, sha in file_hashes.items():
             dest_file = os.path.join(target_stage, rel)
             os.makedirs(os.path.dirname(dest_file), exist_ok=True)
             data = self.blob_bytes(repo, sha)
+            if blob_sha(data) != sha:
+                raise ValueError(f"Downloaded file does not match reviewed content: {rel}")
             with open(dest_file, "wb") as f:
                 f.write(data)
-            file_hashes[rel] = sha
 
         # 4. Run `herdr-app check` for runtime mods in stage
-        for mod_name in mods_paths:
+        for mod_name in proposal["mods"]:
             staged_mod_dir = os.path.join(target_stage, "mods", mod_name)
-            check_proc = subprocess.run(["herdr-app", "check", staged_mod_dir], capture_output=True, text=True)
+            check_proc = subprocess.run(["herdr-app", "check", staged_mod_dir], capture_output=True, text=True,
+                                        env={**os.environ, "HERDR_APP_HOME": self.root})
             if check_proc.returncode != 0:
                 rmtree(target_stage)
                 err_msg = (check_proc.stderr or check_proc.stdout).strip() or "herdr-app check failed"
                 return {"ok": False, "error": f"Validation check failed for mod '{mod_name}': {err_msg}"}
 
         # 5. Move staged package to permanent package store (NOT active mods/layouts yet!)
+        self._verify_files(target_stage, file_hashes)
+        current = self._review(pkg_id, repo, subdir, proposal["branch"], proposal["commit"],
+                               proposal["files"], proposal["mods"], proposal["layouts"], "install")
+        if current["token"] != reviewed:
+            rmtree(target_stage)
+            return {"ok": False, "error": "Local files changed during validation. Review again before installing."}
         target_store = os.path.join(self.packages_dir, slug)
         rmtree(target_store)
-        shutil.copytree(target_stage, target_store)
+        self._copy_files(target_stage, target_store, file_hashes)
         rmtree(target_stage)
 
         # 6. Record installation (installed=True, enabled=False)
@@ -433,11 +476,12 @@ class PackageManager:
             "id": pkg_id,
             "repo": repo,
             "subdir": subdir,
-            "commit": tree.get("HEAD", ref or "latest"),
-            "ref": ref or "main",
+            "commit": proposal["commit"],
+            "ref": proposal["branch"],
+            "source": proposal["source"],
             "files": file_hashes,
-            "mods": list(mods_paths.keys()),
-            "layouts": list(layouts_paths.keys()),
+            "mods": proposal["mods"],
+            "layouts": proposal["layouts"],
             "installed": True,
             "enabled": False,
             "at": time.strftime("%Y-%m-%d"),
@@ -447,8 +491,8 @@ class PackageManager:
         return {
             "ok": True,
             "id": pkg_id,
-            "mods": list(mods_paths.keys()),
-            "layouts": list(layouts_paths.keys()),
+            "mods": proposal["mods"],
+            "layouts": proposal["layouts"],
             "message": "Installed successfully. Use Enable or Use layout to activate.",
         }
 
@@ -457,10 +501,18 @@ class PackageManager:
         record = self.records.get(pkg_id)
         if not record or not record.get("installed"):
             return {"ok": False, "error": f"Package '{pkg_id}' is not installed."}
+        if record.get("enabled"):
+            return {"ok": True, "enabled_mods": record.get("mods", []), "message": "Package is already enabled."}
+        conflicts = self._name_conflicts(pkg_id, record.get("mods", []), [])
+        if conflicts:
+            return {"ok": False, "error": "; ".join(conflicts)}
 
         slug = pkg_id.replace("/", "-")
         pkg_store = os.path.join(self.packages_dir, slug)
         mods_dir = os.path.join(pkg_store, "mods")
+        self._verify_files(pkg_store, record["files"])
+        keys = review.read_keys(os.path.join(pkg_store, "keys.json"))
+        review.read_keys(os.path.join(self.root, "keys.json"))
 
         copied = []
         if os.path.isdir(mods_dir):
@@ -476,6 +528,7 @@ class PackageManager:
                     copied.append(m)
 
         record["enabled"] = True
+        self._merge_keys(record, keys)
         self._save_records()
         return {"ok": True, "enabled_mods": copied, "message": f"Enabled mods: {', '.join(copied) if copied else 'None'}"}
 
@@ -488,16 +541,27 @@ class PackageManager:
         slug = pkg_id.replace("/", "-")
         pkg_store = os.path.join(self.packages_dir, slug)
         layouts_dir = os.path.join(pkg_store, "layouts")
+        if not record.get("layouts"):
+            return {"ok": False, "error": "This package has no layout"}
+        target_layout = record["layouts"][0]
+        target_path = os.path.join(self.root, "layouts", target_layout + ".json")
+        if os.path.exists(target_path):
+            baseline = record.get("files", {}).get(f"layouts/{target_layout}.json")
+            if self.file_hash(target_path) != baseline:
+                return {"ok": False, "error": f"Local layout changed: {target_layout}. Preserving local files."}
 
         # Copy companion mods first
-        self.enable(pkg_id)
+        enabled = self.enable(pkg_id)
+        if not enabled["ok"]:
+            return enabled
 
         target_layout = None
         if os.path.isdir(layouts_dir):
-            for l in os.listdir(layouts_dir):
+            for l in sorted(os.listdir(layouts_dir)):
                 if l.endswith(".json"):
                     src = os.path.join(layouts_dir, l)
                     dst = os.path.join(self.root, "layouts", l)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
                     shutil.copyfile(src, dst)
                     target_layout = l[:-5]
                     break
@@ -508,11 +572,33 @@ class PackageManager:
         # Switch layout
         if target_layout:
             try:
-                subprocess.run(["herdr-app", "do", "layout.switch", "--name", target_layout], capture_output=True, timeout=3)
+                subprocess.run(["herdr-app", "do", "layout.switch", "--name", target_layout], capture_output=True, timeout=3,
+                               env={**os.environ, "HERDR_APP_HOME": self.root})
             except Exception:
                 pass
 
         return {"ok": True, "layout": target_layout, "message": f"Switched to layout {target_layout}"}
+
+    def _merge_keys(self, record, proposed):
+        path = os.path.join(self.root, "keys.json")
+        current = review.read_keys(path)
+        before = json.dumps(current, sort_keys=True)
+        owned = record.get("owned_keys", {})
+        retained = {}
+        for row in review.shortcut_review(current, proposed, owned):
+            section, key, action, status = (row[k] for k in ("section", "key", "action", "status"))
+            if status in ("add", "update"):
+                current.setdefault(section, {})[key] = action
+                retained.setdefault(section, {})[key] = action
+            elif status == "remove":
+                current[section].pop(key, None)
+            elif status == "unchanged" and owned.get(section, {}).get(key) == action:
+                retained.setdefault(section, {})[key] = action
+        if before != json.dumps(current, sort_keys=True):
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2)
+            os.replace(path + ".tmp", path)
+        record["owned_keys"] = retained
 
     # -------------------------------- Removal & References Protection --------------------------------
 
@@ -555,14 +641,14 @@ class PackageManager:
         backup_dir = os.path.join(self.backups_dir, f"{pkg_id.replace('/', '-')}-{backup_stamp}")
         os.makedirs(backup_dir, exist_ok=True)
 
-        for mod_name in mods:
+        for mod_name in mods if record.get("enabled") else []:
             if mod_name not in other_used_mods:
                 p = os.path.join(self.root, "mods", mod_name)
                 if os.path.isdir(p):
                     shutil.copytree(p, os.path.join(backup_dir, "mods", mod_name))
                     rmtree(p)
 
-        for layout_name in layouts:
+        for layout_name in layouts if record.get("enabled") else []:
             p = os.path.join(self.root, "layouts", f"{layout_name}.json")
             if os.path.isfile(p):
                 os.makedirs(os.path.join(backup_dir, "layouts"), exist_ok=True)
@@ -575,6 +661,7 @@ class PackageManager:
         rmtree(pkg_store)
         rmtree(os.path.join(self.updates_dir, slug))
 
+        self._merge_keys(record, {})
         del self.records[pkg_id]
         self._save_records()
 
@@ -593,9 +680,10 @@ class PackageManager:
 
     # -------------------------------- Activation Prompt Generation --------------------------------
 
-    def generate_prompt(self, pkg_id: str, recipe_content: str = None) -> dict:
+    def generate_prompt(self, pkg_id: str, recipe_content: str = None, source=None) -> dict:
         """Generates comprehensive activation prompt text for LLM/agent."""
         record = self.records.get(pkg_id, {})
+        source = source or record.get("source", {})
         parts = pkg_id.split("/")
         repo = "/".join(parts[:2])
         subdir = "/".join(parts[2:]) if len(parts) > 2 else ""
@@ -610,7 +698,7 @@ class PackageManager:
                     recipe_content = ""
 
         current_layout = self.active_layout_name()
-        mods = record.get("mods")
+        mods = record.get("mods") or source.get("mods")
         if not mods:
             try:
                 pkg = next(p for p in gallery.official_packages(self) if p["id"] == pkg_id)
@@ -621,11 +709,14 @@ class PackageManager:
             mods = [subdir.split("/")[-1] or repo.split("/")[-1]]
 
         installed_paths = [os.path.join(self.root, "mods", m) for m in mods]
+        branch = source.get("branch") or record.get("ref", "main")
+        source_url = source.get("source_url") or f"https://github.com/{repo}" + (f"/tree/{urllib.parse.quote(branch, safe='')}/{subdir}" if subdir else "")
 
         prompt_text = f"""You are activating the Herdr package '{pkg_id}' in the user's Herdr desktop app.
 
 Package Details:
-- Source: https://github.com/{repo}{('/tree/main/' + subdir) if subdir else ''}
+- Source: {source_url}
+- Source revision: {record.get('commit') or source.get('commit', 'Not resolved')}
 - Installed Mod Paths: {', '.join(installed_paths)}
 - Target App Home: {self.root}
 - Current Active Layout: {current_layout} (file: {self.root}/layouts/{current_layout}.json)
@@ -687,16 +778,16 @@ Instructions:
                 raise tree
             latest_commit = tree.get("HEAD", "unknown")
 
-            sub_prefix = (subdir + "/") if subdir else ""
             slug = pkg_id.replace("/", "-")
             # Clear stale or partial candidates before preparing a new one.
             record["has_update"] = False
             rmtree(os.path.join(self.updates_dir, slug))
-            upstream = {path[len(sub_prefix):]: sha for path, sha in tree.items()
-                        if path != "HEAD" and path.startswith(sub_prefix) and not ignored(path[len(sub_prefix):])}
+            upstream, candidate_mods, candidate_layouts = review.package_files(self, tree, subdir)
             # Association records own runtime files only; unrelated repository files
             # must not make an unchanged package appear out of date.
-            if not any(rel in upstream and upstream[rel] != sha for rel, sha in record.get("files", {}).items()):
+            baseline = record.get("files", {})
+            compared = {p: sha for p, sha in upstream.items() if review.runtime_file(p)} if record.get("associated") else upstream
+            if compared == baseline:
                 return pkg_id, None, None
 
             # Stage update candidate
@@ -725,10 +816,11 @@ Instructions:
 
             # Check candidate runtime mods with `herdr-app check`
             valid = True
-            for mod_name in record.get("mods", []):
+            for mod_name in candidate_mods:
                 staged_mod = os.path.join(cand_dir, "mods", mod_name)
                 if os.path.isfile(os.path.join(staged_mod, "main.js")):
-                    chk = subprocess.run(["herdr-app", "check", staged_mod], capture_output=True, text=True)
+                    chk = subprocess.run(["herdr-app", "check", staged_mod], capture_output=True, text=True,
+                                         env={**os.environ, "HERDR_APP_HOME": self.root})
                     if chk.returncode != 0:
                         valid = False
                         break
@@ -741,31 +833,19 @@ Instructions:
                 raise ValueError("Update candidate failed herdr-app check")
 
             # 3-Way Merge check: compare baseline, local active files, and candidate
+            local = review.local_snapshot(self, record, cand_hashes)
+            # Preparation reports conflicts; review/apply recompute them against current files.
+            locally_modified = [p for p, sha in local.items() if p in baseline and sha != baseline[p] and record.get("enabled")]
             conflicts = []
-            locally_modified = []
-            for mod_name in record.get("mods", []):
-                local_files = self.local_files("mod", mod_name)
-                baseline = record.get("files", {})
-                for rel, curr_sha in local_files.items():
-                    base_sha = baseline.get(f"mods/{mod_name}/{rel}")
-                    if base_sha and curr_sha != base_sha:
-                        locally_modified.append(f"mods/{mod_name}/{rel}")
-                        cand_sha = cand_hashes.get(f"mods/{mod_name}/{rel}")
-                        if cand_sha and cand_sha != curr_sha:
-                            # Both modified: try 3-way merge on text files
-                            merged = self._three_way_merge(
-                                os.path.join(self.root, "mods", mod_name, rel),
-                                base_sha,
-                                cand_sha,
-                                repo
-                            )
-                            if not merged:
-                                conflicts.append(f"mods/{mod_name}/{rel}")
+            if locally_modified:
+                _, conflicts = self._update_contents(record, cand_hashes)
 
             cand_meta = {
                 "id": pkg_id,
                 "latest_commit": latest_commit,
                 "cand_hashes": cand_hashes,
+                "mods": candidate_mods,
+                "layouts": candidate_layouts,
                 "conflicts": conflicts,
                 "locally_modified": locally_modified,
                 "prepared_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -783,7 +863,7 @@ Instructions:
         except Exception as error:
             return pkg_id, None, str(error)
 
-    def _three_way_merge(self, local_path: str, base_sha: str, cand_sha: str, repo: str) -> bool:
+    def _three_way_merge(self, local_path: str, base_sha: str, cand_sha: str, repo: str, content=False):
         """Attempts diff3 merge, preserving local modifications without conflicts."""
         try:
             with open(local_path, "rb") as f:
@@ -805,15 +885,96 @@ Instructions:
                     os.remove(p)
                 except OSError:
                     pass
-            return proc.returncode == 0
+            return (proc.stdout if proc.returncode == 0 else None) if content else proc.returncode == 0
         except Exception:
-            return False
+            return None if content else False
 
-    def apply_update(self, pkg_id: str) -> dict:
+    def _update_contents(self, record, files):
+        """Recompute the actual active writes from baseline/local/upstream at review and apply."""
+        writes, conflicts = {}, []
+        if not record.get("enabled"):
+            return writes, conflicts
+        baseline = record.get("files", {})
+        for rel in sorted(set(baseline) | set(files)):
+            if not review.runtime_file(rel):
+                continue
+            review.safe_path(rel)
+            path = os.path.join(self.root, rel)
+            base, new, local = baseline.get(rel), files.get(rel), self.file_hash(path)
+            # A staged layout is not activated by updating an enabled companion mod.
+            if rel.startswith("layouts/") and local is None:
+                continue
+            if new == base or local == new:
+                continue
+            if local == base:
+                writes[rel] = self.blob_bytes(record["repo"], new) if new else None
+            elif not base or not new or not local:
+                conflicts.append(rel)
+            else:
+                merged = self._three_way_merge(path, base, new, record["repo"], content=True)
+                if merged is None:
+                    conflicts.append(rel)
+                else:
+                    writes[rel] = merged
+        return writes, conflicts
+
+    def _candidate(self, pkg_id):
+        folder = os.path.join(self.updates_dir, pkg_id.replace("/", "-"))
+        with open(os.path.join(folder, "meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        candidate = os.path.join(folder, "candidate")
+        self._verify_files(candidate, meta["cand_hashes"])
+        return meta, candidate
+
+    def _verify_files(self, folder, files):
+        actual = set()
+        for parent, dirs, names in os.walk(folder):
+            for name in dirs + names:
+                if os.path.islink(os.path.join(parent, name)):
+                    raise ValueError("Prepared update changed: unexpected symlink")
+            actual.update(os.path.relpath(os.path.join(parent, name), folder).replace(os.sep, "/")
+                          for name in names if not ignored(os.path.relpath(os.path.join(parent, name), folder).replace(os.sep, "/")))
+        if actual != set(files):
+            raise ValueError("Prepared update changed: unexpected or missing files")
+        for rel, sha in files.items():
+            review.safe_path(rel)
+            if self.file_hash(os.path.join(folder, rel)) != sha:
+                raise ValueError("Prepared update changed. Check for updates again.")
+
+    @staticmethod
+    def _copy_files(source, target, files):
+        for rel in files:
+            dest = os.path.join(target, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(os.path.join(source, rel), dest)
+
+    def review_update(self, pkg_id):
+        record = self.records.get(pkg_id)
+        if not record or not record.get("installed"):
+            raise ValueError("Package is not installed")
+        meta, _ = self._candidate(pkg_id)
+        files = meta["cand_hashes"]
+        _, mods, layouts = review.package_files(self, files, "")
+        result = self._review(pkg_id, record["repo"], record.get("subdir", ""), record.get("ref", "HEAD"),
+                              meta["latest_commit"], files, mods, layouts, "update")
+        for mod in set(record.get("mods", [])) - set(mods):
+            if self.inspect_layout_references(mod):
+                result["conflicts"].append(f"Removed mod is still referenced by a layout: {mod}")
+        result["token"] = review.token({"content": result["token"], "conflicts": result["conflicts"]})
+        return result
+
+    def apply_update(self, pkg_id: str, reviewed: str = None) -> dict:
         """Applies verified staged candidate update, preserving local edits."""
         record = self.records.get(pkg_id)
         if not record:
             return {"ok": False, "error": f"Package '{pkg_id}' not found."}
+        if not reviewed:
+            return {"ok": False, "error": "Review this update before applying it"}
+        proposal = self.review_update(pkg_id)
+        if proposal["token"] != reviewed:
+            return {"ok": False, "error": "Candidate or local files changed since review. Review the update again."}
+        if proposal["conflicts"]:
+            return {"ok": False, "error": "; ".join(proposal["conflicts"])}
 
         slug = pkg_id.replace("/", "-")
         meta_path = os.path.join(self.updates_dir, slug, "meta.json")
@@ -824,28 +985,78 @@ Instructions:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
 
-        if meta.get("conflicts"):
-            return {"ok": False, "error": f"Cannot apply update: conflicts in {', '.join(meta['conflicts'])}. Local files left intact."}
-
-        # Backup current files before applying
-        self._backup_item("package", slug, pkg_id)
+        writes, conflicts = self._update_contents(record, meta["cand_hashes"])
+        if conflicts:
+            return {"ok": False, "error": "Local edit conflict: " + ", ".join(conflicts)}
+        for rel, data in writes.items():
+            if rel.startswith("layouts/") and data is not None and not isinstance(json.loads(data), dict):
+                return {"ok": False, "error": "Merged layout must be a JSON object: " + rel}
+        # Check the merged result, including local additions, before any active write.
+        with tempfile.TemporaryDirectory(dir=self.stage_dir) as merged_dir:
+            for mod in proposal["mods"]:
+                active = os.path.join(self.root, "mods", mod)
+                staged = os.path.join(merged_dir, "mods", mod)
+                source = active if record.get("enabled") and os.path.isdir(active) else os.path.join(cand_dir, "mods", mod)
+                shutil.copytree(source, staged)
+            for rel, data in writes.items():
+                if not rel.startswith("mods/"):
+                    continue
+                path = os.path.join(merged_dir, rel)
+                if data is None:
+                    if os.path.isfile(path):
+                        os.remove(path)
+                else:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "wb") as f:
+                        f.write(data)
+            for mod in proposal["mods"]:
+                check = subprocess.run(["herdr-app", "check", os.path.join(merged_dir, "mods", mod)],
+                                       capture_output=True, text=True, env={**os.environ, "HERDR_APP_HOME": self.root})
+                if check.returncode:
+                    return {"ok": False, "error": "Merged update failed herdr-app check: " + (check.stderr or check.stdout)}
+        if self.review_update(pkg_id)["token"] != reviewed:
+            return {"ok": False, "error": "Local files changed during validation. Review the update again."}
 
         # Apply to package store
         target_store = os.path.join(self.packages_dir, slug)
-        os.makedirs(target_store, exist_ok=True)
-        shutil.copytree(cand_dir, target_store, dirs_exist_ok=True)
-
-        # If mod was enabled in active mods/, update active files as well
+        backup_dir = tempfile.mkdtemp(prefix=slug + "-", dir=self.backups_dir)
+        if os.path.isdir(target_store):
+            shutil.copytree(target_store, os.path.join(backup_dir, "package"))
+        for rel in writes:
+            path = os.path.join(self.root, rel)
+            if os.path.isfile(path):
+                dest = os.path.join(backup_dir, "active", rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(path, dest)
+        if os.path.isfile(os.path.join(self.root, "keys.json")):
+            shutil.copyfile(os.path.join(self.root, "keys.json"), os.path.join(backup_dir, "keys.json"))
+        rmtree(target_store)
+        self._copy_files(cand_dir, target_store, meta["cand_hashes"])
+        for rel, data in writes.items():
+            path = os.path.join(self.root, rel)
+            if data is None:
+                if os.path.isfile(path):
+                    os.remove(path)
+            else:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "wb") as f:
+                    f.write(data)
         if record.get("enabled"):
-            for mod_name in record.get("mods", []):
-                src = os.path.join(cand_dir, "mods", mod_name)
-                dst = os.path.join(self.root, "mods", mod_name)
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
+            self._merge_keys(record, proposal["keys"])
 
         # Update record
         record["commit"] = meta["latest_commit"]
         record["files"] = meta["cand_hashes"]
+        record["mods"] = proposal["mods"]
+        record["layouts"] = proposal["layouts"]
+        record.pop("associated", None)
+        if record.get("source"):
+            record["source"].update(commit=meta["latest_commit"], mods=proposal["mods"], layouts=proposal["layouts"],
+                                    kind="layout" if proposal["layouts"] else "mod")
+            recipe_path = os.path.join(target_store, "RECIPE.md")
+            if os.path.isfile(recipe_path):
+                with open(recipe_path, encoding="utf-8") as f:
+                    record["source"]["recipe"] = f.read()
         record["has_update"] = False
         self._save_records()
 
@@ -913,11 +1124,19 @@ def main():
     p_details = sub.add_parser("details")
     p_details.add_argument("id")
 
+    p_discover = sub.add_parser("discover")
+    p_discover.add_argument("source")
+
+    p_review = sub.add_parser("review")
+    p_review.add_argument("id")
+    p_review.add_argument("--update", action="store_true")
+
     # install
     p_install = sub.add_parser("install")
     p_install.add_argument("repo")
     p_install.add_argument("subdir", nargs="?", default="")
     p_install.add_argument("--ref")
+    p_install.add_argument("--review", required=True)
 
     # enable
     p_enable = sub.add_parser("enable")
@@ -948,6 +1167,7 @@ def main():
     # apply-update
     p_apply = sub.add_parser("apply-update")
     p_apply.add_argument("id")
+    p_apply.add_argument("--review", required=True)
 
     # settings
     p_settings = sub.add_parser("settings")
@@ -979,8 +1199,13 @@ def main():
             result = {"media": gallery.media(mgr, json.loads(args.ids))}
         elif args.command == "details":
             result = mgr.get_details(args.id)
+        elif args.command == "discover":
+            result = mgr.discover(args.source)
+        elif args.command == "review":
+            repo, subdir, _ = review.parse_source(args.id)
+            result = mgr.review_update(args.id) if args.update else mgr.review_install(repo, subdir)
         elif args.command == "install":
-            result = mgr.install(args.repo, args.subdir, ref=args.ref)
+            result = mgr.install(args.repo, args.subdir, ref=args.ref, reviewed=args.review)
         elif args.command == "enable":
             result = mgr.enable(args.id)
         elif args.command == "use-layout":
@@ -989,7 +1214,7 @@ def main():
             result = mgr.generate_prompt(args.id)
         elif args.command == "copy-prompt":
             if args.catalog:
-                pkg = next(p for p in gallery.official_packages(mgr) if p["id"] == args.id)
+                pkg = mgr.get_details(args.id)
                 p = {"text": pkg["install_prompt"]}
             else:
                 p = mgr.generate_prompt(args.id)
@@ -1011,7 +1236,7 @@ def main():
             result = ({"ok": True, "count": mgr.get_settings()["prepared_updates_count"], "settings": mgr.get_settings(), "errors": []}
                       if args.if_overdue and not mgr.get_settings()["overdue"] else mgr.check_updates())
         elif args.command == "apply-update":
-            result = mgr.apply_update(args.id)
+            result = mgr.apply_update(args.id, reviewed=args.review)
         elif args.command == "settings":
             updates = {}
             if args.auto_update is not None:

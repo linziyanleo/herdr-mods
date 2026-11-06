@@ -40,6 +40,8 @@ export default class ModsPlus extends View {
     this.selected = null;
     this.settings = null;
     this.confirmRemove = null;
+    this.review = null;
+    this.importOpen = false;
 
     this.handle = cx.focus_handle();
     this.sortFocus = cx.focus_handle();
@@ -52,6 +54,7 @@ export default class ModsPlus extends View {
       cx.notify();
     });
     this.initIntervalInput();
+    this.initSourceInput();
     this.handle.focus();
 
     cx.spawn(async (cx) => {
@@ -245,7 +248,9 @@ export default class ModsPlus extends View {
   }
 
   async showDetails(pkg, cx) {
+    if (this.busy && this.view !== "details") return;
     this.view = "details";
+    this.review = null;
     this.selected = { ...pkg, ...this.media[pkg.id] };
     this.confirmRemove = null;
     cx.notify();
@@ -257,9 +262,45 @@ export default class ModsPlus extends View {
 
   // -------------------------------- Actions --------------------------------
 
+  initSourceInput() {
+    this.sourceInput = InputState.new({ placeholder: "owner/repo[/folder] or GitHub URL" });
+    this.sourceInput.on("submit", (_e, cx) => cx.spawn(cx => this.discoverSource(cx)));
+  }
+
+  async discoverSource(cx) {
+    if (this.busy) return;
+    const source = this.sourceInput.value().trim();
+    if (!source) return;
+    await this.work(cx, "Finding packages…", async () => {
+      const result = await this.helper(["discover", source]);
+      const ids = new Set((result.packages || []).map(pkg => pkg.id));
+      this.packages = [...this.packages.filter(pkg => !ids.has(pkg.id)), ...result.packages];
+      this.collection = "direct";
+      this.tab = result.packages[0]?.kind || "mod";
+      this.filter = "all";
+      this.query = "";
+      this.search?.set_value("");
+      this.message = `Found ${result.packages.length} package(s) on ${result.branch}. Select one to review.`;
+    });
+  }
+
+  async reviewPackage(pkg, cx) {
+    if (this.busy) return;
+    this.review = null;
+    await this.work(cx, "Preparing review…", async () => {
+      const result = await this.helper(["review", pkg.id, ...(pkg.installed ? ["--update"] : [])]);
+      if (this.selected?.id === pkg.id) {
+        this.review = result;
+        if (result.source) this.selected.recipe = result.source.recipe;
+      }
+    });
+  }
+
   async installPackage(pkg, cx) {
+    if (this.busy || this.review?.id !== pkg.id || this.review?.operation !== "install") return;
+    const token = this.review.token;
     await this.work(cx, `Installing ${pkg.name}…`, async () => {
-      const res = await this.helper(["install", pkg.repo, pkg.subdir || ""]);
+      const res = await this.helper(["install", pkg.repo, pkg.subdir || "", "--review", token]);
       if (!res.ok) throw new Error(res.error || "Installation failed");
       notify({ title: "Installed", body: `${pkg.name} staged successfully. Use Enable to activate.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -325,8 +366,10 @@ export default class ModsPlus extends View {
   }
 
   async applyUpdate(pkg, cx) {
+    if (this.busy || this.review?.id !== pkg.id || this.review?.operation !== "update") return;
+    const token = this.review.token;
     await this.work(cx, `Updating ${pkg.name}…`, async () => {
-      const res = await this.helper(["apply-update", pkg.id]);
+      const res = await this.helper(["apply-update", pkg.id, "--review", token]);
       if (!res.ok) throw new Error(res.error || "Failed to apply update");
       notify({ title: "Updated", body: `${pkg.name} updated.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -587,7 +630,10 @@ export default class ModsPlus extends View {
     const galleryBar = h_flex().w_full().gap(8).items_center().flex_wrap().pb(12).border_b(0.5).border_color(t.border)
       .child(this.tabPill(t, "community", `Community  ${counts("community")}`, this.collection === "community", cx => this.changeFilter("collection", "community", cx)))
       .child(this.tabPill(t, "examples", `Examples  ${counts("example")}`, this.collection === "example", cx => this.changeFilter("collection", "example", cx)))
+      .when(this.packages.some(pkg => pkg.collection === "direct"), el => el.child(this.tabPill(t, "imported", "Imported",
+        this.collection === "direct", cx => this.changeFilter("collection", "direct", cx))))
       .child(div().flex_1())
+      .child(this.button(t, "import-source", "Add from GitHub", cx => { this.importOpen = !this.importOpen; cx.notify(); }))
       .child(this.iconButton(t, "settings", "settings", "Settings", cx => {
         this.view = "settings"; cx.spawn(cx => this.loadSettings(cx)); cx.notify();
       }))
@@ -607,7 +653,11 @@ export default class ModsPlus extends View {
       .when(packages.length > this.limit, el => el.child(this.button(t, "more", "Show more", cx => {
         this.limit += 24; this.loadMedia(cx); cx.notify();
       })));
-    return [controls, galleryBar, scroll];
+    const source = h_flex().w_full().gap(8).items_center()
+      .child(Input.new(this.sourceInput).id("source-input").accessibility_label("GitHub repository")
+        .flex_1().h(32).px(8).text_size(12).border(0.5).border_color(t.border).rounded(6))
+      .child(this.button(t, "discover", "Find packages", cx => cx.spawn(cx => this.discoverSource(cx)), { disabled: Boolean(this.busy) }));
+    return [controls, galleryBar, ...(this.importOpen ? [source] : []), scroll];
   }
 
   renderCard(t, pkg, width) {
@@ -632,15 +682,15 @@ export default class ModsPlus extends View {
     if (!pkg) return [div().child("Loading details…")];
     const preview = pkg.preview_path || this.media[pkg.id]?.preview_path;
     const actions = h_flex().gap(8).flex_wrap()
-      .when(pkg.installed === false && !pkg.collision, el => el.child(this.button(t, "install", "Install",
-        cx => cx.spawn(cx => this.installPackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+      .when(pkg.installed === false && !pkg.collision, el => el.child(this.button(t, "review-install", "Review install",
+        cx => cx.spawn(cx => this.reviewPackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed && pkg.kind === "mod" && !pkg.enabled, el => el.child(this.button(t, "enable", "Enable",
         cx => cx.spawn(cx => this.enablePackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed && pkg.kind === "layout", el => el.child(this.button(t, "use", "Use layout",
         cx => cx.spawn(cx => this.useLayout(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})));
     const titleActions = h_flex().gap(8).flex_none()
-      .when(pkg.has_update, el => el.child(this.button(t, "update", "Apply update",
-        cx => cx.spawn(cx => this.applyUpdate(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
+      .when(pkg.has_update, el => el.child(this.button(t, "review-update", "Review update",
+        cx => cx.spawn(cx => this.reviewPackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed, el => el.child(this.button(t, "remove",
         this.confirmRemove === pkg.id ? "Confirm removal" : "Remove",
         cx => cx.spawn(cx => this.removePackage(pkg, cx)), {
@@ -663,10 +713,11 @@ export default class ModsPlus extends View {
         .child(this.button(t, "github", "View on GitHub", () => this.openUrl(pkg.source_url)))
         .child(this.button(t, "agent", "Open Agent tab", cx => cx.spawn(cx => this.openAgentTab(pkg, cx)), {disabled: Boolean(this.busy)})));
     const body = v_flex().id("details-scroll").flex_1().min_h(0).gap(24).overflow_y_scrollbar()
-      .when(Boolean(preview), el => el.child(this.preview(t, pkg, this.width - 32,
+      .when(Boolean(preview) && !this.review, el => el.child(this.preview(t, pkg, this.width - 32,
         Math.min(440, (this.width - 32) * 0.46), true).rounded(12)))
       .child((this.width > 760 ? h_flex() : v_flex()).gap(24).flex_none().child(summary).child(prompt))
       .when(Boolean(pkg.collision), el => el.child(div().text_color(t.muted).child(pkg.collision)))
+      .when(this.review?.id === pkg.id, el => el.child(this.renderReview(t, pkg)))
       .when(Boolean(pkg.recipe), el => el.child(v_flex().gap(12).flex_none()
         .child(div().text_size(16).child("Recipe"))
         .child(TextView.markdown("recipe-" + pkg.id, pkg.recipe).text_size(12))));
@@ -676,6 +727,46 @@ export default class ModsPlus extends View {
         .child(div().text_color(t.muted).child(`${pkg.kind === "layout" ? "layouts" : "mods"} / ${pkg.author}`)),
       body,
     ];
+  }
+
+  renderReview(t, pkg) {
+    const review = this.review;
+    const action = review.operation === "install" ? "Install" : "Apply update";
+    const label = { add: "Add", change: "Change", remove: "Remove", unchanged: "Unchanged" };
+    const binding = value => typeof value === "string" ? value : JSON.stringify(value);
+    return v_flex().id("package-review").gap(12).p(16).border(0.5).border_color(t.border).rounded(8).flex_none()
+      .child(h_flex().gap(8).items_center().flex_wrap()
+        .child(div().text_size(16).font_medium().child(review.operation === "install" ? "Install review" : "Update review"))
+        .child(div().text_size(12).text_color(t.muted).child(`${review.branch} / ${short(review.commit)}`)))
+      .child(div().text_size(12).text_color(t.muted).child(review.operation === "install"
+        ? "Install checks and stores files. Enable or Use layout activates them separately."
+        : review.active ? "Apply updates active files and preserves compatible local edits." : "Apply updates stored files. Activation stays separate."))
+      .children([["Mods", review.mod_changes], ["Layouts", review.layout_changes]].map(([name, entries]) =>
+        v_flex().gap(4).text_size(12).child(div().font_medium().child(name))
+          .children(entries.map(item => div().child(`${label[item.status]}  ${item.path}`)))
+          .when(!entries.length, el => el.child(div().text_color(t.muted).child("None")))))
+      .child(v_flex().gap(4).text_size(12).child(div().font_medium().child("Files"))
+        .children(review.changes.map(item => div().child(`${label[item.status]}  ${item.path}`))))
+      .when(review.locally_modified.length > 0, el => el.child(v_flex().gap(4).text_size(12)
+        .child(div().font_medium().child("Local edits"))
+        .children(review.locally_modified.map(path => div().child(path)))))
+      .child(v_flex().gap(4).text_size(12)
+        .child(div().font_medium().child("Shortcuts"))
+        .child(div().text_color(t.muted).child(review.active
+          ? "Existing conflicting bindings are kept. Managed bindings update when applied."
+          : "Existing conflicting bindings are kept. New bindings are added on activation."))
+        .children(review.shortcuts.map(item => v_flex().gap(2)
+          .child(div().child(`${item.section} / ${item.key}: ${binding(item.action) ?? "Remove"}`))
+          .child(div().text_color(item.status === "conflict" ? t.blocked : t.muted)
+            .child(item.status === "conflict" ? `Keep existing: ${binding(item.current)}` : item.status))))
+        .when(!review.shortcuts.length, el => el.child(div().text_color(t.muted).child("None"))))
+      .children(review.conflicts.map(message => div().text_size(12).text_color(t.blocked).child(message)))
+      .child(h_flex().gap(8)
+        .child(this.button(t, "confirm-review", action, cx => cx.spawn(cx => review.operation === "install"
+          ? this.installPackage(pkg, cx) : this.applyUpdate(pkg, cx)),
+        { primary: true, disabled: Boolean(this.busy) || review.conflicts.length > 0 }))
+        .child(this.button(t, "refresh-review", "Refresh review", cx => cx.spawn(cx => this.reviewPackage(pkg, cx)), { disabled: Boolean(this.busy) }))
+        .child(this.button(t, "cancel-review", "Cancel", cx => { this.review = null; cx.notify(); }, { disabled: Boolean(this.busy) })));
   }
 
   // -------------------------------- Settings View --------------------------------

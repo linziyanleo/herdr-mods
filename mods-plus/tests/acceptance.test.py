@@ -94,6 +94,7 @@ class TestAcceptance(unittest.TestCase):
             with open(os.path.join(self.mgr.cache_dir, f"tree-{repo.replace('/', '-')}.json")) as f:
                 return json.load(f)
         self.mgr.branch_tree = tree
+        self.mgr._gh_api = lambda path: {"default_branch": "main", "private": False}
 
     def tearDown(self):
         shutil.rmtree(self.base, ignore_errors=True)
@@ -149,6 +150,7 @@ class TestAcceptance(unittest.TestCase):
         suite_code = b'import { View, div } from "gpui-kit";\nexport default class SuiteMod extends View { render() { return div(); } }\n'
         suite_code_v2 = b'import { View, div } from "gpui-kit";\nexport default class SuiteMod extends View { render() { return div().child("v2"); } }\n'
         bob_tree = {
+            "HEAD": "baseline-commit",
             "mods/suite-mod/main.js": helper.blob_sha(suite_code),
             "mods/suite-mod/mod.json": helper.blob_sha(b'{"place":"none"}'),
             "layouts/suite-layout.json": helper.blob_sha(b'{"id":"suite","type":"block"}'),
@@ -159,6 +161,8 @@ class TestAcceptance(unittest.TestCase):
 
         # Seed mock blobs
         for path, sha in bob_tree.items():
+            if path == "HEAD":
+                continue
             blob_path = os.path.join(self.mgr.cache_dir, "blobs", sha[:2], sha)
             os.makedirs(os.path.dirname(blob_path), exist_ok=True)
             content = b"# Suite Recipe\nActivate with love." if path == "RECIPE.md" else b'{"id":"suite","type":"block"}' if "layout" in path else b'{"place":"none"}' if "mod.json" in path else suite_code
@@ -167,7 +171,8 @@ class TestAcceptance(unittest.TestCase):
 
         # Mock herdr-app check by creating a dummy pass if needed or letting it succeed
         # Run install
-        install_res = self.mgr.install("bob/herdr-new-suite")
+        install_review = self.mgr.review_install("bob/herdr-new-suite")
+        install_res = self.mgr.install("bob/herdr-new-suite", reviewed=install_review["token"])
         self.assertTrue(install_res["ok"])
 
         # Check: Installed package MUST NOT exist in active mods/ yet!
@@ -241,7 +246,8 @@ class TestAcceptance(unittest.TestCase):
         self.assertEqual(curr_code, suite_code, "Running mod must not be mutated upon candidate download")
 
         # Apply update immediately: now active mod becomes v2!
-        apply_res = self.mgr.apply_update("bob/herdr-new-suite")
+        update_review = self.mgr.review_update("bob/herdr-new-suite")
+        apply_res = self.mgr.apply_update("bob/herdr-new-suite", reviewed=update_review["token"])
         self.assertTrue(apply_res["ok"])
         with open(os.path.join(active_suite_mod, "main.js"), "rb") as f:
             updated_code = f.read()
