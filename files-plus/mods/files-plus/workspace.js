@@ -14,7 +14,7 @@ import { findOpenFile, focusOpenFile } from "./open-files.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
-const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf)$/i;
+const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf|json|csv|tsv)$/i;
 const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
