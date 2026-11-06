@@ -113,6 +113,7 @@ class ReviewTest(unittest.TestCase):
     def test_install_enable_keys_and_source_survive_restart_catalog_outage_and_removal(self):
         pkg_id = self.installed()
         self.assertFalse((self.home / "mods/one").exists())
+
         self.assertNotIn("cmd-shift-y", json.loads((self.home / "keys.json").read_text())["global"])
         mgr = helper.PackageManager(self.temp.name)
         self.wire(mgr)
@@ -128,6 +129,17 @@ class ReviewTest(unittest.TestCase):
         self.assertTrue(mgr.remove(pkg_id)["ok"])
         self.assertEqual(json.loads((self.home / "keys.json").read_text())["global"], {"cmd-shift-x": "app.palette"})
         self.assertFalse((self.home / "mods/one").exists())
+
+    def test_cached_catalog_keeps_imported_sources_without_network_or_record_writes(self):
+        pkg_id = self.installed()
+        mgr = helper.PackageManager(self.temp.name)
+        mgr.cache_only = True
+        before = Path(mgr.records_file).read_bytes()
+        with patch.object(helper.gallery, "download", side_effect=AssertionError("Cached import made a network request")):
+            packages = mgr.build_catalog(status_filter="installed")
+            self.assertEqual([pkg["id"] for pkg in packages], [pkg_id])
+            self.assertEqual([item["id"] for item in helper.gallery.media(mgr, [pkg_id])], [pkg_id])
+        self.assertEqual(Path(mgr.records_file).read_bytes(), before)
 
     def test_activation_collision_does_not_overwrite_a_new_local_mod(self):
         pkg_id = self.installed()

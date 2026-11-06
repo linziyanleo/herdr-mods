@@ -69,15 +69,24 @@ export default class ModsPlus extends View {
 
   // -------------------------------- Helper execution --------------------------------
 
-  async helper(args) {
-    const python = "python3";
-    const script = `${appHome()}/mods/mods-plus/helper.py`;
-    const res = await exec(python, ["-B", script, "--app-home", appHome(), "--json", ...args]);
-    if (res.code !== 0) {
-      const err = (res.stderr || res.stdout).trim().split("\n").pop();
-      throw new Error(err || "Helper operation failed");
+  async helper(args, cx) {
+    const invoke = async (script, params) => {
+      const res = await exec("python3", ["-B", `${appHome()}/mods/mods-plus/${script}`, "--app-home", appHome(), ...params]);
+      if (res.code !== 0) throw new Error((res.stderr || res.stdout).trim().split("\n").pop() || "Helper operation failed");
+      return JSON.parse(res.stdout);
+    };
+    try {
+      if (args[0] === "settings") return await invoke("helper.py", ["--json", ...args]);
+      let job = await invoke("jobs.py", ["start", JSON.stringify(args)]);
+      while (job.state === "running") {
+        await cx.sleep(500);
+        job = await invoke("jobs.py", ["status", job.id]);
+      }
+      if (job.state === "failed") throw new Error(job.error);
+      return job.result;
+    } catch (error) {
+      throw new Error(`${args[0]}: ${error.message || error}`);
     }
-    return JSON.parse(res.stdout);
   }
 
   async work(cx, label, fn) {
@@ -100,7 +109,7 @@ export default class ModsPlus extends View {
   async checkOverdue(cx) {
     if (this.checking) return;
     try {
-      const s = await this.helper(["settings"]);
+      const s = await this.helper(["settings"], cx);
       this.acceptSettings(s);
       if (s.overdue) {
         await this.runUpdateCheck(cx, false);
@@ -113,9 +122,16 @@ export default class ModsPlus extends View {
 
   async loadCatalog(cx) {
     await this.work(cx, "Loading catalog…", async () => {
-      const res = await this.helper(["catalog"]);
-      this.packages = res.packages || [];
-      this.message = (res.warnings || []).join("\n") || null;
+      const cached = await this.helper(["catalog", "--cached"], cx);
+      this.packages = cached.packages || [];
+      this.message = (cached.warnings || []).join("\n") || null;
+      cx.notify();
+      this.loadMedia(cx);
+      if (cached.stale) {
+        const res = await this.helper(["catalog"], cx);
+        this.packages = res.packages || [];
+        this.message = (res.warnings || []).join("\n") || null;
+      }
     });
     this.loadMedia(cx);
   }
@@ -135,21 +151,21 @@ export default class ModsPlus extends View {
 
   loadMedia(cx) {
     if (this.loadingMedia) return;
-    const ids = this.visiblePackages().slice(0, this.limit).filter(p => !this.media[p.id]).map(p => p.id);
+    const ids = this.visiblePackages().slice(0, this.limit).filter(p => !this.media[p.id]).slice(0, 4).map(p => p.id);
     if (!ids.length) return;
     this.loadingMedia = true;
     cx.spawn(async (cx) => {
       try {
-        const res = await this.helper(["media", JSON.stringify(ids)]);
+        const res = await this.helper(["media", JSON.stringify(ids)], cx);
         for (const item of res.media || []) this.media[item.id] = item;
+        for (const id of ids) this.media[id] ||= { id };
       } catch (e) {
-        this.message = String(e.message || e);
+        for (const id of ids) this.media[id] = { id, error: String(e.message || e) };
       } finally {
         this.loadingMedia = false;
       }
       cx.notify();
       // A filter may have changed while the images were loading.
-      if (ids.some(id => !this.media[id])) return;
       this.loadMedia(cx);
     });
   }
@@ -163,7 +179,7 @@ export default class ModsPlus extends View {
 
   async loadSettings(cx) {
     try {
-      this.acceptSettings(await this.helper(["settings"]));
+      this.acceptSettings(await this.helper(["settings"], cx));
     } catch (e) {
       this.message = `Settings load error: ${e.message}`;
     }
@@ -238,7 +254,7 @@ export default class ModsPlus extends View {
     this.savingSettings = true;
     let saved = false;
     await this.work(cx, "Saving settings…", async () => {
-      this.acceptSettings(await this.helper(["settings", ...args]));
+      this.acceptSettings(await this.helper(["settings", ...args], cx));
       saved = true;
     });
     this.savingSettings = false;
@@ -255,7 +271,7 @@ export default class ModsPlus extends View {
     this.confirmRemove = null;
     cx.notify();
     await this.work(cx, `Loading details for ${pkg.name}…`, async () => {
-      const details = await this.helper(["details", pkg.id]);
+      const details = await this.helper(["details", pkg.id], cx);
       if (this.selected?.id === pkg.id) this.selected = details;
     });
   }
@@ -272,7 +288,7 @@ export default class ModsPlus extends View {
     const source = this.sourceInput.value().trim();
     if (!source) return;
     await this.work(cx, "Finding packages…", async () => {
-      const result = await this.helper(["discover", source]);
+      const result = await this.helper(["discover", source], cx);
       const ids = new Set((result.packages || []).map(pkg => pkg.id));
       this.packages = [...this.packages.filter(pkg => !ids.has(pkg.id)), ...result.packages];
       this.collection = "direct";
@@ -288,7 +304,7 @@ export default class ModsPlus extends View {
     if (this.busy) return;
     this.review = null;
     await this.work(cx, "Preparing review…", async () => {
-      const result = await this.helper(["review", pkg.id, ...(pkg.installed ? ["--update"] : [])]);
+      const result = await this.helper(["review", pkg.id, ...(pkg.installed ? ["--update"] : [])], cx);
       if (this.selected?.id === pkg.id) {
         this.review = result;
         if (result.source) this.selected.recipe = result.source.recipe;
@@ -300,7 +316,7 @@ export default class ModsPlus extends View {
     if (this.busy || this.review?.id !== pkg.id || this.review?.operation !== "install") return;
     const token = this.review.token;
     await this.work(cx, `Installing ${pkg.name}…`, async () => {
-      const res = await this.helper(["install", pkg.repo, pkg.subdir || "", "--review", token]);
+      const res = await this.helper(["install", pkg.repo, pkg.subdir || "", "--review", token], cx);
       if (!res.ok) throw new Error(res.error || "Installation failed");
       notify({ title: "Installed", body: `${pkg.name} staged successfully. Use Enable to activate.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -310,7 +326,7 @@ export default class ModsPlus extends View {
 
   async enablePackage(pkg, cx) {
     await this.work(cx, `Enabling ${pkg.name}…`, async () => {
-      const res = await this.helper(["enable", pkg.id]);
+      const res = await this.helper(["enable", pkg.id], cx);
       if (!res.ok) throw new Error(res.error || "Failed to enable mod");
       notify({ title: "Enabled", body: `Enabled mod ${pkg.name}.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -320,7 +336,7 @@ export default class ModsPlus extends View {
 
   async useLayout(pkg, cx) {
     await this.work(cx, `Applying layout ${pkg.name}…`, async () => {
-      const res = await this.helper(["use-layout", pkg.id]);
+      const res = await this.helper(["use-layout", pkg.id], cx);
       if (!res.ok) throw new Error(res.error || "Failed to switch layout");
       notify({ title: "Layout Activated", body: `Switched to layout ${res.layout}.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -336,7 +352,7 @@ export default class ModsPlus extends View {
     }
     this.confirmRemove = null;
     await this.work(cx, `Removing ${pkg.name}…`, async () => {
-      const res = await this.helper(["remove", pkg.id]);
+      const res = await this.helper(["remove", pkg.id], cx);
       if (!res.ok) {
         throw new Error(res.error || "Could not remove package");
       }
@@ -351,7 +367,7 @@ export default class ModsPlus extends View {
     if (this.checking) return;
     this.checking = true;
     await this.work(cx, "Checking for updates…", async () => {
-      const res = await this.helper(userInitiated ? ["check-updates"] : ["check-updates", "--if-overdue"]);
+      const res = await this.helper(userInitiated ? ["check-updates"] : ["check-updates", "--if-overdue"], cx);
       this.acceptSettings(res.settings);
       if (!this.entry) {
         const summary = res.count > 0 ? `${res.count} update(s) available.` : "All installed packages are up to date.";
@@ -369,7 +385,7 @@ export default class ModsPlus extends View {
     if (this.busy || this.review?.id !== pkg.id || this.review?.operation !== "update") return;
     const token = this.review.token;
     await this.work(cx, `Updating ${pkg.name}…`, async () => {
-      const res = await this.helper(["apply-update", pkg.id, "--review", token]);
+      const res = await this.helper(["apply-update", pkg.id, "--review", token], cx);
       if (!res.ok) throw new Error(res.error || "Failed to apply update");
       notify({ title: "Updated", body: `${pkg.name} updated.`, level: "success" });
       await this.showDetails(pkg, cx);
@@ -380,7 +396,7 @@ export default class ModsPlus extends View {
 
   async copyActivationPrompt(pkg, cx) {
     await this.work(cx, "Copying prompt…", async () => {
-      const res = await this.helper(["copy-prompt", pkg.id, "--catalog"]);
+      const res = await this.helper(["copy-prompt", pkg.id, "--catalog"], cx);
       if (res.ok) {
         this.message = "Prompt copied to clipboard.";
       } else {
@@ -400,7 +416,7 @@ export default class ModsPlus extends View {
           agentCli = "codex";
         }
       }
-      const details = this.selected || await this.helper(["details", pkg.id]);
+      const details = this.selected || await this.helper(["details", pkg.id], cx);
       const promptText = details.prompt;
 
       run("tab.new", {

@@ -9,7 +9,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - The sidebar footer shows Plugins above Settings and Add machine. Each row uses a 14px native icon, 13px text, 28px height and the native hover style. The 97px footer preserves update badges and hides labels when the sidebar is collapsed. The shortcut is preserved; there is no header entry.
 - The dialog uses the native theme, 0.5px borders and four text sizes (12, 13, 16 and 28px). Mods / Layouts and All / Installed / Not installed occupy the first row.
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
-- Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Images load in batches of 24 as more cards are requested.
+- Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Each page reveals 24 cards; images arrive four cards at a time. Unavailable images do not block later cards.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
 - Review update and Remove sit beside the detail title using the Herdr theme accent and matching foreground colors. Review install appears for an uninstalled package. The action group wraps below the title on narrow panels. Remove keeps its existing second-click confirmation and uses the theme warning color while confirming.
 - Add from GitHub opens an inline native input with a Find packages action; Enter submits it. Results use the same cards and Mod/Layout tabs under Imported. A repository can yield several independently selectable packages.
@@ -20,6 +20,12 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 
 ## How it behaves
 
+- **Bounded Tasks and Progressive Loading**:
+  - Cached catalog entries appear before network refresh. Four official feeds refresh concurrently; media reads cached metadata without refreshing the feeds again.
+  - Long helper operations run as one-shot tasks. Herdr's 30-second `exec` calls only start tasks and read their results; the view polls every 500ms while waiting. Matching in-flight requests share a task, including manual and scheduled update checks.
+  - Each task has a five-minute deadline, native validation has a 45-second deadline, and each image request has a six-second deadline. Task timeout stops the helper process group. Failures include the operation name.
+  - Closing a view stops its polling. An already-started task can finish within its deadline; no daemon schedules new work. Completed task receipts are retained for one day and cleaned on subsequent starts.
+  - Candidate metadata is published atomically only after validation. Caught preparation failures remove their partial candidate without changing active files or recording a successful check. A hard-stopped task may leave partial files; they receive no badge and the next check replaces them.
 - **Separation of Install and Activation**:
   - **Review install** reads a fresh file list and the proposed keys, without executing downloaded code or changing installations. Confirming **Install** downloads the reviewed files into `data/mods-plus/stage/`, runs `herdr-app check` on runtime mods, and saves verified files to `data/mods-plus/packages/<pkg-id>/`.
   - Files are kept outside `~/.config/herdr-app/mods/` and `layouts/` until the user explicitly selects **Enable** or **Use layout**.
@@ -49,7 +55,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
   - Switching layouts or quitting Herdr pauses scheduling without background daemon services.
   - Up to four upstream lookups or package preparations run concurrently; packages sharing a source use one fresh tree lookup. A shared pool downloads up to eight files concurrently, including files within a single package. Checks bypass the catalog's cached tree. Failed packages are reported separately and never treated as up to date.
   - A completed check returns settings and verified candidate IDs together. Cards and the footer update in place without reloading the catalog or resetting the current search/filter.
-  - Package mutations remain locked across helper processes. A lock timeout returns an error; it never proceeds unlocked. Settings reads and image downloads do not wait for package mutations.
+  - Package mutations remain locked across helper processes. A lock timeout returns an error; it never proceeds unlocked. Catalog, details, settings reads and image downloads do not wait for package mutations. Newly verified ownership is saved under a short lock only if its prior record is unchanged; a busy operation defers that write.
 - **Prompt Actions**:
   - The agent-tab activation prompt includes repository source, revision, installed paths, target app home, active layout name, recipe text, and validation instructions (`herdr-app check`).
 
@@ -58,10 +64,10 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 - **GPUI Elements**: `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `Switch`, `TextView` from `gpui-base`.
 - **Herdr APIs**: `exec`, `appHome`, `props`, `closeOverlay`, `notify`, `theme`, `window`, `run`, `knownAgents`, `shared`, `setShared`. Async settings and update actions receive the context from `cx.spawn`; native `spin` and opacity transitions provide feedback without animation timers.
 - **Official Gallery**: `https://assets.herdr.dev/mods/index.json` and `https://assets.herdr.dev/layouts/index.json`. Examples use the cards embedded in `https://herdr.dev/mods/` and `https://herdr.dev/layouts/`, enriched with identities from those same indexes. Community previews use only the official moderated URLs; avatars use GitHub. Metadata is cached for one hour with stale-cache warnings on refresh failure. Search, status filters and sorting run locally.
-- **Backend Helper**: `helper.py`, `catalog.py` and `review.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `shutil`, `fcntl`); `diff3` merges local text edits.
+- **Backend Helper**: `helper.py`, `catalog.py`, `review.py` and `jobs.py` (Python 3.8+ standard library, `urllib.request`, `subprocess`, `hashlib`, `shutil`, `fcntl`); `diff3` merges local text edits.
 - **Network transport**: `curl` is required for official catalog, preview and avatar requests. GitHub file evidence uses the existing GitHub API client. No credentials are sent to the gallery or avatar endpoints.
 - **Icons**: bundled Herdr SVGs rendered through native `svg()`; the star outline is an original local SVG.
-- **Data Storage**: `<appHome>/data/mods-plus/` for `packages.json`, `settings.json`, `cache/`, `stage/`, `packages/`, `updates/`, and `backups/`.
+- **Data Storage**: `<appHome>/data/mods-plus/` for `packages.json`, `settings.json`, `cache/`, `stage/`, `packages/`, `updates/`, `backups/`, and bounded task receipts in `jobs/`.
 
 ## Watch out
 
@@ -86,6 +92,7 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 11. `python3 mods-plus/tests/updates.test.py` and `node --test mods-plus/tests/ui.test.cjs` pass (Node.js 18+ is needed only for the UI event tests).
 12. `python3 mods-plus/tests/review.test.py` passes for multi-package discovery, preview without installation writes, invalid source rejection, revision/local drift, shortcut preservation, persisted sources, actual merges and stored-only updates.
 13. In an isolated native home, enter a source, select both package kinds, cancel and refresh reviews, confirm install, enable separately, review/apply an update and remove it. Inspect narrow/wide and light/dark states plus a `herdr-app shot` screenshot. `tests/native-fixture.mjs` prepares the home without launching it; `tests/native-verify.mjs` drives its production handlers after the coordinating agent launches it. Pointer/keyboard acceptance is separate from handler automation.
+14. `python3 mods-plus/tests/jobs.test.py` passes, including a real 31-second task after its launcher exits, duplicate requests, failed-task retry, and timeout cleanup of descendants.
 
 ## Review and import verification (2026-11-06)
 
@@ -104,3 +111,5 @@ On 2026-11-03, Herdr 0.1.12 passed the source and installed runtime checks. All 
 The subsequent update-check repair passes 20 Python tests and four JavaScript event tests, including parallel preparation with a failed source, stale candidate cleanup, lock exclusion, expiring click contexts, settings refresh and automatic/manual badge synchronization. Source and installed runtime checks pass on Herdr 0.1.12. Live pointer and animation acceptance remains unverified: the window capture returned a stale frame and native clicks returned `noWindowsAvailable`. The existing preview is retained because that capture does not show the repaired UI. See the [update repair record](../docs/plans/mods-plus.md#update-check-repair-2026-11-03).
 
 The custom-interval and download-concurrency follow-up passes 23 Python tests and six JavaScript tests. A native settings-render fixture checks the actual switch and interval controls, in addition to the normal source check. A live-network comparison in disposable app homes took 22.93s before and 6.44s after, with matching candidate revisions/hashes, the same 21 uncached blob requests, two verified candidates and no check errors. This is one paired measurement, not a network latency guarantee. See the [follow-up record](../docs/plans/mods-plus.md#custom-interval-and-check-latency-2026-11-03).
+
+The 2026-11-06 timeout repair passes 34 Python tests and nine JavaScript tests, plus source and installed native checks on Herdr 0.1.13. A real update check launched by the reloaded mod completed in 46.44 seconds without an exec timeout. All six installed runtime files match the task source. Live pointer and image inspection remains unavailable: window capture returns a stale frame and computer use reports `cgWindowNotFound`. See the [timeout repair record](../docs/plans/mods-plus.md#helper-timeout-repair-2026-11-06).

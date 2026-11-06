@@ -31,7 +31,7 @@ Run the provided installation script:
 Or install manually:
 
 1. Check `${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/mods-plus` for conflicts.
-2. Copy only `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py` and `star.svg` into `mods/mods-plus/`. Python 3, `curl` and `diff3` must be available.
+2. Copy only `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py`, `jobs.py` and `star.svg` into `mods/mods-plus/`. Python 3, `curl` and `diff3` must be available.
 3. In `keys.json`, add `"cmd-shift-x": "mod.open:mods-plus"` under `"global"`.
 4. In your personal layout, set the `sidebar-footer` content to `{"mod":"mods-plus","props":{"entry":true,"footer":true}}` and its height to 97px. This footer contains Plugins, Settings and Add machine. Remove any previous header entry.
 5. Verify the installation:
@@ -49,6 +49,7 @@ python3 mods-plus/tests/helper.test.py
 python3 mods-plus/tests/catalog.test.py
 python3 mods-plus/tests/updates.test.py
 python3 mods-plus/tests/review.test.py
+python3 mods-plus/tests/jobs.test.py # includes a real 31-second operation
 
 # Async UI event tests (Node.js 18+, no dependencies)
 node --test mods-plus/tests/ui.test.cjs

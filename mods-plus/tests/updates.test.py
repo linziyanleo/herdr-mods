@@ -90,6 +90,19 @@ class UpdatesTest(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "offline"):
                 self.mgr.branch_tree("owner/mod", refresh=True)
 
+    def test_timed_out_validation_leaves_no_candidate_and_no_success_timestamp(self):
+        pkg_id = self.package("slow")
+        with patch.object(self.mgr, "branch_tree", return_value={"slow/mods/slow/main.js": self.sha2}), \
+             patch.object(self.mgr, "blob_bytes", return_value=self.v2), \
+             patch.object(helper.subprocess, "run", side_effect=helper.subprocess.TimeoutExpired("herdr-app check", 45)) as check:
+            result = self.mgr.check_updates()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["count"], 0)
+        self.assertIsNone(result["settings"]["last_check"])
+        self.assertEqual(check.call_args.kwargs["timeout"], 45)
+        self.assertFalse((Path(self.mgr.updates_dir) / pkg_id.replace("/", "-")).exists())
+        self.assertEqual((Path(self.temp.name) / "mods/slow/main.js").read_bytes(), self.v1)
+
     def test_lock_timeout_never_enters_mutation(self):
         with helper.file_lock(self.mgr.lock_file):
             with self.assertRaises(TimeoutError):

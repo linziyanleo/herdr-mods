@@ -10,7 +10,7 @@ const driver = path.join(app, "mods/mods-plus-driver");
 await fs.mkdir(driver, { recursive: true });
 await fs.mkdir(control, { recursive: true });
 await fs.mkdir(path.join(app, "layouts"), { recursive: true });
-for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "star.svg"]) {
+for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "jobs.py", "star.svg"]) {
   await fs.copyFile(path.join(runtime, name), path.join(driver, name === "main.js" ? "panel.js" : name));
 }
 await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
@@ -22,7 +22,7 @@ await fs.copyFile(path.join(runtime, "main.js"), path.join(render, "panel.js"));
 await fs.copyFile(fileURLToPath(new URL("native-render.js", import.meta.url)), path.join(render, "main.js"));
 await fs.writeFile(path.join(render, "mod.json"), '{"place":"none"}');
 await fs.mkdir(path.join(app, "mods/mods-plus"), { recursive: true });
-for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "star.svg"]) {
+for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "jobs.py", "star.svg"]) {
   await fs.copyFile(path.join(runtime, name), path.join(app, "mods/mods-plus", name));
 }
 const files = {
