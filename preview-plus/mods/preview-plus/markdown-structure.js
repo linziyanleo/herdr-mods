@@ -5,9 +5,11 @@ const titleText = value => value.replace(/!?(\[([^\]]*)\])\([^)]*\)/g, "$2")
   .replace(/[`*~]/g, "").replace(/\\([\p{P}\p{S}])/gu, "$1")
   .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
 
+const columns = whitespace => [...whitespace].reduce((column, char) => char === "\t" ? column + 4 - column % 4 : column + 1, 0);
+
 export function markdownStructure(text) {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) || [], headings = [], diagrams = [], used = new Set(), counts = new Map();
-  let offset = 0, fence = null, previous = null;
+  let offset = 0, fence = null, previous = null, listIndent = null, listBlank = false;
   const heading = (raw, level, start) => {
     const title = titleText(raw), base = title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "").replace(/\s/g, "-") || "section";
     let suffix = counts.get(base) || 0, slug = suffix ? `${base}-${suffix}` : base;
@@ -17,6 +19,24 @@ export function markdownStructure(text) {
   };
   for (const line of lines) {
     const value = line.replace(/\r?\n$/, ""), marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(value);
+    const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)$/.exec(value);
+    if (!fence) {
+      const list = /^( {0,3})(?:[-+*]|\d{1,9}[.)])([ \t]+|$)/.exec(value);
+      const thematic = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(value);
+      const indent = columns(/^[ \t]*/.exec(value)[0]);
+      // Leave list contents (including lazy continuation lines) in one native TextView.
+      // Extracting a nested heading or fence would break the surrounding list syntax.
+      if (listIndent !== null && (!value.trim() || indent >= listIndent ||
+          (!listBlank && !list && !marker && !atx && !thematic && !/^ {0,3}>/.test(value)))) {
+        listBlank = !value.trim(); previous = null; offset += line.length; continue;
+      }
+      listIndent = null; listBlank = false;
+      if (list && !thematic) {
+        const prefix = list[0].length - list[2].length, gap = columns(list[0]) - prefix;
+        listIndent = prefix + (gap >= 1 && gap <= 4 ? gap : 1);
+        previous = null; offset += line.length; continue;
+      }
+    }
     if (fence) {
       if (marker && marker[1][0] === fence.marker[0] && marker[1].length >= fence.marker.length && !marker[2].trim()) {
         if (fence.mermaid) diagrams.push({ start: fence.start, end: offset + line.length, source: text.slice(fence.body, offset), closed: true });
@@ -27,7 +47,6 @@ export function markdownStructure(text) {
       fence = { marker: marker[1], start: offset, body: offset + line.length, mermaid: marker[2].trim().toLowerCase() === "mermaid" };
       previous = null;
     } else {
-      const atx = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)|[ \t]*)$/.exec(value);
       if (atx) { heading((atx[2] || "").replace(/[ \t]+#+[ \t]*$/, ""), atx[1].length, offset); previous = null; }
       else if (previous && /^ {0,3}(?:=+|-+)[ \t]*$/.test(value)) {
         heading(previous.text, value.trim()[0] === "=" ? 1 : 2, previous.start); previous = null;

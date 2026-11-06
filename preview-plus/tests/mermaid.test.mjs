@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runtime, until } from "./runtime.mjs";
+import { runtime, until, find } from "./runtime.mjs";
 
 const flow = "flowchart LR\nA[Read] --> B[Preview]";
 test("bundled diagrams become native SVGs without CSS variables, network fonts or runtime programs", async t => {
@@ -36,6 +36,30 @@ test("Markdown shows diagram errors and original source without losing headings 
   assert.equal(blocks.length, 3); assert.ok(blocks[0].media); assert.match(blocks[1].error, /Supported/); assert.match(blocks[2].error, /Unclosed/);
   assert.match(blocks[1].text, /pie/); panel.setSource(true, state.cx); state.edit(source + "draft"); panel.setSource(false, state.cx); await until(() => !panel.markdownBusy);
   assert.equal(panel.dirty(), true); assert.equal(await fs.readFile(file, "utf8"), source); assert.match(panel.text, /draft/);
+});
+
+test("inline diagram scroll frames reserve natural height before native image decoding", async t => {
+  const state = await runtime(t), file = path.join(state.dir, "diagram-layout.md");
+  await fs.writeFile(file, '# Start\n\n```mermaid\n' + flow + '\n```\n\n## Between\n\n```mermaid\nsequenceDiagram\nEditor->>Disk: Save\n```\n\n## After diagrams\n');
+  state.props = { file }; const panel = await state.start();
+  for (const width of [240, 1280]) {
+    panel.viewport = { width, height: 611 };
+    const tree = state.render(), body = find(tree, `preview-markdown-${file}-top`);
+    const diagrams = panel.markdownBlocks.flatMap((block, index) => block.diagram ? [{ block, index }] : []);
+    assert.equal(diagrams.length, 2);
+    for (const { block, index } of diagrams) {
+      const frame = find(tree, `preview-diagram-${index}`);
+      // The host's scrollbar wrapper defaults an unspecified height to 100%.
+      assert.equal(frame.attributes.h?.[0], block.media.height);
+      assert.ok(frame.attributes.overflow_x_scrollbar);
+      const picture = frame.nodes.find(node => node.kind === "image");
+      assert.equal(picture.attributes.w[0], block.media.width);
+      assert.equal(picture.attributes.h[0], block.media.height);
+      assert.equal(picture.value, block.media.path);
+    }
+    const lastDiagram = body.nodes.findIndex(node => node === find(tree, `preview-diagram-${diagrams.at(-1).index}`));
+    assert.ok(body.nodes.slice(lastDiagram + 1).some(node => node.kind === "markdown" && node.value.includes("## After diagrams")));
+  }
 });
 
 test("late diagram staging cannot overwrite a newer target or theme", async t => {
