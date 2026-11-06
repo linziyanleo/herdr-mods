@@ -32,10 +32,10 @@ async function filesRequest(value) {
   const result = await until(() => read(path.join(filesControl, "receipt.json")), () => true, "Files Plus request");
   assert.equal(result.error, undefined);
 }
-async function back() {
+async function previewRequest(value) {
   const id = `${Date.now()}-${Math.random()}`;
-  await fs.writeFile(path.join(previewControl, "request.json"), JSON.stringify({ id, action: "back" }));
-  const result = await until(() => read(path.join(previewControl, "receipt.json")), value => value.id === id, "Preview Plus back");
+  await fs.writeFile(path.join(previewControl, "request.json"), JSON.stringify({ ...value, id }));
+  const result = await until(() => read(path.join(previewControl, "receipt.json")), value => value.id === id, value.action);
   assert.equal(result.error, undefined);
 }
 
@@ -43,6 +43,11 @@ const samples = [
   ["sample.json", '{"project":"Herdr","ready":true,"files":["README.md","sample.csv"]}\n'],
   ["sample.csv", 'name,status,notes\nFiles Plus,ready,"Search, then preview"\nPreview Plus,ready,"A quoted\nmultiline cell"\n'],
   ["sample.tsv", "name\tcount\nFiles Plus\t3\nPreview Plus\t5\n"],
+  ["code.ts", "export const message = 'Hello';\n"],
+  ["config.yaml", "enabled: true\n"],
+  [".env", "EXAMPLE_VALUE=synthetic\n"],
+  ["Dockerfile", "FROM scratch\n"],
+  ["notes.custom", "An unknown extension with UTF-8 text.\n"],
 ];
 await fs.mkdir(path.join(root, "structured"), { recursive: true });
 for (const [name, text] of samples) await fs.writeFile(path.join(root, "structured", name), text);
@@ -64,19 +69,37 @@ for (const [name, text] of samples) {
   await filesRequest({ type: "preview", path: file, root });
   // Hidden test windows may not paint a changed stack until resized.
   await command("window.maximize");
-  const value = await until(preview, value => value.selected?.file === file && !value.loading && !value.error && !value.dataError && value.structuredRows > 0, name);
+  const rich = /\.(json|csv|tsv)$/.test(name);
+  const value = await until(preview, value => value.selected?.file === file && !value.loading && !value.error && !value.dataError && (rich ? value.structuredRows > 0 : value.codeText === text), name);
   assert.equal(value.selected.root, root);
   assert.equal(value.selected.on, null);
   assert.equal(value.owner.mode, "paired");
   assert.equal(value.source, false);
   assert.equal(value.text, text);
   assert.deepEqual(value.history, []);
+  assert.ok(value.document);
+  if (!rich) {
+    const edited = text + "# Unicode draft 中文 " + "long line ".repeat(30) + "\n";
+    await previewRequest({ action: "edit", value: edited });
+    await until(preview, v => v.dirty && v.codeText === edited, "draft " + name);
+    await previewRequest({ action: "wrap" });
+    await until(preview, v => v.wrap !== value.wrap && v.codeText === edited, "wrap " + name);
+    await previewRequest({ action: "save" });
+    await until(preview, v => !v.dirty && !v.document?.saving, "save " + name);
+    assert.equal(await fs.readFile(file, "utf8"), edited);
+    await previewRequest({ action: "edit", value: "Discard this draft" });
+    await previewRequest({ action: "discard" });
+    await until(preview, v => v.dirty, "confirm discard " + name);
+    await previewRequest({ action: "discard" });
+    await until(preview, v => !v.dirty && v.codeText === edited, "discard " + name);
+    assert.equal(await fs.readFile(file, "utf8"), edited);
+  }
   await command("window.maximize");
   await execute("herdr-app", ["shot", path.join(info.base, `paired-${name.split(".").pop()}.png`)], { env });
-  await back();
+  await previewRequest({ action: "back" });
   await filesRequest({ type: "snapshot" });
   assert.ok((await files()).folders.includes(path.join(root, "structured")));
-  reports.push(`${name}: real paired preview, target identity, back and retained tree`);
+  reports.push(`${name}: real paired ${rich ? "preview" : "edit/wrap/save/discard"}, target identity, back and retained tree`);
   console.log(`passed: ${reports.at(-1)}`);
 }
 const status = JSON.parse((await execute("herdr-app", ["status"], { env })).stdout);

@@ -18,6 +18,46 @@ async function setup(t, name = "sample.txt") {
 }
 const click = (r, id) => find(r.render(), id).handlers.on_click({}, r.cx);
 
+test("source, hidden, extensionless and unknown text files share editing, wrap, save, discard and Open", async t => {
+  for (const name of ["module.ts", "config.yaml", ".env", "Dockerfile", "notes.custom"]) {
+    await t.test(name, async t => {
+      const r = await setup(t, name), p = r.panel;
+      assert.equal(p.code.readonly, false);
+      assert.equal(find(r.render(), "preview-mode"), null);
+      const text = "中文\r\n" + "long text ".repeat(40) + "\r\n";
+      r.edit(text); click(r, "preview-wrap");
+      assert.equal(p.code.soft_wrap, true);
+      assert.equal(p.code.value(), text);
+      click(r, "preview-save"); await drain(r);
+      assert.equal(await fs.readFile(r.props.file, "utf8"), text);
+      r.edit("Discard this edit\n");
+      click(r, "preview-discard");
+      assert.equal(p.code.value(), "Discard this edit\n");
+      click(r, "preview-discard"); await r.settle();
+      assert.equal(p.code.value(), text);
+      r.hooks.exec = async command => command === "open" ? { code: 0, stdout: "", stderr: "" } : undefined;
+      click(r, "preview-open");
+      await until(() => r.calls.some(call => call.command === "open"));
+      assert.deepEqual(r.calls.find(call => call.command === "open").args, [r.props.file]);
+    });
+  }
+});
+
+test("binary files retain Open without an editor or Save; remote Open stays disabled", async t => {
+  const r = await setup(t, "archive.bin"), p = r.panel;
+  await fs.writeFile(r.props.file, Buffer.from([0, 1, 2, 3])); p.reload(r.cx); await until(() => Boolean(p.error));
+  assert.match(p.error, /binary/);
+  assert.equal(p.code, null);
+  assert.equal(find(r.render(), "preview-save"), null);
+  assert.equal(find(r.render(), "preview-wrap").handlers.on_click, undefined);
+  r.hooks.exec = async command => command === "open" ? { code: 0, stdout: "", stderr: "" } : undefined;
+  click(r, "preview-open"); await until(() => r.calls.some(call => call.command === "open"));
+  r.props.on = "remote"; r.render(); await r.settle();
+  assert.equal(find(r.render(), "preview-open").handlers.on_click, undefined);
+  assert.equal(find(r.render(), "preview-save"), null);
+  assert.deepEqual(await fs.readFile(r.props.file), Buffer.from([0, 1, 2, 3]));
+});
+
 test("editing and platform save keys write exact text; own watcher keeps editor and undo state", async t => {
   const r = await setup(t), p = r.panel, code = p.code;
   assert.equal(find(r.render(), "preview-save").handlers.on_click, undefined);

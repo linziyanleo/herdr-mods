@@ -15,7 +15,6 @@ import { FileSearch } from "./search.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
-const RICH = /\.(md|markdown|png|jpe?g|webp|svg|pdf|json|csv|tsv)$/i;
 const collator = globalThis.Intl?.Collator ? new globalThis.Intl.Collator() : { compare: (a, b) => a.localeCompare(b) };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -283,14 +282,14 @@ export class FilesPanel extends View {
           notify({ title: "Select a center pane before opening a file", level: "info" });
           return;
         }
-        const rich = RICH.test(path) && (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
+        const editor = (destination !== "internal" || stack) && await installed("preview-plus").catch(() => false);
         if (!this.current(context) || this.openRequest !== request) return;
         if (destination !== "internal") {
-          const mod = rich ? "preview-plus" : "files-plus";
-          const previewProps = { file: path, root, on, ...(rich ? {} : { role: "preview" }) };
+          const mod = editor ? "preview-plus" : "files-plus";
+          const previewProps = { file: path, root, on, ...(editor ? {} : { role: "preview" }) };
           if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
           else run("pane.split", { pane, direction: "right", mod, props: previewProps });
-        } else if (rich) {
+        } else if (editor) {
           setShared("preview-plus.target", { ...(shared("preview-plus.target") || {}), [space]: { file: path, root, on } });
           run("layout.select", { stack, child: "preview-plus" });
         } else this.show(path, cx);

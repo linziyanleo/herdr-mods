@@ -89,7 +89,7 @@ test("refresh preserves an unchanged editor and reloads changed preview bytes", 
   assert.equal(panel.code.value, "changed"); assert.equal(first.released, true);
 });
 
-test("a delayed rich-preview handoff cannot replace a later text selection", async t => {
+test("a delayed preview handoff cannot replace a later text selection", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
   r.shared["files-plus.open-location"] = "internal";
   await fs.mkdir(path.join(r.dir, "app/mods/preview-plus"), { recursive: true });
@@ -103,7 +103,8 @@ test("a delayed rich-preview handoff cannot replace a later text selection", asy
   r.hooks.beforeRead = async file => { if (file.endsWith("preview-plus/mod.json")) { started(); await pending; } };
   panel.openFile(path.join(r.dir, "README.md"), r.dir, r.cx); await reading;
   panel.openFile(text, r.dir, r.cx); release(); await r.drain();
-  assert.equal(panel.code.value, "Latest"); assert.equal(r.shared["preview-plus.target"], undefined);
+  assert.equal(r.shared["preview-plus.target"].s1.file, text);
+  assert.equal(r.calls.filter(call => call.command === "layout.select").length, 1);
 });
 
 test("lazy loads share the 5,000 entry budget and cap every directory at 500", async t => {

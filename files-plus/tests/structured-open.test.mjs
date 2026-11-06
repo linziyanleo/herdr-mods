@@ -14,11 +14,11 @@ async function setup(t, installed = true) {
   return { r, panel };
 }
 
-test("structured data opens in Preview Plus using the selected center destination", async t => {
+test("every file type opens in Preview Plus using the selected center destination", async t => {
   const { r, panel } = await setup(t);
   for (const destination of ["tab", "pane"]) {
     r.shared["files-plus.open-location"] = destination;
-    for (const name of ["settings.json", "report.CSV", "values.tsv"]) {
+    for (const name of ["settings.json", "report.CSV", "values.tsv", "code.ts", "config.yaml", ".env", "Dockerfile", "notes.custom", "archive.zip", "photo.png", "guide.pdf"]) {
       const file = path.join(r.dir, name);
       panel.openFile(file, r.dir, r.cx); await r.drain();
       const call = r.calls.at(-1);
@@ -30,18 +30,20 @@ test("structured data opens in Preview Plus using the selected center destinatio
   }
 });
 
-test("structured data uses the paired sidebar stack without changing another space target", async t => {
+test("all file types use the paired sidebar stack without changing another space target", async t => {
   const { r, panel } = await setup(t);
   r.props = { previewStack: "files" };
   r.shared["files-plus.open-location"] = "internal";
   const other = { file: "/other/data.json", root: "/other", on: null };
   r.shared["preview-plus.target"] = { other };
-  const file = path.join(r.dir, "data.json");
-  panel.openFile(file, r.dir, r.cx); await r.drain();
-  assert.equal(r.calls.at(-1).command, "layout.select");
-  assert.deepEqual({ ...r.calls.at(-1).args }, { stack: "files", child: "preview-plus" });
-  assert.deepEqual({ ...r.shared["preview-plus.target"].s1 }, { file, root: r.dir, on: null });
-  assert.equal(r.shared["preview-plus.target"].other, other);
+  for (const name of ["data.json", "src.ts", "Dockerfile", ".env", "unknown.format", "archive.zip"]) {
+    const file = path.join(r.dir, name);
+    panel.openFile(file, r.dir, r.cx); await r.drain();
+    assert.equal(r.calls.at(-1).command, "layout.select");
+    assert.deepEqual({ ...r.calls.at(-1).args }, { stack: "files", child: "preview-plus" });
+    assert.deepEqual({ ...r.shared["preview-plus.target"].s1 }, { file, root: r.dir, on: null });
+    assert.equal(r.shared["preview-plus.target"].other, other);
+  }
 });
 
 test("structured data retains source fallback without Preview Plus or a sidebar pairing", async t => {
