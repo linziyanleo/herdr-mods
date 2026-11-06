@@ -29,8 +29,11 @@ const ready = (accept, label) => until(state, value => !value.loading && !value.
 const shot = async name => { await request({ action: "activate" }); await execute("herdr-app", ["shot", path.join(info.base, name + ".png")], { env }); };
 const passed = label => { reports.push(label); console.log("passed: " + label); };
 const file = name => path.join(info.project, name);
+const previousDriver = (await state().catch(() => null))?.driverIdentity;
+const driverRun = `${Date.now()}-${Math.random()}`;
 await fs.rm(path.join(control, "request.json"), { force: true });
-await command("layout.set", { layout: { id: "root", type: "block", content: { mod: "preview-plus-driver", props: { base: control, file: file("community.md") } } } });
+await command("layout.set", { layout: { id: "root", type: "block", content: { mod: "preview-plus-driver", props: { base: control, file: file("community.md"), driverRun } } } });
+await until(state, v => v.driverIdentity && v.driverIdentity !== previousDriver && v.owner?.target?.file === file("community.md"), "new Preview driver");
 await request({ action: "activate" });
 let current = await ready(v => v.selected?.file === file("community.md") && v.markdownBlocks?.filter(b => b.diagram && b.media).length === 2, "native Mermaid");
 assert.equal(current.markdownBlocks.filter(b => b.diagram && b.error).length, 1);
@@ -72,8 +75,11 @@ passed("Native JSON collapse and CSV/TSV virtual tables, source drafts, guarded 
 // Direct pane.split uses file props, separately from the Files Plus routing test.
 await command("layout.set", { layout: { id: "root", type: "block", content: { tab: "active" } } });
 for (const name of ["data.json", "table.csv", "table.tsv"]) {
+  const previousDriver = (await state())?.driverIdentity;
   const split = await command("pane.split", { direction: "right", mod: "preview-plus-driver", props: { base: control, file: file(name) } });
-  assert.ok(split.pane); await request({ action: "activate" });
+  assert.ok(split.pane);
+  await until(state, v => v.driverIdentity && v.driverIdentity !== previousDriver && v.owner?.target?.file === file(name), "new pane driver");
+  await request({ action: "activate" });
   await ready(v => v.owner?.mode === "pane" && v.selected?.file === file(name) && v.structuredRows > 0 && !v.dataError, "standalone pane " + name);
   await shot("rich-pane-" + name.replace(".", "-")); await command("pane.close", { pane: split.pane });
 }
