@@ -8,9 +8,9 @@ Each mod has its own top-level directory. Implemented mods include documentation
 
 | Mod | Purpose | Status |
 | --- | --- | --- |
-| [Files Plus](files-plus/RECIPE.md) | Combine single-folder and workspace file browsing with right-click file copy/paste, root-aware path copying, `@` agent reference insertion, Finder reveal, and file CRUD. | Available |
-| [Preview Plus](preview-plus/RECIPE.md) | View formatted Markdown, images, and PDF pages with Preview/Source toggle, relative link navigation, fit, zoom, and page controls; works standalone or with Files Plus. | Available |
-| [Mods Plus](mods-plus/RECIPE.md) | Browse official mod and layout catalogs, manage packages, and open Plugins from the sidebar footer. | Available |
+| [Files Plus](files-plus/RECIPE.md) | Browse and search single-folder and multi-root workspaces, manage files, and send `@` references to agents. | Available |
+| [Preview Plus](preview-plus/RECIPE.md) | Read Markdown with a document outline and Mermaid diagrams, browse JSON trees and CSV/TSV tables, edit source, and preview images and PDFs. | Available |
+| [Mods Plus](mods-plus/RECIPE.md) | Browse official catalogs or import GitHub packages, review installation changes and shortcut conflicts, and manage mods and layouts. | Available |
 
 ## Development
 
