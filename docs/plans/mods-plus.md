@@ -103,6 +103,8 @@ Native acceptance in `/tmp/mp.lBl5xK` passed nine production-view/helper checks:
 
 A live public GitHub discovery of this repository found Files Plus, Mods Plus and Preview Plus as separate packages. A read-only Files Plus install review resolved commit `1f82759aea1cd8c78c9de36fe624a27cab5c2253` and returned its manifest and change list. No live package was installed. Physical pointer/keyboard dispatch, scrolling and additional narrow/theme combinations remain unverified: CUA could not locate the isolated window. The existing normal app home and user bindings remain unchanged.
 
+Independent review reproduced an ownership defect in multi-layout packages: enabling one layout could allow an update to modify an unrelated same-name file for another layout. Fix `5a1ebfa` records only actually activated layouts in `active_layouts`; updates and removal honor that set. Legacy records without this evidence preserve local layouts rather than inferring ownership from matching bytes. Twenty relevant Python cases and the native source check pass, including update/removal preservation of an independently created second layout and conservative legacy handling. The earlier native mod/shortcut flow does not depend on layout ownership and remains applicable.
+
 Attribution: UX references are [herdr-customize/docs/app.md](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager). No third-party code/assets were copied, and no license decision or new library dependency is introduced. Review/check output is not a security certification.
 
 ## Implementation sequence

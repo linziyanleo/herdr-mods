@@ -91,6 +91,8 @@ A comprehensive package manager dialog and entry mod for browsing, installing, e
 
 On macOS 27.2 with Herdr 0.1.13, the source and disposable review-render checks pass. The Python suites cover 36 cases and the Node event suite covers nine. Nine native production-view/helper checks passed in an isolated home, covering discovery through reviewed install, activation, update and removal, with conflict/local-drift preservation and no runtime errors. The current preview is an inspected native install-review capture. Live public GitHub discovery and read-only manifest review also passed without installation. Physical pointer/keyboard dispatch and additional sizing/theme combinations remain unverified; no real user package or shortcut was changed.
 
+The ownership follow-up passes 20 affected Python cases. Only layouts recorded as actually activated may be updated or removed. Older records without that evidence preserve existing layouts; matching source bytes alone do not establish ownership. Independently created same-name layouts remain untouched.
+
 UX references: [herdr-customize app documentation](https://github.com/wapenshaw/herdr-customize/blob/main/docs/app.md) for direct input and review of a specific commit, and [herdr-app-mod-manager](https://github.com/jacksonpires/herdr-app-mod-manager) for review and preserving shortcut conflicts. This implementation reuses Mods Plus's own Python/GPUI architecture; no source code or assets were copied from those projects and no new runtime library was added.
 
 ## Repair verification
