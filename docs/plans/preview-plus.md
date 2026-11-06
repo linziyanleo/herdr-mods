@@ -1,6 +1,6 @@
 # Preview Plus implementation plan
 
-Status: all-file routing from Files Plus is implemented and verified on 2026-11-06. Complete local text shares the existing Preview Plus editor without an extension allowlist. Main delivery and normal-home hot reload are authorized for this update; the delivery receipt below tracks their completion. Earlier publication and installation records below are historical.
+Status: all-file routing from Files Plus is implemented, committed, pushed to main and installed in the current Herdr view on 2026-11-06. Complete local text shares the existing Preview Plus editor without an extension allowlist. Automated and isolated native checks pass; physical keyboard/pointer verification remains unavailable in this round. Earlier publication and installation records below are historical.
 
 ## All-file editor routing (2026-11-06)
 
@@ -15,7 +15,9 @@ Validation on macOS / Herdr 0.1.13:
 - In `/tmp/pp.0W5oi9`, `native-structured-pair.mjs` passed eight real paired handoff groups: JSON/CSV/TSV previews, plus `.ts`, `.yaml`, `.env`, `Dockerfile` and `.custom` edit/wrap/save/discard, exact disk readback, target identity, Back and retained folders. `native-editor-verify.mjs` passed all four groups for Unicode drafts, wrapping/Markdown preview, navigation/save, external-edit conflicts/discard and persistent draft recovery. Both report `errors: []`.
 - `all-text-editor.png` was captured with `herdr-app shot` from that disposable session and inspected. It shows the real Files Plus tree and an ordinary TypeScript file in Preview Plus. CUA could not identify the isolated window (`cgWindowNotFound`), including after restarting the same session with a distinct copy of the signed app; those native driver receipts do not establish physical input dispatch.
 
-Delivery receipt: source validation complete; main integration/push, normal-home hot reload and physical-input smoke verification pending.
+Delivery receipt: implementation `bac66dc` and documentation `67b0521` were fast-forwarded into local main and pushed to `linziyanleo/herdr-mods`; `git ls-remote` confirmed `67b05213b90820dcf0271d8669f99206ebbcaeec`. Only `mods/files-plus/workspace.js` needed updating in the normal app home; the existing Preview Plus runtime already matched the accepted source. The previous file is backed up under `~/.config/herdr-app/backups/all-text-editor-20261106-144919/`. Installed runtime SHA-256 is `22954f14cf4c5f27831c01f1646c79ce785a0fe7c42c19861cb8a33e31b0a34b`. Both installed mod checks pass and the hot-reloaded app reports `errors: []`. The existing layout and key bindings remain byte-for-byte unchanged. The primary checkout's unrelated `.gitignore` edit is preserved.
+
+The disposable window was closed after verification. Normal-window observation and a native screenshot succeeded, but physical input could not proceed: CUA first reported a user-changed window and, after refreshing state, `noWindowsAvailable`. No physical edit, save-key, undo/redo or external-Open success is claimed for this round. The automated Open-dispatch coverage and native editor-handler receipts above remain valid; additional OS/theme combinations were not tested.
 
 This plan merges the previous `markdown-preview` and `media-preview` plans into one mod (`preview-plus`) that works standalone or alongside [Files Plus](files-plus.md).
 
