@@ -63,19 +63,23 @@ export async function runtime(t) {
     } });
     return element;
   };
-  const kit = { View: class {}, div: () => builder("div"), image: file => builder("image", file), svg: file => builder("svg", file) };
+  const kit = { View: class {}, div: () => builder("div"), image: file => builder("image", file), svg: file => builder("svg", file),
+    uniform_list: (id, count, key, render) => { const el = builder("uniform-list", { count, key, render }).id(id); return el; } };
   const base = { h_flex: () => builder("row"), v_flex: () => builder("column"),
+    Scrollbar: { vertical: id => builder("scrollbar", id) },
     InputState: { new: options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) },
     Input: { new: state => builder("input", state) },
     TextView: { markdown: (id, text) => builder("markdown", text).id(id) },
     EditorState: { new: options => ({ ...options, text: options.value, handlers: {}, value() { return this.text; },
       set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
-  const context = vm.createContext({ console, localStorage }), cache = new Map();
+  const context = vm.createContext({ console, localStorage, atob }), cache = new Map();
   async function module(file) {
     if (cache.has(file)) return cache.get(file);
-    const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file }); cache.set(file, result);
+    const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file,
+      importModuleDynamically: async (specifier, parent) => { const imported = await module(path.resolve(path.dirname(parent.identifier), specifier)); if (imported.status !== "evaluated") await imported.evaluate(); return imported; }
+    }); cache.set(file, result);
     await result.link(async (specifier, parent) => {
-      const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : null;
+      const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : specifier === "fs/promises" ? { mkdir: fs.mkdir } : null;
       if (!exports) return module(path.resolve(path.dirname(parent.identifier), specifier));
       return new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
     });

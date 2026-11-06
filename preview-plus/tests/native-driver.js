@@ -1,6 +1,7 @@
 // Test-only subclass: exercise production handlers and record native state.
 import PreviewPlus from "./panel.js";
 import { props, readTextFile, writeTextFile, watchFolder, shared, setShared, closeOverlay, settings, theme } from "herdr";
+import { jsonRows } from "./structured.js";
 
 export default class NativeDriver extends PreviewPlus {
   init(p, cx) {
@@ -19,6 +20,8 @@ export default class NativeDriver extends PreviewPlus {
               if (request.action === "activate") { globalThis.window.activate_window(); globalThis.window.refresh(); cx.notify(); }
               else if (request.action === "show") this.show({ file: request.file, root: request.root, on: request.on }, cx);
               else if (request.action === "follow") this.follow(request.href, cx);
+              else if (request.action === "contents") { this.contents = !this.contents; cx.notify(); }
+              else if (request.action === "json-toggle") this.toggleJson(request.path, cx);
               else if (request.action === "back") this.back(cx);
               else if (request.action === "source") this.setSource(request.value, cx);
               // set_value does not emit change; keyboard input is verified separately.
@@ -51,6 +54,9 @@ export default class NativeDriver extends PreviewPlus {
   record(cx) {
     const value = { owner: this.owner, selected: this.selected, loading: this.loading, error: this.error, actionError: this.actionError,
       imageWarning: this.imageWarning, text: this.text, markdownBlocks: this.markdownBlocks, source: this.source, media: this.media,
+      headings: this.headings, anchor: this.anchor, contents: this.contents, markdownBusy: this.markdownBusy,
+      dataError: this.dataPreview?.error, expanded: [...this.expanded],
+      structuredRows: this.dataPreview ? (this.dataPreview.rows?.length ?? (this.dataPreview.error ? 0 : jsonRows(this.dataPreview.value, this.expanded).rows.length)) : 0,
       dirty: this.dirty(), document: this.document, wrap: this.wrap, codeText: this.code?.value(), draftError: this.draftError,
       page: this.page, total: this.total, zoom: this.zoom, history: this.history, viewport: this.viewport,
       uiFont: settings().ui_font_family, codeFontSize: settings().font_size, appZoom: settings().zoom, codeStyle: this.codeStyle, colors: theme(), windowActive: globalThis.window?.is_window_active?.(),

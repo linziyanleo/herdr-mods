@@ -96,6 +96,7 @@ async function filesRequest(value) {
   const receipt = await until(async () => JSON.parse(await fs.readFile(path.join(info.base, "files/receipt.json"), "utf8")), () => true, "Files Plus request"); assert.equal(receipt.error, undefined);
 }
 await until(async () => JSON.parse(await fs.readFile(path.join(info.base, "files/native-state-panel.json"), "utf8")), value => Boolean(value.entries[root]), "Files Plus tree");
+await filesRequest({ type: "open-location", value: "internal" });
 await filesRequest({ type: "toggle", path: `${root}/notes` });
 for (const name of ["README.md", "diagram.svg", "guide.pdf"]) {
   const selected = `${root}/${name}`;

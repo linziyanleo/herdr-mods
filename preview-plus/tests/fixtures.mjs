@@ -46,5 +46,10 @@ export async function fixtures(dir) {
   await fs.writeFile(path.join(dir, "guide.pdf"), pdf());
   await fs.writeFile(path.join(dir, "notes/next.markdown"), "# Linked note\n\nBack returns to the previous document.\n\n[View the PDF](../guide.pdf)\n");
   await fs.writeFile(path.join(dir, "source.txt"), "A read-only text file.\n");
+  await fs.writeFile(path.join(dir, "community.md"), '# Preview Plus\n\n[Details](#details) | [Second details](#details-1) | [Other document](notes/anchors.md#中文-标题)\n\n## Details\n\n```mermaid\nflowchart LR\nRead --> Preview --> Save\n```\n\n## Details\n\n```mermaid\nsequenceDiagram\nEditor->>Disk: Save snapshot\nDisk-->>Editor: Saved\n```\n\n## Unsupported diagram\n\n```mermaid\npie\n"A": 1\n```\n\n````markdown\n# Not a heading\n```mermaid\ngraph LR\nA-->B\n```\n````\n');
+  await fs.writeFile(path.join(dir, "notes/anchors.md"), "# Linked document\n\n## 中文 标题\n\n[Return](../community.md#details-1)\n");
+  await fs.writeFile(path.join(dir, "data.json"), JSON.stringify({ name: "Preview Plus", items: [{ id: 1, active: true }, { id: 2, active: false }], "a/b": { "~": null } }, null, 2));
+  await fs.writeFile(path.join(dir, "table.csv"), 'name,note,count\r\nAda,"Quoted, comma",2\r\nLin,"Two\nlines",3\r\n' + Array.from({ length: 500 }, (_, i) => `Row ${i},Value ${i},${i}\r\n`).join(""));
+  await fs.writeFile(path.join(dir, "table.tsv"), "name\tvalue\tnote\nA\t1\tFirst\nB\t2\tSecond\n");
   await fs.writeFile(path.join(dir, "README.md"), "# Preview Plus\n\nOne place for Markdown, images, and PDF pages.\n\n## Explore the files\n\n- [Follow a linked note](notes/next.markdown)\n- [Open the landscape](landscape.png)\n- [View the diagram](diagram.svg)\n- [Read the two-page PDF](guide.pdf)\n- [Read plain text](source.txt)\n- [Herdr documentation](https://herdr.dev)\n\n![Landscape](landscape.png)\n\n```js\nconst preview = { local: true, editable: false };\n```\n");
 }

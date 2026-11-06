@@ -46,7 +46,7 @@ test("standalone tree opens Markdown, source, links, history, and ordinary text 
   find(tree, "preview-file-README.md").handlers.on_click({}, state.cx); await state.settle();
   assert.equal(panel.selected.file, path.join(state.dir, "README.md"));
   assert.ok(panel.markdownBlocks.some(block => block.media?.path.startsWith("mods/preview-plus/.cache/")));
-  const documentImage = find(state.render(), "preview-markdown-image-1");
+  const documentImage = find(state.render(), `preview-markdown-image-${panel.markdownBlocks.findIndex(block => block.href === "landscape.png")}`);
   assert.equal(typeof documentImage.handlers.on_click, "function");
   documentImage.handlers.on_click({}, state.cx); await state.settle();
   assert.equal(panel.selected.file, path.join(state.dir, "landscape.png")); assert.equal(panel.history.length, 1);
