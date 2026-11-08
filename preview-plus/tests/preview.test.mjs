@@ -204,3 +204,13 @@ test("Python fallback stages the same PNG/SVG without third-party modules", asyn
   }
   await assert.rejects(loadMedia({ file: path.join(state.dir, "guide.pdf"), on: null }, 1, "pdf"), /require macOS/);
 });
+
+test("a file pane keeps loading when another space gains focus", async t => {
+  const state = await runtime(t); state.props = { file: path.join(state.dir, "notes.txt") };
+  let release; state.hooks.read = () => new Promise(resolve => { release = resolve; });
+  const { default: Panel } = await state.load("main.js"), panel = state.panel = new Panel(); panel.init({}, state.cx);
+  await new Promise(resolve => setImmediate(resolve));
+  state.focus = { ...state.focus, space: "s2" }; state.spaces = [...state.spaces, { id: "s2", active: true }]; state.render();
+  release("loaded while away\n"); await state.settle();
+  assert.equal(panel.loading, false); assert.equal(panel.error, null); assert.match(panel.code.value(), /loaded while away/);
+});

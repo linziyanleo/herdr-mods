@@ -16,7 +16,7 @@ const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", js
 function context() {
   const p = props() || {}, f = focused(), space = spaces().find(s => s.id === f?.space) || spaces().find(s => s.active);
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
-  if (p.file !== undefined) return { mode: "pane", spaceId: space?.id || null, target: target(p) };
+  if (p.file !== undefined) return { mode: "pane", target: target(p) };
   if (p.previewStack) return { mode: "paired", stack: p.previewStack, spaceId: space?.id || null, target: target(shared("preview-plus.target")?.[space?.id]) };
   const on = f?.pane === null && f?.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine || null;
   return { mode: "files", spaceId: space?.id || null, cwd: pane?.cwd || f?.cwd || space?.folder || null, on };
