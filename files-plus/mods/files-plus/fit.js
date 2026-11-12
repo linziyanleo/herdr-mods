@@ -6,8 +6,8 @@ export function findNode(tree, id) {
   for (const node of tree.children || []) { const found = findNode(node, id); if (found) return found; }
   return null;
 }
-export function panelWidth(rows, title, metrics) {
-  const header = 28 + textWidth(title, 13, metrics) + 16 + 24 + 24;
+export function panelWidth(rows, title, metrics, controls = 2) {
+  const header = 28 + textWidth(title, 13, metrics) + Math.max(0, controls) * (24 + 8);
   // Expanded descendants must not move the divider beside the workspace.
   const widths = rows.filter(row => !row.depth).map(row => {
     const padding = 16;

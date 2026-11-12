@@ -1,7 +1,7 @@
 // Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify, pickFolder } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
 import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
@@ -12,6 +12,8 @@ import { dragMove } from "./drag.js";
 import { OPEN_LOCATION, openLocation } from "./preferences.js";
 import { findOpenFile, focusOpenFile } from "./open-files.js";
 import { FileSearch } from "./search.js";
+
+import { browsingFolder, setBrowsingFolder } from "./browsing.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html", md: "markdown" };
@@ -40,10 +42,12 @@ export function location(previous) {
   const space = spaces().find(s => s.active), f = focused();
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const preview = ["files-plus", "preview-plus"].includes(pane?.mod);
-  const cwd = (f?.space === space?.id ? pane?.cwd || f?.cwd || (preview && previous?.space === space.id ? previous.cwd : null) : null) || space?.folder;
+  const cwd = (f?.space === space?.id ? pane?.cwd || f?.cwd || (preview && previous?.space === space.id ? previous.terminalCwd || previous.cwd : null) : null) || space?.folder;
   const on = f && space && f.space === space.id && f.pane === null && f.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  const entry = workspaceOf(space?.id);
-  return { space: space?.id, cwd, on, entry, key: entry ? JSON.stringify([space.id, entry.folders]) : JSON.stringify([space?.id, cwd, on]) };
+  const browsing = browsingFolder(space?.id, on);
+  const entry = browsing ? null : workspaceOf(space?.id);
+  const base = browsing || cwd;
+  return { space: space?.id, cwd: base, terminalCwd: cwd, browsing, on, entry, key: entry ? JSON.stringify([space.id, entry.folders]) : JSON.stringify([space?.id, base, on, Boolean(browsing)]) };
 }
 
 export async function directory(path, on, limit = PER_FOLDER) {
@@ -68,6 +72,29 @@ export class FilesPanel extends View {
     const loc = location(this.browsingLocation);
     this.browsingLocation = loc;
     return loc;
+  }
+  changeFolder(cx) {
+    const loc = this.location();
+    if (!loc.space || loc.on !== null || this.folderPicker) return;
+    const request = this.folderPicker = {};
+    cx.spawn(async cx => {
+      try {
+        const path = await pickFolder({ prompt: "Browse" });
+        if (this.folderPicker !== request || !this.context || !path) return;
+        if (setBrowsingFolder(loc.space, loc.on, path)) this.refresh(cx);
+      } catch (error) {
+        if (this.folderPicker === request) notify({ title: error.message || "Cannot choose a folder", level: "error" });
+      } finally {
+        if (this.folderPicker === request) { this.folderPicker = null; cx.notify(); }
+      }
+    });
+    cx.notify();
+  }
+  useDefaultFolder(cx) {
+    const loc = this.location();
+    this.folderPicker = null;
+    setBrowsingFolder(loc.space, loc.on, null);
+    this.refresh(cx); cx.notify();
   }
   initPanel(cx) {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Map(); this.watches = new Map(); this.marks = {};
@@ -402,7 +429,7 @@ export class FilesPanel extends View {
       this.fitTimer = null;
       const tree = layout();
       if (!findNode(tree, fit.node)) return;
-      const desired = fittedWidth(panelWidth(this.rowModel || [], this.panelTitle(), metrics()), fit, tree, viewport(), zoom());
+      const desired = fittedWidth(panelWidth(this.rowModel || [], this.panelTitle(), metrics(), this.location().browsing ? 4 : 3), fit, tree, viewport(), zoom());
       if (!shouldFit(desired, this.panelSize.width / zoom(), token.cause)) return;
       this.lastRequestedWidth = desired; this.resizePending = token;
       run("layout.resize", { id: fit.node, px: desired });
@@ -456,10 +483,21 @@ export class FilesPanel extends View {
           .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
           .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().id("files-title").flex_1().min_w(0).truncate().font_semibold().tooltip(loc.cwd || this.root || "").child(this.panelTitle()))
+        .child(h_flex().id("change-folder").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button")
+          .accessibility_label("Change folder").tooltip("Change folder… (browse only)").text_color(loc.space && loc.on === null && !this.folderPicker ? t.muted : t.dim)
+          .disabled(!loc.space || loc.on !== null || Boolean(this.folderPicker))
+          .when(Boolean(loc.space) && loc.on === null && !this.folderPicker, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)))
+          .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+          .on_click((_event, cx) => { cx.stop_propagation(); this.changeFolder(cx); }).child(svg("mods/files-plus/folder.svg").size(14)))
+        .when(Boolean(loc.browsing), el => el.child(h_flex().id("use-terminal-folder").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button")
+          .accessibility_label(entry ? "Use workspace folders" : "Use terminal folder").tooltip(entry ? "Use workspace folders" : "Use terminal folder").text_color(t.muted)
+          .hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
+          .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+          .on_click((_event, cx) => { cx.stop_propagation(); this.useDefaultFolder(cx); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(h_flex().id("add-folder").size(24).items_center().justify_center().rounded(6).cursor_default().text_color(add ? t.muted : t.dim).role("button").accessibility_label("Add folder").tooltip("Add folder…").disabled(!add)
           .when(add, el => el.hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground)).on_mouse_down("left", (_event, cx) => cx.stop_propagation())).on_click((_event, cx) => {
             if (!add) return;
-            const root = entry?.folders[0]?.path || this.root;
+            const root = entry?.folders[0]?.path || loc.terminalCwd || this.root;
             const target = this.target(root, "root", root);
             openOverlay({ mod: "files-plus", kind: "dialog", modal: true, ...dialogLayout("add-root", target), props: { role: "dialog", action: "add-root", target } });
             cx.stop_propagation();
@@ -478,7 +516,7 @@ export class FilesPanel extends View {
           .when(!this.fileError, el => el.loop("opacity", { from: 0.5, to: 1, period: 1200, easing: "ease-out" })).child(this.fileError || "Loading file…"))));
   }
   close() {
-    this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
+    this.folderPicker = null; this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
     this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
     this.search?.close();
   }

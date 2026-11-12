@@ -77,6 +77,14 @@ Drag a file, folder or workspace root at least 6px to show the floating `@` pill
 
 When Files has keyboard focus, target capture inspects the active tab and picks in priority order: the focused terminal pane, then a running Agent pane, then its first terminal pane. Focus in another space never falls back. Herdr exposes no split-pane rectangles, so the drop destination is the captured terminal of the shown tab throughout the workspace area. The frameless floating overlay stays inside the app window.
 
+### Independent browsing folder
+
+The header folder button opens **Change folder…**, a local system picker. The chosen path becomes a per-space browsing override in `shared("files-plus.browsing")`, without changing terminal cwd, tabs, the space name, workspace mappings or workspace files. Tree browsing, search and file opening use that path. **Use terminal folder** clears the override; for a workspace the same control is labeled **Use workspace folders** and restores all declared roots. Overrides survive reloads and stay scoped to the original space and machine.
+
+Cancel leaves the current folder unchanged. Repeated clicks do not open duplicate pickers; closing the panel invalidates a pending result. A picker captures its original space, so changing focus cannot apply the path to a different space. Remote folder picking is disabled because the system picker selects local paths. Missing or unreadable chosen folders use the existing tree error state.
+
+The **+** button remains a workspace operation, not a browsing control. It retains the original terminal/workspace root when adding another folder, even while a browsing override is active. This intentionally does not implement the issue's optional single-root replacement, which would mutate workspace configuration.
+
 ### Multi-root workspaces and persistent + folder addition
 
 Add folder works for local POSIX spaces, including ordinary single-folder spaces and preview headers. Captures the original space and displayed folder before opening the system picker. Cancel and duplicate selections leave data unchanged. Adding a different folder converts an ordinary space to an unsaved workspace, preserving its name, tabs and terminals.
@@ -241,3 +249,11 @@ Build and exercise these observable behaviors using disposable folders:
 14. Search finds unopened nested files, including beyond the tree entry/depth limits; identical relative paths across roots stay distinguishable. Literal terms, hidden/ignored policy, empty/error states and honest result truncation agree with the contract above. Delayed queries and changed roots cannot open stale targets. Native typing, arrows, Enter, result clicks, Clear and Escape work, and the original expanded tree survives. `node files-plus/tests/check-search.mjs` checks a populated native search description without starting a window; `native-search.mjs` prepares the separate runtime acceptance report.
 
 The committed package also includes automated and isolated native test drivers. Their commands are in [README.md](README.md); they are development tools, not runtime dependencies. The 2026-11-06 search addition passed automated tests, mod checks and five native driver groups. The current preview shows the Files Plus tree beside a TypeScript file in Preview Plus. Real Files Plus handoffs to JSON/CSV/TSV previews also passed. Physical keyboard/pointer dispatch and additional platform/theme combinations remain unverified; see the [implementation plan](../docs/plans/files-plus.md#filename-and-path-search-2026-11-06).
+
+### Independent browsing verification (2026-11-12)
+
+On macOS with Herdr 0.1.15, all 88 Files Plus Node tests passed, including seven browsing regressions; the five repository licensing tests and `git diff --check` also passed. `herdr-app check files-plus/mods/files-plus` passed outside the execution sandbox after the sandbox blocked LaunchServices. `native-browsing.mjs` passed single-folder and multi-root override/reset checks in a disposable app home, including unchanged workspace mappings.
+
+Physical system-picker interaction, Windows/Linux rendering and remote behavior in a real remote session were not exercised. Native screenshots were captured and inspected, but this session's frame capture remained on a prior panel state, so visual acceptance of the override/reset controls is still pending. The existing preview image is intentionally unchanged; do not treat model-state checks as visual acceptance. No files were installed in the normal app home.
+
+Installation follow-up: the three changed runtime files were installed in the maintainer’s normal Herdr home after backing up the two existing files. The installed mod passed `herdr-app check` (a first checker-launch timeout succeeded on retry). This does not establish physical picker acceptance.

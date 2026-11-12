@@ -62,3 +62,9 @@ The [recipe](RECIPE.md) defines behavior, dependencies and limits. The [search r
 ## License
 
 Original project contributions are licensed under [MIT](LICENSE). Third-party material retains its own licenses; see the [runtime notices](mods/files-plus/THIRD_PARTY.md). Keep the runtime `LICENSE`, `THIRD_PARTY.md` and any `licenses/` directory with installations and redistributions.
+
+### Browse without changing the workspace
+
+Use the header folder button (**Change folder…**) to browse a local folder without moving the terminal or adding workspace roots. The adjacent return button restores the terminal folder, or the original workspace roots. The **+** button still adds a workspace root. The browsing choice is remembered per space; remote system folder picking is not supported.
+
+For isolated native browsing checks, run `node files-plus/tests/native-browsing.mjs <session.json>` after starting the disposable session described above. This exercises the production override/reset behavior, not physical interaction with the system picker.

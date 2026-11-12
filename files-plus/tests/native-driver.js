@@ -2,6 +2,7 @@
 import FilesPlus from "./panel.js";
 import { div } from "gpui-kit";
 import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setShared, openOverlay, focused, layout, settings, theme, closeOverlay, appHome } from "herdr";
+import { setBrowsingFolder } from "./browsing.js";
 import { location } from "./workspace.js";
 import { parseConfig, setWorkspace } from "./roots.js";
 import { menuItems, menuLayout } from "./actions.js";
@@ -80,6 +81,8 @@ export default class NativeDriver extends FilesPlus {
             if (request.motion) { globalThis.window.activate_window(); globalThis.__fpMotion = []; }
             this.toggle(request.path, cx);
           }
+          else if (request.type === "browse-folder") { setBrowsingFolder(this.spaceId, this.on, request.path); this.refresh(cx); }
+          else if (request.type === "browse-reset") this.useDefaultFolder(cx);
           else if (request.type === "refresh") this.refresh(cx);
           else if (request.type === "activate") { globalThis.window.activate_window(); globalThis.window.refresh(); cx.notify(); }
           else if (request.type === "frame") globalThis.window.refresh();
