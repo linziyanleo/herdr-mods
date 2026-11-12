@@ -42,7 +42,7 @@ The script copies the runtime, adds `cmd-shift-x` only when unbound, and places 
 
 To install manually:
 
-1. Copy `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py`, `jobs.py` and `star.svg` into `<app-home>/mods/mods-plus/`.
+1. Copy `main.js`, `mod.json`, `helper.py`, `catalog.py`, `review.py`, `jobs.py`, `star.svg`, `LICENSE` and `THIRD_PARTY.md` into `<app-home>/mods/mods-plus/`.
 2. Add `"cmd-shift-x": "mod.open:mods-plus"` to the `global` section of `keys.json` only if that key is available. This is `Cmd+Shift+X` on macOS.
 3. In a personal layout, set `sidebar-footer` content to `{"mod":"mods-plus","props":{"entry":true,"footer":true}}` and its height to 97px. The footer contains Plugins, Settings and Add machine. Remove an older Plugins header entry if present.
 4. Run `herdr-app check <app-home>/mods/mods-plus` and inspect `herdr-app status`.
@@ -65,3 +65,7 @@ The jobs suite includes a real 31-second operation. UI event tests require Node.
 For native checks, `node mods-plus/tests/native-fixture.mjs` prepares a disposable home and prints its session file. It does not start Herdr or herdr-core. Launch that home with the printed environment, then run `node mods-plus/tests/native-verify.mjs <session.json>`. The driver uses the production view and helper with a local fixture repository. It records results and screenshots. Keep it out of the normal app home.
 
 See the [recipe](RECIPE.md) for implementation contracts and acceptance criteria. The [verification record](../docs/plans/mods-plus.md#review-and-direct-import-2026-11-06) covers the combined review, import and background-task implementation. Physical input and additional sizing/theme combinations remain unverified for this release.
+
+## License
+
+Original project contributions are licensed under [MIT](LICENSE). Third-party material retains its own licenses; see the [runtime notices](mods/mods-plus/THIRD_PARTY.md). Keep the runtime `LICENSE`, `THIRD_PARTY.md` and any `licenses/` directory with installations and redistributions.

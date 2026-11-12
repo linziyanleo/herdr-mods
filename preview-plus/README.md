@@ -13,7 +13,7 @@ See the [recipe](RECIPE.md) for behavior, dependencies and verification. The [im
 Verified with Herdr 0.1.13 on macOS. Media uses built-in Foundation, AppKit and PDFKit through `osascript`. Linux images require `python3`; Windows images require Python 3 as `python`. Mermaid uses a bundled renderer and needs no Node.js or browser at runtime. No service credentials are required. The [recipe](RECIPE.md#built-from) lists the required Herdr APIs.
 
 1. Check `${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/preview-plus` for a name conflict. For an update, back up the installed files and compare local changes before replacing them. Use another name for an unrelated mod.
-2. Copy `mods/preview-plus/`, including `mermaid.bundle.js`, `THIRD_PARTY.md` and its `licenses/`, into the app home's `mods/`. Do not copy `tests/`, `node_modules/`, generated type files or `.cache/`. Keep the package's existing `licenses/` with any redistribution too.
+2. Copy `mods/preview-plus/`, including `mermaid.bundle.js`, `LICENSE`, `THIRD_PARTY.md` and its `licenses/`, into the app home's `mods/`. Do not copy `tests/`, `node_modules/`, generated type files or `.cache/`. Keep the package's existing `licenses/` with any redistribution too.
 3. Run `herdr-app check <app-home>/mods/preview-plus`.
 4. Use one of the three setups below. Clone a shipped layout with `herdr-app do layout.clone '{"name":"main","as":"my-preview"}'` before editing its structure. Preserve the surrounding Files/Changes block ids, sizes, visibility and shortcuts.
 
@@ -115,3 +115,7 @@ npm run build -- --check
 ```
 
 The build applies asserted QuickJS compatibility patches before bundling. `check-mermaid.mjs` executes five diagram families during initialization in a disposable `herdr-app check` root, without starting a core or a visible app session. It proves execution, not SVG painting. See [third-party notices](mods/preview-plus/THIRD_PARTY.md) for source, licenses and changes.
+
+## License
+
+Original project contributions are licensed under [MIT](LICENSE). Third-party material retains its own licenses; see the [runtime notices](mods/preview-plus/THIRD_PARTY.md). Keep the runtime `LICENSE`, `THIRD_PARTY.md` and any `licenses/` directory with installations and redistributions.

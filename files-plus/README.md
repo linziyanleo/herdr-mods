@@ -25,7 +25,7 @@ Up/down selects a result. Enter or a click opens it in the chosen location. Clea
 Use `${HERDR_APP_HOME:-$HOME/.config/herdr-app}` as the app home.
 
 1. Check for an existing `mods/files-plus/`. For an update, back up the installed files and compare local changes before replacing them. Use another name for an unrelated mod.
-2. Copy the runtime files from `mods/files-plus/`. Leave tests, generated type files and caches out. Keep the package's licenses with any redistribution.
+2. Copy the runtime directory `mods/files-plus/`, including `LICENSE`, `THIRD_PARTY.md` and `licenses/`. Leave tests, generated type files and caches out.
 3. Follow the [layout installation steps](RECIPE.md#installation) to replace the existing Files block without adding a second panel. Clone bundled layouts before editing them, and retain the `files` block id so the tab bar button still works.
 4. Run `herdr-app check <app-home>/mods/files-plus` and inspect `herdr-app status`.
 
@@ -58,3 +58,7 @@ For a render comparison, run `node --experimental-vm-modules files-plus/tests/be
 Reuse the disposable app home and core for follow-up checks. Close the test window with `HERDR_APP_HOME=<session-app-home> herdr-app do app.quit`. Keep tests out of the normal app home. The optional `--distinct-bundle` flag copies the signed app unchanged for separately targeted native input.
 
 The [recipe](RECIPE.md) defines behavior, dependencies and limits. The [search record](../docs/plans/files-plus.md#filename-and-path-search-2026-11-06) and [all-file editor record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06) contain the completed automated and isolated native checks. Physical input and additional platform/theme combinations remain unverified for these changes.
+
+## License
+
+Original project contributions are licensed under [MIT](LICENSE). Third-party material retains its own licenses; see the [runtime notices](mods/files-plus/THIRD_PARTY.md). Keep the runtime `LICENSE`, `THIRD_PARTY.md` and any `licenses/` directory with installations and redistributions.

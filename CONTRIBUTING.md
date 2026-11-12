@@ -84,7 +84,9 @@ Address review comments and update verification results when follow-up changes a
 
 ## Licensing and attribution
 
-Contribute only code and assets you have permission to share. For reused material, record the source and license in the mod's `RECIPE.md`. Preserve the original license files, copyright notices, and required attribution alongside that material.
+Original contributions are made under the repository's [MIT license](LICENSE). Contribute only code and assets you have permission to share. Third-party and adapted portions keep their upstream licenses; do not mark mixed-license files or bundles as MIT-only. See [licensing scope and third-party notices](THIRD_PARTY.md). For reused material, record the source and license in the mod's `RECIPE.md`. Preserve the original license files, copyright notices, and required attribution alongside that material.
+
+Include `LICENSE`, `THIRD_PARTY.md` and all required `licenses/` files in each runtime directory so notices survive standalone installation. Keep duplicated license files synchronized and run `node --test tests/licenses.test.mjs` after licensing or packaging changes. For bundled components, identify exact versions, local modifications and source/build locations; distinguish verified reproducibility from unresolved upstream provenance.
 
 Explain new third-party dependencies and their licenses in the PR. Repository license decisions require maintainer approval, as described in [the repository rules](AGENTS.md#open-source-contributions).
 

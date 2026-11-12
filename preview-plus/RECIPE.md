@@ -92,7 +92,7 @@ preview-plus/
   mods/preview-plus/
     main.js, tree.js, paths.js, markdown.js, markdown-structure.js, markdown-view.js,
     structured.js, structured-view.js, mermaid.js, mermaid.bundle.js,
-    media.js, appearance.js, mod.json, icons/, licenses/, THIRD_PARTY.md
+    media.js, appearance.js, mod.json, icons/, LICENSE, licenses/, THIRD_PARTY.md
   build/, package.json, package-lock.json
   tests/
 ```
@@ -150,9 +150,9 @@ The cache contains copies of viewed files. It is local, disposable and excluded 
 
 ### Attribution
 
-Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Earlier releases used a Radix palette; its [MIT notice](licenses/Radix-MIT.txt) is retained. The current mod reads Herdr's theme instead. [Git Graph](https://github.com/rabeeh-ta/herdr-git-graph) is a reference for the integration pattern; no third-party source is imported. Test landscapes, diagrams and PDFs are original generated fixtures. No repository license is selected or changed.
+Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Earlier releases used a Radix palette; its [MIT notice](licenses/Radix-MIT.txt) is retained. The current mod reads Herdr's theme instead. [Git Graph](https://github.com/rabeeh-ta/herdr-git-graph) is a reference for the integration pattern; no third-party source is imported. Test landscapes, diagrams and PDFs are original generated fixtures. Original project contributions are licensed under [MIT](LICENSE); third-party portions retain their upstream terms, and the bundled elkjs remains EPL-2.0.
 
-The Mermaid build/SVG adapter adapts [jjongkwann/herdr-files-plus](https://github.com/jjongkwann/herdr-files-plus) under MIT. beautiful-mermaid 1.1.3 (MIT), elkjs 0.11.1 (EPL-2.0) and entities 7.0.1 (BSD-2-Clause) are bundled. JSON Pointer escaping and the pure parser approach reference/adapt [gsydler/cria-file-preview](https://github.com/gsydler/cria-file-preview) under Apache-2.0. Full notices, exact source references, modifications and the EPL source reconstruction procedure are in [THIRD_PARTY.md](mods/preview-plus/THIRD_PARTY.md) and the runtime's `licenses/` directory. esbuild 0.28.2 is build-only.
+The Mermaid build/SVG adapter adapts [jjongkwann/herdr-files-plus](https://github.com/jjongkwann/herdr-files-plus) under MIT. beautiful-mermaid 1.1.3 (MIT), elkjs 0.11.1 (EPL-2.0) and entities 7.0.1 (BSD-2-Clause) are bundled. JSON Pointer escaping and the pure parser approach reference/adapt [gsydler/cria-file-preview](https://github.com/gsydler/cria-file-preview) under Apache-2.0. Full notices, exact source references, local modifications, the JavaScript rebuild procedure and the unresolved upstream ELK source revision are documented in [THIRD_PARTY.md](mods/preview-plus/THIRD_PARTY.md) and the runtime's `licenses/` directory. esbuild 0.28.2 is build-only.
 
 ## Watch out
 

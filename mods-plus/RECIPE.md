@@ -73,6 +73,10 @@ Direct batches reuse per-package review tokens, backups, native validation, thre
 
 The agent-tab activation prompt includes the repository, revision, installed paths, app home, active layout, recipe and `herdr-app check` instructions.
 
+## License
+
+Original Mods Plus code and assets are licensed under [MIT](LICENSE). Herdr/GPUI host components retain their own terms. Include the runtime `LICENSE` and [THIRD_PARTY.md](mods/mods-plus/THIRD_PARTY.md) when installing or redistributing the mod.
+
 ## Built from
 
 - GPUI elements. `View`, `div`, `image`, `svg` from `gpui-kit`; `h_flex`, `v_flex`, `Input`, `InputState`, `Switch`, `TextView` from `gpui-base`.

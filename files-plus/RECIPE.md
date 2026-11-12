@@ -100,6 +100,7 @@ files-plus/
   preview.png
   licenses/
   mods/files-plus/
+    LICENSE, THIRD_PARTY.md, licenses/
     main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
     roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js, search.js
     mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
@@ -208,7 +209,7 @@ With Inside right panel selected, both the prop and installed receiver, every fi
 
 ### Attribution
 
-The Files tree, editor and original SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). The settings SVG comes from Herdr 0.1.12's workspace-chrome Lucide icon. Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). This retains third-party terms and does not choose a repository license.
+The Files tree, editor and original SVGs derive from [Herdr files 0.1.9](https://github.com/herdrdev/herdr-app) (Apache-2.0). The settings SVG comes from Herdr 0.1.12's workspace-chrome Lucide icon. Preserve [the Herdr license](licenses/Herdr-APACHE-2.0.txt) and [Lucide/Feather notices](licenses/Lucide.txt). Original project contributions are licensed under [MIT](LICENSE); the upstream portions retain their own terms. The runtime [THIRD_PARTY.md](mods/files-plus/THIRD_PARTY.md), `LICENSE` and `licenses/` must accompany installed and redistributed copies.
 
 Filename search takes interaction concepts from [cybertron288's filetree](https://github.com/cybertron288/herdr-mods/tree/main/filetree) and [Mantiq's Telescope](https://github.com/Mantiq-com/herdr-telescope): search alongside browsing and keyboard selection of file results. The implementation uses this package's existing listing and opening contracts. No source, assets or dependencies from those projects are copied.
 

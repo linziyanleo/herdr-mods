@@ -12,6 +12,10 @@ Each mod has its own directory with documentation, a native screenshot and runti
 | [Preview Plus](preview-plus/RECIPE.md) | Edit local text files, read Markdown with contents and Mermaid diagrams, browse JSON and CSV/TSV, and preview images and PDFs. |
 | [Mods Plus](mods-plus/RECIPE.md) | Browse catalogs or import GitHub packages, review installation and update changes, and enable or remove mods and layouts. |
 
+## License
+
+Original project code, documentation and assets are available under [MIT](LICENSE). Third-party code, adaptations and assets retain their own licenses, including Apache-2.0, EPL-2.0, BSD-2-Clause and ISC. Preview Plus's bundled elkjs is **not** relicensed under MIT. See [licensing scope and third-party notices](THIRD_PARTY.md).
+
 ## Development
 
 - [Development guide](CONTRIBUTING.md) covers directory structure, local API references and verification.

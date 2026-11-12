@@ -3,8 +3,10 @@
 import { build } from "esbuild";
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { rendererBanner } from "./notices.mjs";
 
 // elkjs assumes a browser, Node or worker global; the Herdr mod runtime is none of these.
+// These modifications to elkjs are licensed under EPL-2.0; see the runtime THIRD_PARTY.md.
 // Each patch must apply exactly once, so an elkjs update that moves the code fails the build.
 const ELK_PATCHES = [
   // Built-in prototypes are frozen, so assigning toString on elkjs's base prototype throws.
@@ -45,7 +47,7 @@ const output = await build({
   // Escape upstream multiline strings instead of introducing significant
   // trailing spaces in generated source. This does not alter string contents.
   supported: { "template-literal": false },
-  banner: { js: `// beautiful-mermaid ${pkg.version} (MIT) with elkjs (EPL-2.0) and entities (BSD-2-Clause), bundled. Rebuild: node build/build.mjs` },
+  banner: { js: rendererBanner(pkg.version) },
 });
 const file = new URL("../mods/preview-plus/mermaid.bundle.js", import.meta.url).pathname;
 const source = output.outputFiles[0].text;
