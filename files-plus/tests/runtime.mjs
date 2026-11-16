@@ -14,6 +14,7 @@ export async function runtime(t) {
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dir, "home"));
   const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true, ui_font_family: "Geist", ui_font_size: 13, font_family: "JetBrains Mono", font_size: 14 }, layout: {}, rebuiltRows: 0, notifications: 0 };
+  let activeTask;
   state.theme = { background: "#111113", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#363a3f", input: "#43484e", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#b0b4ba", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
   state.semantic = { colors: { border: "#ffffff" }, appearance: "dark", is_dark: true,
     spacing: { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 }, radius: { none: 0, sm: 3, md: 6, lg: 8, xl: 12, full: 9999 },
@@ -23,7 +24,7 @@ export async function runtime(t) {
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
   const host = {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
-    spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
+    spaces: () => state.spaces, panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), focused: () => state.focus,
     machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, theme: () => state.theme, layout: () => state.layout,
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
@@ -43,7 +44,13 @@ export async function runtime(t) {
       try { const result = await execute(command, [...args], { cwd: options.cwd, maxBuffer: 8 * 1024 * 1024 }); return { code: 0, ...result }; }
       catch (error) { if (typeof error.code !== "number") throw error; return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
     },
-    watchFolder: async () => { throw new Error("Native watchers are exercised in Herdr"); },
+    checking: () => false,
+    nextCommand: () => { activeTask.persistent = true; return new Promise(() => {}); },
+    watchFolder: dir => {
+      if (state.hooks.watch) { if (activeTask) activeTask.persistent = true; return state.hooks.watch(dir); }
+      const pending = Promise.reject(new Error("Native watchers are exercised in Herdr")); pending.cancel = () => {};
+      return pending;
+    },
     run: (command, args) => {
       state.calls.push({ command, args });
       if (command === "pane.focus") { const p = state.panes.find(p => p.terminal === args.terminal); state.focus = p ? { ...state.focus, ...p } : null; }
@@ -103,13 +110,13 @@ export async function runtime(t) {
       };
       view.init?.(props, state.cx); return entity;
     },
-    focus_handle: () => ({ focus() {} }), read_from_clipboard: () => state.clipboard, write_to_clipboard: text => { state.clipboard = text; },
-    spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; },
+    focus_handle: () => { const handle = { focus() { state.keyboard = handle; }, is_focused() { return state.keyboard === handle; } }; return handle; }, read_from_clipboard: () => state.clipboard, write_to_clipboard: text => { state.clipboard = text; },
+    spawn: fn => { const task = Promise.resolve().then(() => { activeTask = task; const result = fn(state.cx); activeTask = null; return result; }); state.tasks.push(task); return task; },
     timer: { every: (ms, fn) => state.timers.push({ ms, fn, repeat: true }), after: (ms, fn) => state.timers.push({ ms, fn }) }
   };
   state.drain = async () => {
     while (state.tasks.length || state.timers.some(timer => !timer.repeat && timer.ms === 0)) {
-      while (state.tasks.length) await Promise.all(state.tasks.splice(0));
+      while (state.tasks.length) { const tasks = state.tasks.splice(0); await new Promise(resolve => setImmediate(resolve)); await Promise.all(tasks.filter(task => !task.persistent)); }
       const ready = state.timers.filter(timer => !timer.repeat && timer.ms === 0);
       state.timers = state.timers.filter(timer => !ready.includes(timer));
       for (const timer of ready) timer.fn(state.cx);

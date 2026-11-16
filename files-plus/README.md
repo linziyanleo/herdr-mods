@@ -18,11 +18,31 @@ Type in the field below the header to find files in unopened directories. All wh
 
 Search includes hidden and Git-ignored files, skips `.git` and does not follow directory symlinks. It shows up to 200 matches and reports when more exist. Multiple roots show their names beside results. Unreadable folders produce a partial-search message; large or remote roots can take longer to scan.
 
-Up/down selects a result. Enter or a click opens it in the chosen location. Clear or Escape restores the tree with its expanded folders intact.
+Up/down selects a result. A click uses the chosen opening location. Enter uses the temporary Preview slot when paired; otherwise it uses the chosen location. Clear or Escape restores the tree with its expanded folders intact.
+
+## Keyboard workflow
+
+Use the [Files / Preview / terminal example](../preview-plus/examples/files-preview-agent.json) with both packages. It contains no personal paths or shortcuts; copying or selecting it is an explicit setup action. The entry command `files-plus.search` focuses search. Bind it only to a free key in your own cloned layout/setup if desired.
+
+| Focus | Key or command | Result |
+| --- | --- | --- |
+| Search | Up/down, Enter | Select a result and open a temporary preview |
+| Tree | Up/down, Left/right, Enter | Select, collapse/expand, open a file |
+| Files | F6 / `files-plus.preview` | Preview the selected item |
+| Files | F7 / `files-plus.add-to-agent` | Explicitly paste `@` into the captured terminal |
+| Preview | F7 / `preview-plus.pin` | Pin/unpin the paired slot; edits pin automatically |
+| Preview | F6 / `preview-plus.back` | Back through history, then return to Files |
+| Either | F8 / `<mod>.agent` | Focus the captured terminal |
+
+These are local focus handlers, not global bindings. Modified function keys remain available to existing bindings. Files keeps its query, selection and expanded folders on return. A pinned paired file blocks replacement; save or confirm discard before unpinning a draft. Unpin keeps the current file until the next explicit selection. Tab/Pane previews remain fixed and existing same-machine files are reused.
+
+`@` insertion quotes paths containing whitespace or quotes, preserves machine identity, restores the previous text clipboard if it still owns it, and never sends Enter. Paths containing control characters are refused. Native path dragging does not replace this action.
+
+The paste target must still be the captured effective terminal (`shown || terminal`) after focus has yielded and immediately before paste. A shown replacement fails closed instead of receiving the reference.
 
 ## Install
 
-Use `${HERDR_APP_HOME:-$HOME/.config/herdr-app}` as the app home.
+Requires Herdr **0.1.16 or newer** for cancellable watches and native focus APIs. Use `${HERDR_APP_HOME:-$HOME/.config/herdr-app}` as the app home.
 
 1. Check for an existing `mods/files-plus/`. For an update, back up the installed files and compare local changes before replacing them. Use another name for an unrelated mod.
 2. Copy the runtime directory `mods/files-plus/`, including `LICENSE`, `THIRD_PARTY.md` and `licenses/`. Leave tests, generated type files and caches out.
@@ -58,6 +78,8 @@ For a render comparison, run `node --experimental-vm-modules files-plus/tests/be
 Reuse the disposable app home and core for follow-up checks. Close the test window with `HERDR_APP_HOME=<session-app-home> herdr-app do app.quit`. Keep tests out of the normal app home. The optional `--distinct-bundle` flag copies the signed app unchanged for separately targeted native input.
 
 The [recipe](RECIPE.md) defines behavior, dependencies and limits. The [search record](../docs/plans/files-plus.md#filename-and-path-search-2026-11-06) and [all-file editor record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06) contain the completed automated and isolated native checks. Physical input and additional platform/theme combinations remain unverified for these changes.
+
+The [interaction/performance implementation record](../docs/plans/interaction-performance-implementation.md) records the 0.1.16 lifecycle, keyboard and Plugins checks separately, including remaining physical acceptance gaps.
 
 ## License
 

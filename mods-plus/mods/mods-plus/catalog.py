@@ -8,7 +8,7 @@ import subprocess
 import struct
 import tempfile
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 
 
@@ -230,7 +230,7 @@ def available_packages(manager):
     return packages
 
 
-def media(manager, ids):
+def media(manager, ids, progress=None):
     wanted = set(ids)
     # Browsing has already loaded the catalog; media must not refresh four feeds.
     previous = manager.cache_only
@@ -239,32 +239,44 @@ def media(manager, ids):
         packages = [p for p in available_packages(manager) if p["id"] in wanted]
     finally:
         manager.cache_only = previous
-    def fetch(pkg):
-        result = {"id": pkg["id"]}
+    resources = {}
+    results = {pkg["id"]: {"id": pkg["id"], **{field + "_pending": True for field in ("preview", "avatar") if pkg[field + "_url"]}} for pkg in packages}
+    for pkg in packages:
         for field in ("preview", "avatar"):
-            url = pkg[field + "_url"]
-            if not url:
-                continue
-            suffix = os.path.splitext(urllib.parse.urlparse(url).path)[1] or ".png"
-            relative = f"data/mods-plus/cache/media/{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
-            path = os.path.join(manager.root, relative)
-            try:
-                if not os.path.isfile(path):
-                    data = download(url, timeout=6)
-                    os.makedirs(os.path.dirname(path), exist_ok=True)
-                    with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), delete=False) as out:
-                        out.write(data)
-                    os.replace(out.name, path)
-                result[field + "_path"] = relative
-                if field == "preview":
-                    size = image_size(path)
-                    if size:
-                        result["preview_width"], result["preview_height"] = size
-            except Exception:
-                pass
-        return result
+            if pkg[field + "_url"]:
+                resources.setdefault(pkg[field + "_url"], []).append((pkg["id"], field))
+
+    def fetch(url):
+        suffix = os.path.splitext(urllib.parse.urlparse(url).path)[1] or ".png"
+        relative = f"data/mods-plus/cache/media/{hashlib.sha256(url.encode()).hexdigest()}{suffix}"
+        path = os.path.join(manager.root, relative)
+        try:
+            if not os.path.isfile(path):
+                data = download(url, timeout=6)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), delete=False) as out:
+                    out.write(data)
+                os.replace(out.name, path)
+            return url, {"path": relative, "size": image_size(path)}
+        except Exception as error:
+            return url, {"error": str(error)}
+
     with ThreadPoolExecutor(max_workers=4) as pool:
-        return list(pool.map(fetch, packages))
+        pending = [pool.submit(fetch, url) for url in resources]
+        for future in as_completed(pending):
+            url, asset = future.result()
+            for pkg_id, field in resources[url]:
+                result = results[pkg_id]
+                result.pop(field + "_pending")
+                if "error" in asset:
+                    result[field + "_error"] = asset["error"]
+                else:
+                    result[field + "_path"] = asset["path"]
+                    if field == "preview" and asset["size"]:
+                        result["preview_width"], result["preview_height"] = asset["size"]
+            if progress:
+                progress([dict(item) for item in results.values()])
+    return list(results.values())
 
 
 def details(manager, pkg_id):

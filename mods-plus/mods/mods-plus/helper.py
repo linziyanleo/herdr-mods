@@ -292,8 +292,10 @@ class PackageManager:
             return data
         except Exception as e:
             if filename.startswith("official-"):
+                self.stale = True
                 self.catalog_errors.append(f"Using cached catalog: {e}")
             if os.path.isfile(path):
+                self.stale = True
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
             raise e
@@ -1281,6 +1283,7 @@ def main():
     parser = argparse.ArgumentParser(description="Mods Plus local package manager helper.")
     parser.add_argument("--app-home", default=HERDR_APP, help="Path to Herdr app configuration directory")
     parser.add_argument("--json", action="store_true", help="Format output as JSON")
+    parser.add_argument("--progress-file", help=argparse.SUPPRESS)
 
     sub = parser.add_subparsers(dest="command")
 
@@ -1373,7 +1376,11 @@ def main():
             pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter)
             result = {"packages": pkgs, "count": len(pkgs), "warnings": getattr(mgr, "catalog_errors", []), "stale": mgr.stale}
         elif args.command == "media":
-            result = {"media": gallery.media(mgr, json.loads(args.ids))}
+            def progress(items):
+                with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(args.progress_file), delete=False) as out:
+                    json.dump({"media": items}, out)
+                os.replace(out.name, args.progress_file)
+            result = {"media": gallery.media(mgr, json.loads(args.ids), progress if args.progress_file else None)}
         elif args.command == "details":
             result = mgr.get_details(args.id)
         elif args.command == "discover":

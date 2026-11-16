@@ -14,6 +14,10 @@ test("agent references use the captured cwd only within the owning root", async 
   target.active.cwd = r.dir;
   target.path = path.join(r.dir, "quote\"name.ts");
   assert.equal(a.reference(target), '@"quote\\"name.ts" ');
+  target.path = path.join(r.dir, "中文 'draft'.txt");
+  assert.equal(a.reference(target), '@"中文 \'draft\'.txt" ');
+  target.path = path.join(r.dir, "bad\nname.txt");
+  assert.throws(() => a.reference(target), /control characters/);
   r.focus = { space: "other", pane: "p2", terminal: "t2" };
   assert.equal(a.captureTarget("s1", target.path, "file", r.dir, null).active, null);
 });
@@ -35,8 +39,32 @@ test("agent insertion restores clipboard text and never submits Enter", async t 
   assert.equal(r.pasted, "@README.md ");
   assert.equal(r.clipboard, "original clipboard");
   assert.deepEqual(r.calls.map(c => c.command), ["pane.focus", "terminal.paste"]);
+  let ticks = 0;
+  r.cx.sleep = async () => { if (++ticks === 2) r.clipboard = "new clipboard owner"; };
+  await a.insertReference(target, r.cx); assert.equal(r.clipboard, "new clipboard owner");
+  r.spaces[0].machine = "remote"; target.on = "remote";
+  await assert.rejects(a.insertReference(target, r.cx), /different machines/);
+  assert.equal(r.clipboard, "new clipboard owner");
+  r.spaces[0].machine = null; target.on = null;
   r.panes = [];
   await assert.rejects(a.insertReference(target, r.cx), /no longer available/);
+});
+
+test("agent insertion refuses a shown replacement before focus, after yielding and immediately before paste", async t => {
+  for (const when of ["before", "yield", "clipboard"]) await t.test(when, async t => {
+    const r = await runtime(t), a = await r.load("actions.js"), target = r.target("README.md");
+    const replace = () => { r.panes[0].shown = "t2"; r.focus.shown = "t2"; };
+    if (when === "before") replace();
+    if (when === "yield") r.cx.sleep = async () => replace();
+    if (when === "clipboard") {
+      const write = r.cx.write_to_clipboard;
+      r.cx.write_to_clipboard = text => { write(text); if (text.startsWith("@")) replace(); };
+    }
+    await assert.rejects(a.insertReference(target, r.cx), /terminal/);
+    assert.equal(r.calls.some(call => call.command === "terminal.paste"), false);
+    assert.equal(r.calls.some(call => /send|enter/.test(call.command)), false);
+    assert.equal(r.clipboard, "original clipboard");
+  });
 });
 
 test("copy/paste chooses available names and preserves original bytes", async t => {

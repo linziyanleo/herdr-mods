@@ -66,10 +66,12 @@ test("standalone tree opens Markdown, source, links, history, and ordinary text 
 test("paired mode follows per-space shared targets and returns to the configured tree", async t => {
   const state = await runtime(t); await fixtures(state.dir);
   state.props = { previewStack: "files" };
+  const panel = await state.start(); assert.equal(panel.owner.mode, "paired"); assert.equal(panel.pinned(), false);
   state.shared["preview-plus.target"] = { s1: { file: path.join(state.dir, "source.txt"), root: state.dir, on: null } };
-  const panel = await state.start(); assert.equal(panel.owner.mode, "paired");
+  state.render(); await state.settle();
   panel.back(state.cx);
-  assert.deepEqual(JSON.parse(JSON.stringify(state.calls.at(-1))), { command: "layout.select", args: { stack: "files", child: "files-plus-tree" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(state.calls.at(-2))), { command: "layout.select", args: { stack: "files", child: "files-plus-tree" } });
+  assert.equal(state.calls.at(-1).command, "files-plus.return");
   state.shared["preview-plus.target"].s1.file = path.join(state.dir, "notes/next.markdown");
   state.render(); await state.settle(); assert.match(panel.text, /Linked note/);
   state.focus = { ...state.focus, space: "s2" }; state.spaces = [{ id: "s2", active: true }];
@@ -164,6 +166,136 @@ test("native physical-path events refresh a source opened through a symlink alia
   const panel = await state.start(), physical = await fs.realpath(state.props.file);
   await fs.writeFile(state.props.file, "Updated through a physical path event.\n");
   await state.change(state.dir, [physical]); await until(() => /physical path event/.test(panel.text));
+});
+
+test("periodic media polling preserves unchanged presentation and remote unsupported states", async t => {
+  for (const file of ["landscape.png", "guide.pdf"]) for (const on of [null, "remote"]) await t.test(`${file} ${on || "local"}`, async t => {
+    const state = await runtime(t); await fixtures(state.dir); state.props = { file: path.join(state.dir, file), on };
+    const panel = await state.start();
+    if (!on && file.endsWith("pdf")) { panel.turnPage(1, state.cx); await state.settle(); }
+    panel.pan = { x: 43, y: 29 }; panel.zoom = 1.4;
+    const media = panel.media, error = panel.error, page = panel.page, focus = state.keyboard = {};
+    const timer = state.timers.find(timer => timer.ms === (on ? 10000 : 60000));
+    timer.fn(state.cx); assert.equal(panel.loading, false); assert.equal(panel.media, media);
+    await until(() => !panel.mediaPoll);
+    assert.equal(panel.media, media); assert.equal(panel.pan.x, 43); assert.equal(panel.pan.y, 29);
+    assert.equal(panel.zoom, 1.4); assert.equal(panel.page, page); assert.equal(state.keyboard, focus);
+    if (on) assert.equal(panel.error, error);
+    else {
+      await fs.utimes(state.props.file, new Date(), new Date(Date.now() + 2000));
+      timer.fn(state.cx); await until(() => panel.media?.signature !== media.signature && !panel.loading);
+      assert.equal(panel.page, page); assert.equal(state.keyboard, focus);
+    }
+    panel.reload(state.cx); assert.equal(panel.loading, true); await state.settle(); await panel.close();
+  });
+});
+
+test("watch warnings belong to current dependencies and healthy peers cannot hide a failure", async t => {
+  const state = await runtime(t), a = path.join(state.dir, "a"), b = path.join(state.dir, "b");
+  await fs.mkdir(a); await fs.mkdir(b); state.props = { file: path.join(a, "file.txt") }; state.hooks.read = async () => "unchanged";
+  state.hooks.exec = async (command, _args, options) => { if (command === "pwd" && options.cwd === a) throw new Error("A watch failed"); };
+  const panel = await state.start(); await until(() => panel.watchError === "A watch failed");
+  state.props.file = path.join(b, "file.txt"); state.render(); await state.settle(); assert.equal(panel.watchError, null);
+  panel.watchTargets([state.props.file, path.join(a, "dependency.png")], state.cx);
+  await until(() => panel.watchError === "A watch failed");
+  await state.change(b, [state.props.file]); assert.equal(panel.watchError, "A watch failed");
+  panel.watchTargets([state.props.file], state.cx); assert.equal(panel.watchError, null); await panel.close();
+});
+
+test("pending physical-path helpers cannot rearm a closed or replaced watch owner", async t => {
+  for (const action of ["close", "replace"]) await t.test(action, async t => {
+    const state = await runtime(t), a = path.join(state.dir, "a"), b = path.join(state.dir, "b");
+    await fs.mkdir(a); await fs.mkdir(b); state.props = { file: path.join(a, "file.txt") }; state.hooks.read = async () => "hello";
+    let release; state.hooks.exec = async (command, _args, options) => { if (command === "pwd" && options.cwd === a) return new Promise(resolve => { release = resolve; }); };
+    const panel = await state.start(); await until(() => Boolean(release));
+    if (action === "close") await panel.close();
+    else { state.props.file = path.join(b, "file.txt"); state.render(); await state.settle(); }
+    assert.equal(state.watches.has(a), false);
+    release({ code: 0, stdout: a, stderr: "" }); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.watches.has(a), false); assert.equal(panel.watchers.has(a), false);
+    if (action === "replace") { assert.equal(state.watches.get(b).size, 1); await panel.close(); }
+  });
+});
+
+test("fixed-file slow reads survive A-B-A space focus and retain dirty drafts", async t => {
+  const state = await runtime(t); state.props = { file: path.join(state.dir, "a.txt") };
+  let finish, reads = 0;
+  state.hooks.read = () => { reads++; return new Promise(resolve => { finish = resolve; }); };
+  const { default: Panel } = await state.load("main.js"), panel = state.panel = new Panel(); panel.init({}, state.cx);
+  await until(() => reads === 1);
+  state.focus.space = "s2"; state.spaces = [{ id: "s2", active: true }]; state.render();
+  finish("Finished while A is hidden"); await state.settle();
+  state.focus.space = "s1"; state.spaces = [{ id: "s1", active: true }]; state.render();
+  assert.equal(panel.code.value(), "Finished while A is hidden"); assert.equal(panel.loading, false); assert.equal(reads, 1);
+  state.edit("Recovered draft"); state.focus.space = "s2"; state.render(); state.focus.space = "s1"; state.render();
+  assert.equal(panel.code.value(), "Recovered draft");
+  await panel.close(); assert.equal(state.watches.size, 0);
+});
+
+test("100 watched directories release handles; closing one same-directory pane leaves its peer live", async t => {
+  const state = await runtime(t); state.props = { file: path.join(state.dir, "file.txt") };
+  state.hooks.read = async () => "live";
+  const panel = await state.start();
+  const { default: Panel } = await state.load("main.js"), peer = new Panel(); peer.init({}, state.cx);
+  await until(() => !peer.loading && state.watches.get(state.dir)?.size === 2);
+  await peer.close(); assert.equal(state.watches.get(state.dir).size, 1);
+  for (let index = 0; index < 100; index++) {
+    const dir = path.join(state.dir, `dir-${index}`); await fs.mkdir(dir);
+    state.props.file = path.join(dir, "file.txt"); state.render(); await state.settle();
+    assert.equal(state.watches.size, 1); assert.equal([...state.watches.values()][0].size, 1);
+  }
+  state.hooks.read = async () => "refreshed";
+  await state.change(path.dirname(state.props.file), [state.props.file]); await until(() => panel.text === "refreshed");
+  await panel.close(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.watches.size, 0); assert.equal(panel.watchers.size, 0);
+});
+
+test("a superseded slow read cannot steal focus or replace a newer keyboard preview", async t => {
+  const state = await runtime(t); state.props = { file: path.join(state.dir, "slow.txt") };
+  let finish;
+  state.hooks.read = file => file.endsWith("slow.txt") ? new Promise(resolve => { finish = resolve; }) : Promise.resolve("New selection");
+  const { default: Panel } = await state.load("main.js"), panel = state.panel = new Panel(); panel.init({}, state.cx);
+  await until(() => Boolean(finish)); panel.focusContent();
+  state.props.file = path.join(state.dir, "next.txt"); state.render();
+  const terminalFocus = {}; state.keyboard = terminalFocus;
+  await state.settle(); finish("Old selection"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(panel.code.value(), "New selection"); assert.equal(state.keyboard, terminalFocus);
+  panel.keyDown({ key: "f6", keystroke: "shift-f6" }, state.cx);
+  assert.equal(state.calls.some(call => call.command === "layout.select"), false);
+});
+
+test("collapse and reopen during a slow tree refresh retain the newer listing after the old read fails", async t => {
+  const state = await runtime(t), { Tree } = await state.load("tree.js");
+  const folder = path.join(state.dir, "nested"); let rejectOld, reads = 0;
+  state.hooks.exec = async (command, args) => {
+    if (command === "sh" && args.at(-1) === folder) {
+      if (++reads === 1) return new Promise((_resolve, reject) => { rejectOld = reject; });
+      return { code: 0, stdout: "f\0new.txt\0", stderr: "" };
+    }
+  };
+  const tree = new Tree({ cwd: state.dir, on: null }, () => true);
+  tree.folders.add("nested"); tree.refresh(state.cx); await until(() => Boolean(rejectOld));
+  tree.toggle("nested", state.cx); tree.toggle("nested", state.cx);
+  await until(() => tree.entries.get("nested")?.[0]?.name === "new.txt");
+  rejectOld(new Error("Old directory disappeared")); await until(() => !tree.loading);
+  assert.equal(tree.entries.get("nested")[0].name, "new.txt"); assert.equal(tree.error, null);
+  tree.close();
+});
+
+test("closing during slow read prevents editor creation and tree/image watches cancel on navigation", async t => {
+  const state = await runtime(t); await fixtures(state.dir);
+  const panel = await state.start(); assert.equal(state.watches.get(state.dir).size, 1);
+  panel.show({ file: path.join(state.dir, "README.md") }, state.cx); await state.settle();
+  assert.equal(state.watches.get(state.dir).size, 1);
+  const imageDir = path.join(state.dir, "dependency"); await fs.mkdir(imageDir);
+  panel.watchTargets([path.join(imageDir, "image.png")], state.cx);
+  await until(() => state.watches.has(imageDir)); assert.equal(state.watches.has(state.dir), false);
+  panel.watchTargets([], state.cx); await new Promise(resolve => setImmediate(resolve)); assert.equal(state.watches.size, 0);
+  let finish;
+  state.hooks.read = () => new Promise(resolve => { finish = resolve; });
+  panel.show({ file: path.join(state.dir, "slow.txt") }, state.cx); await until(() => Boolean(finish));
+  await panel.close(); finish("stale"); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(panel.code, null); assert.equal(state.watches.size, 0);
 });
 
 test("HTTP links use the browser and preserve the current preview history", async t => {

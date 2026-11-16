@@ -26,6 +26,13 @@ await fs.mkdir(path.join(app, "mods/mods-plus"), { recursive: true });
 for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "jobs.py", "star.svg"]) {
   await fs.copyFile(path.join(runtime, name), path.join(app, "mods/mods-plus", name));
 }
+for (const [name, source] of [["mods-plus-catalog", runtime], ...(process.env.MODS_PLUS_BASELINE ? [["mods-plus-baseline", process.env.MODS_PLUS_BASELINE]] : [])]) {
+  const folder = path.join(app, "mods", name);
+  await fs.mkdir(folder, { recursive: true });
+  await fs.copyFile(path.join(source, "main.js"), path.join(folder, "panel.js"));
+  await fs.copyFile(fileURLToPath(new URL("native-catalog.js", import.meta.url)), path.join(folder, "main.js"));
+  await fs.writeFile(path.join(folder, "mod.json"), '{"place":"none"}');
+}
 const files = {
   "one/RECIPE.md": "# Review fixture\nA local package for native acceptance.",
   "one/mods/review-fixture/main.js": 'import {View,div} from "gpui-kit"; export default class Fixture extends View { render(){ return div().text_size(13).child("Fixture v1"); } }',

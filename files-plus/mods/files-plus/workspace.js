@@ -1,9 +1,9 @@
 // Lazy tree and read-only preview adapted from Herdr files.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify, pickFolder } from "herdr";
+import { spaces, panes, terminals, focused, exec, readTextFile, watchFolder, checking, nextCommand, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify, pickFolder } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
-import { captureTarget, installed, REVISION, menuLayout, menuItems } from "./actions.js";
+import { captureTarget, insertReference, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
@@ -47,7 +47,7 @@ export function location(previous) {
   const browsing = browsingFolder(space?.id, on);
   const entry = browsing ? null : workspaceOf(space?.id);
   const base = browsing || cwd;
-  return { space: space?.id, cwd: base, terminalCwd: cwd, browsing, on, entry, key: entry ? JSON.stringify([space.id, entry.folders]) : JSON.stringify([space?.id, base, on, Boolean(browsing)]) };
+  return { space: space?.id, cwd: base, terminalCwd: cwd, browsing, on, entry, key: entry ? JSON.stringify([space.id, entry.file, entry.folders, on]) : JSON.stringify([space?.id, base, on, Boolean(browsing)]) };
 }
 
 export async function directory(path, on, limit = PER_FOLDER) {
@@ -103,23 +103,101 @@ export class FilesPanel extends View {
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
     this.search = new FileSearch(this, directory, cx);
+    this.handle = cx.focus_handle();
+    this.commands(cx);
     this.revision = shared(REVISION);
+    if (checking()) return;
     this.refresh(cx);
     cx.timer.every(10000, cx => { if (this.on) this.refresh(cx); });
     cx.timer.every(60000, cx => { if (!this.on && this.visible !== false) this.refresh(cx, { recover: true }); });
   }
   watch(path, cx) {
     if (this.on || this.watches.has(path)) return;
-    const token = {};
+    const token = { pending: null };
     this.watches.set(path, token);
     cx.spawn(async cx => {
       try {
         while (this.watches.get(path) === token) {
-          const paths = await watchFolder(path);
-          if (this.watches.get(path) === token) this.queueChanges(paths, cx);
+          token.pending = watchFolder(path);
+          const paths = await token.pending;
+          if (this.watches.get(path) !== token || !paths.length) return;
+          this.queueChanges(paths, cx);
         }
-      } catch { if (this.watches.get(path) === token) this.watches.delete(path); }
+      } catch (error) {
+        if (this.watches.get(path) === token && this.watchError !== String(error.message || error)) { this.watchError = String(error.message || error); cx.notify(); }
+      } finally {
+        token.pending?.cancel();
+        if (this.watches.get(path) === token) this.watches.delete(path);
+      }
     });
+  }
+  commands(cx) { cx.spawn(async cx => { for (;;) this.command(await nextCommand(), cx); }); }
+  command(command, cx) {
+    if (command === "focus" || command === "search") this.search.input.focus();
+    else if (command === "return") { if (this.search.active) this.search.input.focus(); else this.handle.focus(); }
+    else if (command === "preview") this.openSelected(cx);
+    else if (command === "add-to-agent") this.addToAgent(cx);
+    else if (command === "agent") this.focusAgent();
+    else return false;
+    return true;
+  }
+  selectedTarget() {
+    const result = this.search.active ? this.search.results[this.search.at] : this.rowModel?.find(row => row.path === this.selectedFile);
+    if (!result) return null;
+    const target = this.target(result.path, result.kind || "file", result.root);
+    if (this.agentTarget?.space === target.space && this.agentTarget.on === target.on) target.active = this.agentTarget.active;
+    return target;
+  }
+  openSelected(cx) {
+    const target = this.selectedTarget();
+    if (target?.kind === "file") this.openFile(target.path, target.root, cx, { temporary: true });
+  }
+  addToAgent(cx) {
+    const target = this.selectedTarget();
+    if (!target || this.insertingReference) return;
+    this.insertingReference = true;
+    cx.spawn(async cx => {
+      try { await insertReference(target, cx); }
+      catch (error) { notify({ title: String(error.message || error), level: "error" }); }
+      finally { this.insertingReference = false; }
+    });
+  }
+  focusAgent() {
+    const target = this.selectedTarget() || this.agentTarget;
+    if (!target?.active) return;
+    const machine = target.active.terminal.includes("/") ? target.active.terminal.split("/")[0] : null;
+    if (machine !== target.on || !spaces().some(space => space.id === target.space && space.machine === target.on)
+      || !terminals().some(terminal => terminal.address === target.active.terminal && terminal.state === "live")) {
+      notify({ title: "The captured agent terminal is no longer available.", level: "error" }); return;
+    }
+    run("pane.focus", { terminal: target.active.terminal });
+  }
+  treeKey(event, cx) {
+    if (event.keystroke && event.keystroke !== event.key) return;
+    if (event.key === "f6") this.openSelected(cx);
+    else if (event.key === "f7") this.addToAgent(cx);
+    else if (event.key === "f8") this.focusAgent();
+    else if (this.handle.is_focused()) {
+      const rows = this.rowModel.filter(row => row.path && !row.leaving && !row.missing), at = rows.findIndex(row => row.path === this.selectedFile);
+      let row = rows[Math.max(0, at)];
+      if (!row) return;
+      if (event.key === "down" || event.key === "up") row = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "down" ? 1 : -1)))];
+      else if (event.key === "right" && row.kind !== "file" && !row.open || event.key === "left" && row.kind !== "file" && row.open) this.toggle(row.path, cx);
+      else if (event.key === "enter") { if (row.kind === "file") this.openFile(row.path, row.root, cx, { temporary: true }); else this.toggle(row.path, cx); }
+      else if (event.key === "escape") this.search.input.focus();
+      else return;
+      this.selectedFile = row.path; this.treeVersion++; this.syncTree(cx);
+    } else return;
+    cx.stop_propagation(); cx.notify();
+  }
+  stopWatches() {
+    for (const token of this.watches.values()) token.pending?.cancel();
+    this.watches.clear();
+  }
+  syncWatches(cx) {
+    const wanted = new Set((this.rootInfo || []).filter(root => root.exists && (this.folders.has(root.path) || this.search.active || this.file && contains(root.path, this.file))).map(root => root.path));
+    for (const [path, token] of this.watches) if (!wanted.has(path)) { this.watches.delete(path); token.pending?.cancel(); }
+    for (const path of wanted) this.watch(path, cx);
   }
   queueChanges(paths, cx) {
     this.changedPaths ||= new Set();
@@ -137,20 +215,34 @@ export class FilesPanel extends View {
     });
   }
   watchConfig(id, file, cx) {
-    const token = file ? `${id}:${file}` : null;
-    if (this.configWatch === token) return;
+    if (this.configWatch?.id === id && this.configWatch?.file === file) return;
+    this.configWatch?.pending?.cancel();
+    const token = file ? { id, file, pending: null } : null;
     this.configWatch = token;
     if (!file) return;
     cx.spawn(async cx => {
       try {
-        await reloadWorkspace(id).catch(() => null);
-        cx.notify();
+        const dir = dirname(file);
+        token.pending = watchFolder(dir);
+        const physical = appWindow().platform === "windows" ? Promise.resolve(dir) : exec("pwd", ["-P"], { cwd: dir }).then(result => result.stdout.trim() || dir);
+        const initial = reloadWorkspace(id, () => this.configWatch === token).catch(() => null)
+          .then(() => { if (this.configWatch === token) cx.notify(); });
         while (this.configWatch === token) {
-          const paths = await watchFolder(dirname(file));
-          if (this.configWatch !== token) return;
-          if (paths.some(path => path === file || path.replace(/^\/private\/tmp\//, "/tmp/") === file)) { await reloadWorkspace(id).catch(() => null); this.refresh(cx, { describe: true }); }
+          const [paths, canonical] = await Promise.all([token.pending, physical, initial]);
+          if (this.configWatch !== token || !paths.length) return;
+          if (paths.some(path => path === dir || path === canonical || path === file || path === joinPath(canonical, basename(file)))) {
+            await reloadWorkspace(id, () => this.configWatch === token).catch(() => null);
+            if (this.configWatch !== token) return;
+            this.refresh(cx, { describe: true });
+          }
+          token.pending = watchFolder(dir);
         }
-      } catch { if (this.configWatch === token) this.configWatch = null; }
+      } catch (error) {
+        if (this.configWatch === token) { this.watchError = String(error.message || error); cx.notify(); }
+      } finally {
+        token.pending?.cancel();
+        if (this.configWatch === token) this.configWatch = null;
+      }
     });
   }
   current(context, loc = this.location()) { return this.context === context && (this.role === "preview" ? context !== null : loc.key === context); }
@@ -187,9 +279,9 @@ export class FilesPanel extends View {
     if (context !== this.context) {
       this.context = context; this.spaceId = loc.space; this.root = loc.cwd; this.on = loc.on; this.workspace = loc.entry;
       this.entries = new Map(); this.folders = new Set(loc.entry ? loc.entry.folders.map(f => f.path) : loc.cwd ? [loc.cwd] : []);
-      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.watches.clear(); this.show(null); this.error = null; this.loading = null;
+      this.pending = new Map(); this.marks = {}; this.rootInfo = null; this.stopWatches(); this.show(null); this.error = null; this.loading = null; this.watchError = null;
       this.generation = {}; this.entryCount = 0; this.limits.clear(); this.gitCache.clear(); this.changedPaths = new Set(); this.changeTimer = false; this.gitTimer = null;
-      this.refreshAgain = null; this.treeVersion++; this.selectedFile = null;
+      this.refreshAgain = null; this.treeVersion++; this.selectedFile = null; this.agentTarget = null;
       this.closingKeys = new Set(); this.exitTimer = null; this.fresh = new Set(); this.revealPath = null;
       this.manualWidthSpace = null; this.lastRequestedWidth = null; this.resizePending = null; this.fitSignature = null; this.fitCause = "user";
     }
@@ -211,6 +303,7 @@ export class FilesPanel extends View {
         if (!this.current(context) || generation !== this.generation) return;
         if (!same(roots, this.rootInfo)) this.treeVersion++;
         this.rootInfo = roots;
+        this.syncWatches(cx);
         // Drop entries for folders removed on disk so their budget can be reused.
         const queue = [...(options.paths || this.folders)], listing = queue.length > 0;
         let readError = null;
@@ -254,7 +347,6 @@ export class FilesPanel extends View {
         if (!this.current(context) || generation !== this.generation) return;
         if (!same(this.marks, marks)) { this.marks = marks; this.treeVersion++; }
         if (listing) this.error = readError;
-        for (const root of roots) if (root.exists) this.watch(root.path, cx);
         if (this.file) this.show(this.file, cx);
       } catch (error) { if (this.current(context) && generation === this.generation) this.error = error.message || String(error); }
       finally {
@@ -293,13 +385,15 @@ export class FilesPanel extends View {
         });
       }
     }
+    this.syncWatches(cx);
     this.treeVersion++; this.syncTree(cx); this.revealPath = null; cx.notify();
   }
-  openFile(path, root, cx) {
+  openFile(path, root, cx, options = {}) {
     this.selectedFile = path; this.treeVersion++; this.syncTree(cx);
     const request = this.openRequest = {};
     const stack = props()?.previewStack, context = this.context, space = this.spaceId, on = this.on;
-    const destination = openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
+    const destination = options.temporary && stack ? "internal" : openLocation(shared(OPEN_LOCATION)), pane = focused()?.pane;
+    const agent = this.agentTarget = this.target(path, "file", root);
     cx.spawn(async cx => {
       try {
         const existing = await findOpenFile(path, on, space);
@@ -313,12 +407,16 @@ export class FilesPanel extends View {
         if (!this.current(context) || this.openRequest !== request) return;
         if (destination !== "internal") {
           const mod = editor ? "preview-plus" : "files-plus";
-          const previewProps = { file: path, root, on, ...(editor ? {} : { role: "preview" }) };
+          const previewProps = { file: path, root, on, space, agent, ...(editor ? {} : { role: "preview" }) };
           if (destination === "tab") run("tab.new", { space, name: basename(path), mod, props: previewProps });
           else run("pane.split", { pane, direction: "right", mod, props: previewProps });
         } else if (editor) {
-          setShared("preview-plus.target", { ...(shared("preview-plus.target") || {}), [space]: { file: path, root, on } });
+          const pinned = shared("preview-plus.pinned")?.[space];
+          if (pinned && (pinned.file !== path || pinned.on !== on)) {
+            notify({ title: "Preview is pinned. Save or discard edits, then unpin to browse another file.", level: "info" });
+          } else setShared("preview-plus.target", { ...(shared("preview-plus.target") || {}), [space]: { file: path, root, on, agent, selection: `${Date.now()}-${Math.random()}` } });
           run("layout.select", { stack, child: "preview-plus" });
+          run("preview-plus.focus");
         } else this.show(path, cx);
       } catch {
         if (this.current(context) && this.openRequest === request) notify({ title: "Cannot check open files. Try again.", level: "error" });
@@ -333,6 +431,7 @@ export class FilesPanel extends View {
     if (!same) { this.code?.release(); this.code = null; this.previewText = null; }
     this.file = path; this.fileError = null; this.openRequest = null;
     const request = this.previewRequest = {};
+    if (cx && this.role !== "preview") this.syncWatches(cx);
     if (!same && cx) cx.notify();
     if (!path || !cx) return;
     const context = this.context, on = this.on;
@@ -469,6 +568,7 @@ export class FilesPanel extends View {
     const add = Boolean(this.root || entry?.folders.length) && this.on === null && appWindow().platform !== "windows";
     const title = this.file ? fileRoot ? `${label(fileRoot)}/${relativePath(fileRoot.path, this.file)}` : relativePath(this.root, this.file) : entry?.name || (this.root ? label({ path: this.root }) : "");
     return v_flex().id("files-plus").size_full().min_w(0).min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).font_family(font).text_size(13)
+      .on_key_down((event, cx) => this.treeKey(event, cx))
       .on_size_change((size, cx) => this.panelResized(size, cx))
       .on_mouse_down("left", event => { if (event.bounds) this.panelBounds = event.bounds; })
       .on_mouse_up("left", () => { this.dragCandidate = null; })
@@ -481,7 +581,7 @@ export class FilesPanel extends View {
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().bg(t.background).border_b_1().border_color(t.border)
         .when(Boolean(this.file), el => el.child(h_flex().id("files-back").size(24).items_center().justify_center().rounded(6).cursor_default().role("button").accessibility_label("Back to files").tooltip("Back to files").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).active(s => s.bg(t.selected).text_color(t.foreground))
           .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
-          .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
+          .on_click((_event, cx) => { cx.stop_propagation(); this.show(null, cx); this.command("return", cx); cx.notify(); }).child(svg("mods/files-plus/arrow-left.svg").size(14))))
         .child(div().id("files-title").flex_1().min_w(0).truncate().font_semibold().tooltip(loc.cwd || this.root || "").child(this.panelTitle()))
         .child(h_flex().id("change-folder").size(24).flex_none().items_center().justify_center().rounded(6).cursor_default().role("button")
           .accessibility_label("Change folder").tooltip("Change folder… (browse only)").text_color(loc.space && loc.on === null && !this.folderPicker ? t.muted : t.dim)
@@ -510,6 +610,7 @@ export class FilesPanel extends View {
             openOverlay({ mod: "files-plus", kind: "dialog", modal: true, width: 360, height: 264, props: { role: "settings" } });
           }).child(svg("mods/files-plus/settings.svg").size(14))))
       .when(Boolean(entry?.error), el => el.child(div().px(14).py(8).text_size(12).text_color(t.ansi1).child(entry.error)))
+      .when(Boolean(this.watchError), el => el.child(div().px(14).py(8).text_size(12).text_color(t.muted).child(`Live refresh unavailable: ${this.watchError}. Periodic refresh remains active.`)))
       .when(!this.file, el => el.child(this.search.renderInput(t)).child(this.search.active ? this.search.renderResults(t) : this.treeView))
       .when(Boolean(this.file), el => el.child(v_flex().id("files-preview").flex_1().min_h(0)
         .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.muted)
@@ -517,7 +618,8 @@ export class FilesPanel extends View {
   }
   close() {
     this.folderPicker = null; this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
-    this.watches?.clear(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
+    if (this.watches) this.stopWatches();
+    this.configWatch?.pending?.cancel(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
     this.search?.close();
   }
 }

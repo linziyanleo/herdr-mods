@@ -32,6 +32,7 @@ export default class NativeDriver extends PreviewPlus {
               else if (request.action === "contents") { this.contents = !this.contents; cx.notify(); }
               else if (request.action === "json-toggle") this.toggleJson(request.path, cx);
               else if (request.action === "back") this.back(cx);
+              else if (request.action === "pin") this.togglePin(cx);
               else if (request.action === "source") this.setSource(request.value, cx);
               // set_value does not emit change; keyboard input is verified separately.
               else if (request.action === "edit") { this.code.set_value(request.value); this.editorChanged(this.code, cx); }
@@ -83,6 +84,7 @@ export default class NativeDriver extends PreviewPlus {
     if (!this.ownsDriver()) return;
     const value = { driverIdentity: this.driverIdentity, handledRequest: this.handled, renderCount: this.renderCount,
       owner: this.owner, selected: this.selected, loading: this.loading, error: this.error, actionError: this.actionError,
+      watchStats: globalThis.__watchStats, watchers: this.watchers.size, pinned: this.pinned(),
       imageWarning: this.imageWarning, text: this.text, markdownBlocks: this.markdownBlocks, source: this.source, media: this.media,
       headings: this.headings, anchor: this.anchor, contents: this.contents, markdownBusy: this.markdownBusy,
       dataError: this.dataPreview?.error, expanded: [...this.expanded],

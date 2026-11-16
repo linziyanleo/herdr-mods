@@ -126,6 +126,15 @@ export async function loadMedia(target, page = 1, type = "image") {
   return media;
 }
 
+export async function mediaSignature(target) {
+  const platform = window()?.platform;
+  const result = platform === "macos"
+    ? await exec("osascript", ["-l", "JavaScript", "-e", "ObjC.import('Foundation'); function run(args) { var attrs=$.NSFileManager.defaultManager.attributesOfItemAtPathError($(args[0]),null); if(!attrs) throw new Error('This file is no longer available or cannot be read.'); return args[0]+':'+ObjC.unwrap(attrs.objectForKey($.NSFileModificationDate).timeIntervalSince1970)+':'+ObjC.unwrap(attrs.objectForKey($.NSFileSize)); }", target.file])
+    : await exec(platform === "windows" ? "python" : "python3", ["-c", "import os,sys; s=os.stat(sys.argv[1]); print(sys.argv[1]+':'+str(s.st_mtime_ns)+':'+str(s.st_size))", target.file]);
+  if (result.code !== 0) throw new Error(result.stderr.trim() || "Cannot read media metadata.");
+  return result.stdout.trim();
+}
+
 export async function openFile(target) {
   if (target.on) throw new Error("Open is only available for local files.");
   const platform = window()?.platform;

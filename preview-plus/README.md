@@ -10,7 +10,7 @@ See the [recipe](RECIPE.md) for behavior, dependencies and verification. The [im
 
 ## Install
 
-Verified with Herdr 0.1.13 on macOS. Media uses built-in Foundation, AppKit and PDFKit through `osascript`. Linux images require `python3`; Windows images require Python 3 as `python`. Mermaid uses a bundled renderer and needs no Node.js or browser at runtime. No service credentials are required. The [recipe](RECIPE.md#built-from) lists the required Herdr APIs.
+Requires Herdr **0.1.16 or newer** for cancellable watches; the current lifecycle checks use 0.1.16 on macOS. Media uses built-in Foundation, AppKit and PDFKit through `osascript`. Linux images require `python3`; Windows images require Python 3 as `python`. Mermaid uses a bundled renderer and needs no Node.js or browser at runtime. No service credentials are required. The [recipe](RECIPE.md#built-from) lists the required Herdr APIs.
 
 1. Check `${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/preview-plus` for a name conflict. For an update, back up the installed files and compare local changes before replacing them. Use another name for an unrelated mod.
 2. Copy `mods/preview-plus/`, including `mermaid.bundle.js`, `LICENSE`, `THIRD_PARTY.md` and its `licenses/`, into the app home's `mods/`. Do not copy `tests/`, `node_modules/`, generated type files or `.cache/`. Keep the package's existing `licenses/` with any redistribution too.
@@ -51,7 +51,17 @@ Files Plus sends every file type to Preview Plus. Its Tab and Pane destinations 
 }
 ```
 
-Select Inside right panel in Files Plus settings to use this stack. Tab remains the default. Every file arrives as `{ file, root, on }`; Preview Plus chooses its editor, dedicated preview or unsupported-file message. Update both packages if an older Files Plus still opens ordinary text in its read-only viewer.
+Pointer opening uses this stack with Inside right panel selected. Keyboard Enter/F6 uses it as a temporary slot independently of that preference. Tab remains the pointer default. The target carries file/root/machine plus a selection identity and captured terminal; Preview Plus chooses the existing editor or preview. Update both packages together.
+
+The complete [example layout](examples/files-preview-agent.json) keeps spaces, tabs, an active terminal and the paired slot together without personal paths or shortcuts. Copy it under a new name only in an explicitly selected app home; select it there with `herdr-app do layout.switch '{"name":"files-preview-agent"}'`. It does not merge into a personal layout automatically.
+
+### Temporary and pinned preview
+
+Recovery polling compares local media metadata before reloading. Unchanged images/PDFs keep pan, zoom, page, focus and the loaded media; explicit Refresh still reloads. Unsupported remote media retains its visible error instead of being reset every ten seconds. Watch warnings belong to current dependency directories and disappear when the failed dependency is removed.
+
+F7 or Pin freezes the paired slot on its current file. Editing pins it automatically, including recovered drafts. Browsing another file cannot replace a pinned slot; save or confirm discard, then unpin. Unpin keeps the current file until a new explicit selection. Pinning creates no extra tab/pane. Fixed Tab/Pane files retain their existing behavior and same-machine reuse.
+
+With Preview focused, F6 returns through history to Files; while pinned, cross-file Back returns to Files without replacing the pinned file. F8 focuses the terminal captured by Files. `preview-plus.focus`, `.pin` and `.agent` expose the same operations. The [Files keyboard table](../files-plus/README.md#keyboard-workflow) includes search/selection and explicit safe `@` insertion. No global bindings are installed.
 
 ### Standalone pane or tab
 
@@ -101,9 +111,11 @@ node preview-plus/tests/native-rich-verify.mjs /tmp/pp.<session>/session.json
 node preview-plus/tests/native-structured-pair.mjs /tmp/pp.<session>/session.json
 ```
 
-Automated tests and isolated native checks cover rich previews, file handoff, editing and save conflicts on Herdr 0.1.13. Physical input and additional platform/theme combinations remain unverified for the latest changes. See the [all-file editor record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06) for the checked scope.
+Earlier rich-preview/editor checks used Herdr 0.1.13. The [interaction/performance record](../docs/plans/interaction-performance-implementation.md) separates current 0.1.16 lifecycle, keyboard, native and physical checks and their remaining gaps. See the [all-file editor record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06) for the earlier scope.
 
 The native session command prints the exact receipt path. It starts a disposable app home and core, creates synthetic files and copies the runtime plus test drivers into that home. The verifier exercises production handlers and actual rendering; screenshots still require visual inspection. It does not change the user's app home, layout or key bindings. Close the disposable instance with `HERDR_APP_HOME=<receipt-app-home> herdr-app do app.quit`; its temporary core and files are scoped by the environment recorded in the receipt.
+
+For lifecycle acceptance, run `node preview-plus/tests/native-session.mjs --distinct-bundle --lifecycle`, then `node preview-plus/tests/native-lifecycle.mjs <session.json>`. This instruments pending native watch calls in the disposable copy and adds a one-second slow read. Its report covers 100 directories, independent same-directory callers and fixed-file A→B→A. Physical keyboard input remains a separate check.
 
 To reproduce the checked-in renderer from the public npm lock, use Node 22+:
 

@@ -2,11 +2,17 @@
 // All package operations are handled through helper.py with validation and protection.
 
 import { View, div, image, svg } from "gpui-kit";
-import { h_flex, v_flex, Input, InputState, TextView, Select, Popup, Switch } from "gpui-base";
-import { exec, appHome, props, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates, shared, setShared } from "herdr";
+import { h_flex, v_flex, Input, InputState, TextView, Select, Popup, Switch, ScrollHandle } from "gpui-base";
+import { exec, appHome, props, checking as hostChecking, closeOverlay, notify, theme, window, run, knownAgents, settings, layout, updates, shared, setShared } from "herdr";
 
 const short = (sha) => (sha ? sha.slice(0, 7) : "?");
 const opener = () => (window()?.platform === "macos" ? "open" : window()?.platform === "windows" ? "explorer" : "xdg-open");
+
+class CatalogCard extends View {
+  init(data) { this.data = data; }
+  update(data) { this.data = data; }
+  render() { const { owner, theme, pkg, width } = this.data; return owner.renderCard(theme, pkg, width); }
+}
 
 export default class ModsPlus extends View {
   init(_props, cx) {
@@ -17,8 +23,18 @@ export default class ModsPlus extends View {
     this.workDepth = 0;
     this.busy = null;
     this.message = null;
+    this.motion = false;
+    // No reduced-motion preference is exposed by Herdr 0.1.16. Unknown hosts
+    // stay static; macOS opts in only after its native accessibility query.
+    if (!hostChecking() && !this.entry && props()?.motion !== false && window()?.platform === "macos") cx.spawn(async cx => {
+      try {
+        const result = await exec("osascript", ["-l", "JavaScript", "-e", "ObjC.import('AppKit'); String($.NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion)"]);
+        if (!this.closed && result.code === 0) { this.motion = result.stdout.trim() === "false"; cx.notify(); }
+      } catch { /* Static is the accessible fallback when the OS query is unavailable. */ }
+    });
 
     if (this.entry) {
+      if (hostChecking()) return;
       // The footer owns scheduling while its layout is loaded.
       cx.spawn(cx => this.checkOverdue(cx));
       cx.timer.every(60 * 1000, (cx) => cx.spawn(cx => this.checkOverdue(cx)));
@@ -34,6 +50,8 @@ export default class ModsPlus extends View {
     this.sort = "popular";
     this.limit = 24;
     this.width = 1000;
+    this.cards = new Map(); this.grid = [];
+    this.catalogScroll = ScrollHandle.new();
     this.media = {};
     this.loadingMedia = false;
     this.packages = [];
@@ -50,15 +68,18 @@ export default class ModsPlus extends View {
     this.search.on("change", (_e, cx) => {
       this.query = this.search.value();
       this.limit = 24;
+      this.catalogScroll.scroll_to_item(0);
       this.loadMedia(cx);
       cx.notify();
     });
     this.initIntervalInput();
     this.initSourceInput();
     this.handle.focus();
+    if (hostChecking()) return;
 
     cx.spawn(async (cx) => {
       await this.loadCatalog(cx);
+      if (this.closed) return;
       await this.loadSettings(cx);
       // Check if scheduled checks are overdue on opening
       if (this.settings?.overdue) {
@@ -69,7 +90,8 @@ export default class ModsPlus extends View {
 
   // -------------------------------- Helper execution --------------------------------
 
-  async helper(args, cx) {
+  async helper(args, cx, onProgress, mediaSource) {
+    if (this.closed) throw new Error("View closed");
     const invoke = async (script, params) => {
       const res = await exec("python3", ["-B", `${appHome()}/mods/mods-plus/${script}`, "--app-home", appHome(), ...params]);
       if (res.code !== 0) throw new Error((res.stderr || res.stdout).trim().split("\n").pop() || "Helper operation failed");
@@ -77,9 +99,16 @@ export default class ModsPlus extends View {
     };
     try {
       if (args[0] === "settings") return await invoke("helper.py", ["--json", ...args]);
-      let job = await invoke("jobs.py", ["start", JSON.stringify(args)]);
+      let job = await invoke("jobs.py", ["start", JSON.stringify(mediaSource === undefined ? args : [...args, mediaSource])]);
+      let progressKey;
       while (job.state === "running") {
+        if (this.closed) throw new Error("View closed");
+        if (job.progress && onProgress) {
+          const key = JSON.stringify(job.progress);
+          if (key !== progressKey) { progressKey = key; onProgress(job.progress); }
+        }
         await cx.sleep(500);
+        if (this.closed) throw new Error("View closed");
         job = await invoke("jobs.py", ["status", job.id]);
       }
       if (job.state === "failed") throw new Error(job.error);
@@ -97,11 +126,11 @@ export default class ModsPlus extends View {
     try {
       await fn();
     } catch (e) {
-      this.message = String(e?.message ?? e);
+      if (!this.closed) this.message = String(e?.message ?? e);
     }
     this.workDepth -= 1;
     if (!this.workDepth) this.busy = null;
-    cx.notify();
+    if (!this.closed) cx.notify();
   }
 
   // -------------------------------- Data loading --------------------------------
@@ -121,24 +150,45 @@ export default class ModsPlus extends View {
   }
 
   async loadCatalog(cx) {
+    const request = this.catalogRequest = {};
+    const current = () => !this.closed && this.catalogRequest === request;
     await this.work(cx, "Loading catalog…", async () => {
-      const cached = await this.helper(["catalog", "--cached"], cx);
-      this.packages = cached.packages || [];
-      this.message = (cached.warnings || []).join("\n") || null;
-      cx.notify();
-      this.loadMedia(cx);
-      if (cached.stale) {
-        const res = await this.helper(["catalog"], cx);
-        this.packages = res.packages || [];
-        this.message = (res.warnings || []).join("\n") || null;
+      try {
+        const cached = await this.helper(["catalog", "--cached"], cx);
+        if (!current()) return;
+        this.acceptCatalog(cached);
+        this.syncCards(cx);
+        this.catalogState = cached.stale ? "refreshing" : "fresh";
+        cx.notify(); this.loadMedia(cx);
+        if (cached.stale) {
+          const res = await this.helper(["catalog"], cx);
+          if (!current()) return;
+          this.acceptCatalog(res);
+          this.syncCards(cx);
+        }
+      } catch (error) {
+        if (current()) { this.catalogState = "stale"; throw error; }
       }
     });
-    this.loadMedia(cx);
+    if (current()) this.loadMedia(cx);
+  }
+
+  acceptCatalog(result) {
+    const previous = new Map(this.packages.map(pkg => [pkg.id, pkg]));
+    for (const pkg of result.packages) {
+      const old = previous.get(pkg.id);
+      if (!old || old.preview_url !== pkg.preview_url || old.avatar_url !== pkg.avatar_url) delete this.media[pkg.id];
+    }
+    this.packages = result.packages;
+    this.message = (result.warnings || []).join("\n") || null;
+    this.catalogState = result.stale || this.message ? "stale" : "fresh";
   }
 
   visiblePackages() {
     const query = this.query.trim().toLowerCase();
-    return this.packages.filter(p =>
+    const key = JSON.stringify([query, this.tab, this.filter, this.collection, this.sort]);
+    if (this.visibleCache?.packages === this.packages && this.visibleCache.key === key) return this.visibleCache.value;
+    const value = this.packages.filter(p =>
       p.kind === this.tab && p.collection === this.collection &&
       (this.filter === "all" || (this.filter === "installed" ? p.installed === true : p.installed === false)) &&
       `${p.name} ${p.author} ${p.description}`.toLowerCase().includes(query)
@@ -147,23 +197,61 @@ export default class ModsPlus extends View {
       Number(!a.preview_url) - Number(!b.preview_url) ||
       (this.sort === "new" ? b.pushed.localeCompare(a.pushed) : b.stars - a.stars) ||
       a.name.localeCompare(b.name));
+    this.visibleCache = { packages: this.packages, key, value };
+    return value;
+  }
+
+  syncCards(cx) {
+    const packages = this.visiblePackages(), t = theme();
+    const columns = Math.max(1, Math.min(3, Math.floor((this.width - 32) / 280)));
+    const width = (this.width - 32 - (columns - 1) * 16) / columns;
+    const signature = [packages, this.limit, this.width, this.mediaVersion, JSON.stringify(t), this.motion];
+    if (this.gridSignature && signature.every((value, index) => value === this.gridSignature[index])) return;
+    this.gridSignature = signature;
+    const shown = packages.slice(0, this.limit), wanted = new Set(shown.map(pkg => pkg.id));
+    for (const [id, card] of this.cards) if (!wanted.has(id)) { card.view.release(); this.cards.delete(id); }
+    for (const pkg of shown) {
+      const key = JSON.stringify([pkg, this.media[pkg.id], t, width, this.motion]);
+      const card = this.cards.get(pkg.id), data = { owner: this, pkg, theme: t, width };
+      if (!card) this.cards.set(pkg.id, { key, view: cx.new(CatalogCard, data) });
+      else if (card.key !== key) { card.key = key; card.view.set_props(data); }
+    }
+    this.grid = [];
+    for (let index = 0; index < shown.length; index += columns) this.grid.push(shown.slice(index, index + columns).map(pkg => this.cards.get(pkg.id).view));
+    cx.notify();
   }
 
   loadMedia(cx) {
-    if (this.loadingMedia) return;
-    const ids = this.visiblePackages().slice(0, this.limit).filter(p => !this.media[p.id]).slice(0, 4).map(p => p.id);
+    if (this.closed || this.loadingMedia || this.view && this.view !== "catalog") return;
+    const packages = this.visiblePackages(), page = packages.slice(0, this.limit);
+    const ids = [...page.slice(this.mediaStart || 0), ...page.slice(0, this.mediaStart || 0)]
+      .filter(p => !this.media[p.id]).slice(0, 4).map(p => p.id);
     if (!ids.length) return;
     this.loadingMedia = true;
+    const catalog = this.packages;
     cx.spawn(async (cx) => {
+      const accept = res => {
+        if (this.closed || catalog !== this.packages) return;
+        for (const item of res.media) this.media[item.id] = item;
+        this.mediaVersion = (this.mediaVersion || 0) + 1;
+        this.syncCards(cx); cx.notify();
+      };
       try {
-        const res = await this.helper(["media", JSON.stringify(ids)], cx);
-        for (const item of res.media || []) this.media[item.id] = item;
-        for (const id of ids) this.media[id] ||= { id };
+        const source = JSON.stringify(ids.map(id => { const pkg = page.find(pkg => pkg.id === id); return [id, pkg.preview_url, pkg.avatar_url]; }));
+        const res = await this.helper(["media", JSON.stringify(ids)], cx, accept, source);
+        if (this.closed) return;
+        if (catalog === this.packages) {
+          for (const item of res.media || []) this.media[item.id] = item;
+          for (const id of ids) this.media[id] ||= { id, error: "Image metadata unavailable" };
+        }
       } catch (e) {
-        for (const id of ids) this.media[id] = { id, error: String(e.message || e) };
+        if (!this.closed && catalog === this.packages) for (const id of ids) this.media[id] = { ...this.media[id], id, error: String(e.message || e), preview_pending: false, avatar_pending: false };
       } finally {
         this.loadingMedia = false;
       }
+      if (this.closed) return;
+      this.mediaVersion = (this.mediaVersion || 0) + 1;
+      this.syncCards(cx);
       cx.notify();
       // A filter may have changed while the images were loading.
       this.loadMedia(cx);
@@ -173,17 +261,20 @@ export default class ModsPlus extends View {
   changeFilter(key, value, cx) {
     this[key] = value;
     this.limit = 24;
+    this.mediaStart = 0;
+    this.catalogScroll.scroll_to_item(0);
     this.loadMedia(cx);
     cx.notify();
   }
 
   async loadSettings(cx) {
     try {
-      this.acceptSettings(await this.helper(["settings"], cx));
+      const value = await this.helper(["settings"], cx);
+      if (!this.closed) this.acceptSettings(value);
     } catch (e) {
-      this.message = `Settings load error: ${e.message}`;
+      if (!this.closed) this.message = `Settings load error: ${e.message}`;
     }
-    cx.notify();
+    if (!this.closed) cx.notify();
   }
 
   acceptSettings(value) {
@@ -269,10 +360,15 @@ export default class ModsPlus extends View {
     this.review = null;
     this.selected = { ...pkg, ...this.media[pkg.id] };
     this.confirmRemove = null;
+    const request = this.detailsRequest = {};
     cx.notify();
     await this.work(cx, `Loading details for ${pkg.name}…`, async () => {
-      const details = await this.helper(["details", pkg.id], cx);
-      if (this.selected?.id === pkg.id) this.selected = details;
+      try {
+        const details = await this.helper(["details", pkg.id], cx);
+        if (!this.closed && this.view === "details" && this.detailsRequest === request) this.selected = details;
+      } catch (error) {
+        if (!this.closed && this.view === "details" && this.detailsRequest === request) throw error;
+      }
     });
   }
 
@@ -477,7 +573,7 @@ export default class ModsPlus extends View {
       )
       .when(disabled, (el) => el.opacity(0.5).cursor_default())
       .when(!disabled, el => el.active(s => s.opacity(0.7)))
-      .transition("opacity", { duration: 250, easing: "ease-out" })
+      .when(this.motion, el => el.transition("opacity", { duration: 120, easing: "ease-out" }))
       .on_click((_e, cx) => {
         cx.stop_propagation();
         if (!disabled) {
@@ -500,6 +596,7 @@ export default class ModsPlus extends View {
       .text_size(12)
       .cursor_pointer()
       .when(active, (el) => el.bg(t.selected).text_color(t.foreground).font_medium())
+      .opacity(active ? 1 : 0.84).when(this.motion, el => el.transition("opacity", { duration: 120, easing: "ease-out" }))
       .when(!active, (el) => el.text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
       .on_click((_e, cx) => action(cx))
       .child(label);
@@ -572,7 +669,7 @@ export default class ModsPlus extends View {
   }
 
   spinner() {
-    return this.icon("spinner", 14).spin(900);
+    return this.icon("spinner", 14).when(this.motion, el => el.spin(900));
   }
 
   updateBadge(t, count) {
@@ -613,10 +710,11 @@ export default class ModsPlus extends View {
       picture = image(asset.preview_path).w(iw * scale).h(ih * scale).flex_none();
     } else {
       picture = div().p(20).text_size(12).text_color(t.muted)
-        .when(Boolean(pkg.preview_url && !asset), el => el.child(this.spinner()))
-        .child(pkg.preview_url ? (asset ? "Preview unavailable" : "Loading preview…") : pkg.description);
+        .when(Boolean(pkg.preview_url && (!asset || asset.preview_pending)), el => el.child(this.spinner()))
+        .child(pkg.preview_url ? (!asset || asset.preview_pending ? "Loading preview…" : "Preview unavailable") : pkg.description);
     }
-    return div().w(width).h(height).flex_none().overflow_hidden().bg(t.background)
+    return div().id(`preview-${pkg.id}`).w(width).h(height).flex_none().overflow_hidden().bg(t.background)
+      .opacity(asset?.preview_path ? 1 : 0.86).when(this.motion, el => el.transition("opacity", { duration: 140, easing: "ease-out" }))
       .flex().items_center().justify_center().child(picture);
   }
 
@@ -653,9 +751,12 @@ export default class ModsPlus extends View {
 
   renderCatalog(t) {
     const packages = this.visiblePackages();
-    const columns = Math.max(1, Math.min(3, Math.floor((this.width - 32) / 280)));
-    const cardWidth = (this.width - 32 - (columns - 1) * 16) / columns;
-    const counts = collection => this.packages.filter(p => p.kind === this.tab && p.collection === collection).length;
+    if (this.collectionCache?.packages !== this.packages || this.collectionCache.tab !== this.tab) {
+      const counts = {};
+      for (const pkg of this.packages) if (pkg.kind === this.tab) counts[pkg.collection] = (counts[pkg.collection] || 0) + 1;
+      this.collectionCache = { packages: this.packages, tab: this.tab, counts };
+    }
+    const counts = collection => this.collectionCache.counts[collection] || 0;
     const controls = h_flex().w_full().gap(8).items_center().flex_wrap()
       .child(this.tabPill(t, "tab-mod", "Mods", this.tab === "mod", cx => this.changeFilter("tab", "mod", cx)))
       .child(this.tabPill(t, "tab-layout", "Layouts", this.tab === "layout", cx => this.changeFilter("tab", "layout", cx)))
@@ -665,7 +766,7 @@ export default class ModsPlus extends View {
     const galleryBar = h_flex().w_full().gap(8).items_center().flex_wrap().pb(12).border_b(0.5).border_color(t.border)
       .child(this.tabPill(t, "community", `Community  ${counts("community")}`, this.collection === "community", cx => this.changeFilter("collection", "community", cx)))
       .child(this.tabPill(t, "examples", `Examples  ${counts("example")}`, this.collection === "example", cx => this.changeFilter("collection", "example", cx)))
-      .when(this.packages.some(pkg => pkg.collection === "direct"), el => el.child(this.tabPill(t, "imported", "Imported",
+      .when(Boolean(counts("direct")), el => el.child(this.tabPill(t, "imported", "Imported",
         this.collection === "direct", cx => this.changeFilter("collection", "direct", cx))))
       .child(div().flex_1())
       .child(this.button(t, "import-source", "Add from GitHub", cx => { this.importOpen = !this.importOpen; cx.notify(); }))
@@ -676,17 +777,16 @@ export default class ModsPlus extends View {
         .rounded(6).border(0.5).border_color(t.border)
         .child(this.icon("search", 14)).child(Input.new(this.search).text_size(12)))
       .child(this.sortPicker(t));
-    const rows = [];
-    const shown = packages.slice(0, this.limit);
-    for (let i = 0; i < shown.length; i += columns) {
-      rows.push(h_flex().gap(16).flex_none().items_start()
-        .children(shown.slice(i, i + columns).map(pkg => this.renderCard(t, pkg, cardWidth))));
-    }
-    const scroll = v_flex().id("catalog-scroll").flex_1().min_h(0).gap(16).overflow_y_scrollbar()
-      .children(rows)
+    const scroll = v_flex().id("catalog-scroll").flex_1().min_h(0).gap(16).overflow_y_scrollbar().track_scroll(this.catalogScroll)
+      .on_click((_event, cx) => {
+        const pkg = this.clickedPackage; this.clickedPackage = null;
+        const current = pkg && this.packages.find(current => current.id === pkg.id);
+        if (current) cx.spawn(cx => this.showDetails(current, cx));
+      })
+      .children(this.grid.map(row => h_flex().gap(16).flex_none().items_start().children(row)))
       .when(!packages.length && !this.busy, el => el.child(div().py(32).text_color(t.muted).child("No packages found.")))
       .when(packages.length > this.limit, el => el.child(this.button(t, "more", "Show more", cx => {
-        this.limit += 24; this.loadMedia(cx); cx.notify();
+        this.mediaStart = this.limit; this.limit += 24; this.syncCards(cx); this.loadMedia(cx); cx.notify();
       })));
     const source = h_flex().w_full().gap(8).items_center()
       .child(Input.new(this.sourceInput).id("source-input").accessibility_label("GitHub repository")
@@ -699,7 +799,7 @@ export default class ModsPlus extends View {
     return v_flex().id("pkg-" + pkg.id).w(width).flex_none().rounded(12).overflow_hidden()
       .bg(t.chrome).border(0.5).border_color(t.border)
       .hover(s => s.bg(t.hover)).cursor_pointer()
-      .on_click((_e, cx) => cx.spawn(cx => this.showDetails(pkg, cx)))
+      .on_click(() => { this.clickedPackage = pkg; })
       .child(this.preview(t, pkg, width, width * 0.625))
       .child(h_flex().w_full().p(14).gap(10).items_center()
         .child(this.avatar(t, pkg))
@@ -758,7 +858,7 @@ export default class ModsPlus extends View {
         .child(TextView.markdown("recipe-" + pkg.id, pkg.recipe).text_size(12))));
     return [
       h_flex().gap(8).items_center()
-        .child(this.iconButton(t, "back", "chevron-left", "Back to catalog", cx => { this.view = "catalog"; cx.notify(); }))
+        .child(this.iconButton(t, "back", "chevron-left", "Back to catalog", cx => { this.view = "catalog"; this.detailsRequest = null; this.loadMedia(cx); cx.notify(); }))
         .child(div().text_color(t.muted).child(`${pkg.kind === "layout" ? "layouts" : "mods"} / ${pkg.author}`)),
       body,
     ];
@@ -820,6 +920,7 @@ export default class ModsPlus extends View {
         .child(
           this.button(t, "btn-back-settings", this.icon("chevron-left", 14), (cx) => {
             this.view = "catalog";
+            this.detailsRequest = null; this.loadMedia(cx);
             cx.notify();
           }).accessibility_label("Back").tooltip("Back")
         )
@@ -940,6 +1041,10 @@ export default class ModsPlus extends View {
     if (this.entry) {
       return this.renderEntry(t);
     }
+    if (this.view === "catalog" && !this.cardSyncPending) {
+      this.cardSyncPending = true;
+      _cx.timer.after(0, cx => { this.cardSyncPending = false; if (!this.closed) this.syncCards(cx); });
+    }
 
     const content =
       this.view === "details"
@@ -989,6 +1094,8 @@ export default class ModsPlus extends View {
           )
       )
       .children(content)
+      .when(this.catalogState === "refreshing" || this.catalogState === "stale", el => el.child(div().text_size(12).text_color(t.muted)
+        .child(this.catalogState === "refreshing" ? "Cached catalog · refreshing…" : "Cached catalog · refresh incomplete")))
       // Busy & Status message banner
       .when(Boolean(this.busy), (el) =>
         el.child(
@@ -1000,5 +1107,12 @@ export default class ModsPlus extends View {
           div().text_size(12).text_color(t.muted).child(this.message)
         )
       );
+  }
+
+  close() {
+    this.closed = true; this.catalogRequest = null; this.detailsRequest = null;
+    this.search?.release(); this.sourceInput?.release(); this.intervalInput?.release();
+    this.catalogScroll?.release();
+    for (const card of this.cards?.values() || []) card.view.release();
   }
 }

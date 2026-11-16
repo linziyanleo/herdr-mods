@@ -70,6 +70,39 @@ test("invalid workspace JSON keeps the last valid mapping and exposes its error"
   assert.match(r.shared["multi-root.spaces"].s1.error, /Invalid workspace JSON/);
 });
 
+test("a cancelled config read cannot publish roots or errors into a replacement workspace", async t => {
+  const r = await runtime(t), roots = await r.load("roots.js"), { file } = await savedWorkspace(r);
+  let release, started;
+  const reading = new Promise(resolve => { started = resolve; });
+  const pending = new Promise(resolve => { release = resolve; });
+  r.hooks.beforeRead = async path => { if (path === file) { started(); await pending; } };
+  let current = true;
+  const reload = roots.reloadWorkspace("s1", () => current);
+  await reading; current = false;
+  const replacement = { name: "Replacement", file: null, folders: [{ path: "/replacement" }] };
+  r.shared["multi-root.spaces"].s1 = replacement;
+  await fs.writeFile(file, "{invalid"); release(); await assert.rejects(reload);
+  assert.equal(r.shared["multi-root.spaces"].s1, replacement); assert.equal(replacement.error, undefined);
+});
+
+test("config replacement cancels only its pending call and empty cancellation does not restart", async t => {
+  const r = await runtime(t), { FilesPanel } = await r.load("workspace.js"), { file } = await savedWorkspace(r);
+  r.platform = "windows";
+  const calls = [];
+  r.hooks.watch = dir => {
+    let finish; const call = { dir, cancelled: 0 };
+    const pending = new Promise(resolve => { finish = resolve; });
+    pending.cancel = () => { call.cancelled++; finish([]); }; calls.push(call); return pending;
+  };
+  const panel = new FilesPanel();
+  panel.watchConfig("s1", file, r.cx); await r.drain();
+  panel.watchConfig("s1", path.join(r.dir, "replacement.json"), r.cx); await r.drain();
+  assert.ok(calls[0].cancelled >= 1); assert.equal(calls.length, 2); assert.equal(calls[1].cancelled, 0);
+  panel.watchConfig("s1", null, r.cx); await r.drain();
+  assert.ok(calls[1].cancelled >= 1); assert.equal(calls.length, 2); assert.equal(panel.configWatch, null);
+  assert.equal(r.calls.some(call => call.command === "pwd"), false);
+});
+
 test("last-root removal and changed/closed target mappings are refused", async t => {
   const r = await runtime(t), c = await r.load("config.js"), target = r.target("", "root");
   r.shared["multi-root.spaces"] = { s1: { name: "One", file: null, folders: [{ path: r.dir }] } };

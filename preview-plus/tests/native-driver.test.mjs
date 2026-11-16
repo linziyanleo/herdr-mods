@@ -23,7 +23,8 @@ async function fixture() {
     watchFolder: () => new Promise(resolve => watchers.add(resolve)),
   };
   class Panel {
-    init() { this.expanded = new Set([""]); this.owner = { mode: "pane" }; }
+    init() { this.expanded = new Set([""]); this.owner = { mode: "pane" }; this.watchers = new Map(); }
+    pinned() { return false; }
     dirty() { return false; }
     render() { return {}; }
   }

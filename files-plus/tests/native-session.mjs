@@ -19,12 +19,12 @@ if (bundle !== installedBundle) await fs.cp(installedBundle, bundle, { recursive
 await fs.mkdir(path.join(app, "mods"), { recursive: true });
 const runtimeFile = entry => !["jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts"].includes(path.basename(entry));
 await fs.cp(process.env.FILES_PLUS_RUNTIME || fileURLToPath(new URL("../mods/files-plus", import.meta.url)), path.join(app, "mods/files-plus"), { recursive: true, filter: runtimeFile });
-await fs.writeFile(path.join(app, "mods/files-plus/mod.json"), '{"place":"none"}');
+await fs.writeFile(path.join(app, "mods/files-plus/mod.json"), '{"place":"none","focusable":true}');
 const driver = path.join(app, "mods/files-plus-driver");
 await fs.cp(path.join(app, "mods/files-plus"), driver, { recursive: true });
 await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
 await fs.copyFile(fileURLToPath(new URL(process.argv.includes("--performance") ? "native-performance-driver.js" : "native-driver.js", import.meta.url)), path.join(driver, "main.js"));
-await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
+await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none","focusable":true}');
 if (process.argv.includes("--motion")) {
   const file = path.join(driver, "tree.js");
   const code = await fs.readFile(file, "utf8");

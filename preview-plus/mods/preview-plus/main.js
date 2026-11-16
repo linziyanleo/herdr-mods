@@ -1,9 +1,9 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
+import { props, shared, setShared, spaces, panes, terminals, focused, run, readTextFile, writeTextFile, watchFolder, checking, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, richText, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
-import { loadMedia, openFile } from "./media.js";
+import { loadMedia, mediaSignature, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
 import { markdownView } from "./markdown-view.js";
 import { structuredPreview } from "./structured.js";
@@ -16,8 +16,12 @@ const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", js
 function context() {
   const p = props() || {}, f = focused(), space = spaces().find(s => s.id === f?.space) || spaces().find(s => s.active);
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
-  if (p.file !== undefined) return { mode: "pane", spaceId: space?.id || null, target: target(p) };
-  if (p.previewStack) return { mode: "paired", stack: p.previewStack, spaceId: space?.id || null, target: target(shared("preview-plus.target")?.[space?.id]) };
+  if (p.file !== undefined) return { mode: "pane", spaceId: p.space || null, target: target(p) };
+  if (p.previewStack) {
+    const incoming = shared("preview-plus.target")?.[space?.id];
+    return { mode: "paired", stack: p.previewStack, spaceId: space?.id || null,
+      target: target(shared("preview-plus.pinned")?.[space?.id] || incoming), selection: incoming?.selection };
+  }
   const on = f?.pane === null && f?.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine || null;
   return { mode: "files", spaceId: space?.id || null, cwd: pane?.cwd || f?.cwd || space?.folder || null, on };
 }
@@ -55,7 +59,8 @@ export default class PreviewPlus extends View {
           this.documents.set(draft.file, { ...draft, saving: false });
       }
     } catch { this.draftError = "Saved drafts could not be read."; }
-    this.history = []; this.watchers = new Map(); this.watchedFiles = new Set();
+    this.history = []; this.watchers = new Map(); this.watchErrors = new Map(); this.watchedFiles = new Set();
+    this.handle = cx.focus_handle();
     this.anchor = ""; this.contents = false; this.expanded = new Set([""]);
     this.viewport = { width: 400, height: 500 }; this.zoom = null; this.page = 1; this.total = 0;
     this.pan = { x: 0, y: 0 };
@@ -68,7 +73,10 @@ export default class PreviewPlus extends View {
     cx.spawn(async cx => {
       for (;;) {
         const command = await nextCommand();
-        if (command === "back") this.back(cx);
+        if (command === "focus") this.focusContent();
+        else if (command === "pin") this.togglePin(cx);
+        else if (command === "agent") this.focusAgent(cx);
+        else if (command === "back") this.back(cx);
         else if (command === "source") this.setSource(true, cx);
         else if (command === "preview") this.setSource(false, cx);
         else if (command === "save") this.save(cx);
@@ -82,15 +90,23 @@ export default class PreviewPlus extends View {
       }
     });
     // Only remote directory listings need a bounded refresh timer; live app data does not.
-    cx.timer.every(10000, cx => { if (this.tree?.location.on && !this.selected) this.tree.refresh(cx); });
+    cx.timer.every(10000, cx => { if (this.selected?.on) this.poll(cx); else if (this.tree?.location.on && !this.selected) this.tree.refresh(cx); });
+    cx.timer.every(60000, cx => { if (this.selected && !this.selected.on) this.poll(cx); else this.tree?.refresh(cx); });
   }
 
   sync(cx) {
     const next = context(), key = JSON.stringify(next);
     if (this.owner?.key === key) return;
+    if (next.mode === "paired" && this.owner?.mode === "paired" && next.spaceId === this.owner.spaceId
+      && next.target?.file === this.selected?.file && next.target?.on === this.selected?.on) {
+      this.owner = { ...next, key };
+      if (this.request) this.request.owner = this.owner;
+      return;
+    }
     this.owner = { ...next, key }; this.request = null; this.releaseEditor(); this.document = null;
     this.history = []; this.selected = null; this.media = null; this.text = null; this.error = null; this.actionError = null;
-    this.watchTargets([], cx); this.tree = null;
+    this.watchTargets([], cx); this.tree?.close(); this.tree = null;
+    if (checking()) return;
     if (next.mode === "files") {
       const owner = this.owner;
       this.tree = new Tree(next, () => !this.closed && this.owner === owner && contextKey() === owner.key);
@@ -104,6 +120,11 @@ export default class PreviewPlus extends View {
 
   releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; }
 
+  focusContent() {
+    if (this.code && (this.source || !richText(kind(this.selected.file)))) this.code.focus();
+    else this.handle.focus();
+  }
+
   updateEditor() {
     const style = sourceStyle(), ext = extension(this.selected.file);
     this.releaseEditor();
@@ -115,10 +136,45 @@ export default class PreviewPlus extends View {
   editorChanged(code, cx) {
     if (this.code !== code || !this.document) return;
     this.text = this.document.text = code.value(); this.confirmDiscard = false;
+    if (this.dirty()) this.pin();
     this.persistDrafts(); cx.notify();
   }
 
   dirty(doc = this.document) { return Boolean(doc && doc.text !== doc.base); }
+
+  pinned() {
+    const pinned = shared("preview-plus.pinned")?.[this.owner.spaceId];
+    return Boolean(this.owner.mode === "paired" && pinned && pinned.file === this.selected?.file && pinned.on === this.selected?.on);
+  }
+
+  pin() {
+    if (this.owner.mode === "paired" && this.selected && !this.pinned())
+      setShared("preview-plus.pinned", { ...(shared("preview-plus.pinned") || {}), [this.owner.spaceId]: this.selected });
+  }
+
+  togglePin(cx) {
+    if (!this.selected || this.owner.mode !== "paired") return;
+    if (!this.pinned()) this.pin();
+    else if (this.dirty() || this.document?.saving) this.actionError = "Save or confirm discard before unpinning this draft.";
+    else {
+      const incoming = shared("preview-plus.target") || {};
+      setShared("preview-plus.target", { ...incoming, [this.owner.spaceId]: { ...incoming[this.owner.spaceId], ...this.selected } });
+      const pins = { ...shared("preview-plus.pinned") }; delete pins[this.owner.spaceId];
+      setShared("preview-plus.pinned", pins); this.actionError = null;
+    }
+    cx.notify();
+  }
+
+  focusAgent(cx) {
+    const agent = props()?.agent || shared("preview-plus.target")?.[this.owner.spaceId]?.agent;
+    const terminal = agent?.active?.terminal;
+    const machine = terminal?.includes("/") ? terminal.split("/")[0] : null;
+    if (!terminal || machine !== agent.on || !spaces().some(space => space.id === agent.space && space.machine === agent.on)
+      || !terminals().some(terminal => terminal.address === agent.active.terminal && terminal.state === "live")) {
+      this.actionError = "The captured agent terminal is no longer available."; cx.notify(); return;
+    }
+    run("pane.focus", { terminal: agent.active.terminal });
+  }
 
   persistDrafts() {
     try {
@@ -204,6 +260,10 @@ export default class PreviewPlus extends View {
   keyDown(event, cx) {
     const saveKey = window()?.platform === "macos" ? "cmd-s" : "ctrl-s";
     if (event.keystroke === saveKey && this.document) { cx.stop_propagation(); this.save(cx); }
+    else if (event.keystroke && event.keystroke !== event.key) return;
+    else if (event.key === "f6") { cx.stop_propagation(); this.back(cx); }
+    else if (event.key === "f7") { cx.stop_propagation(); this.togglePin(cx); }
+    else if (event.key === "f8") { cx.stop_propagation(); this.focusAgent(cx); }
   }
 
   remember() {
@@ -214,6 +274,7 @@ export default class PreviewPlus extends View {
   show(value, cx, remember = false, notify = true, anchor = "") {
     const next = target(value);
     if (!next) return;
+    this.tree?.close();
     if (remember && this.selected) this.remember();
     this.selected = next; this.source = false; this.zoom = null; this.page = 1; this.total = 0;
     this.anchor = anchor; this.contents = false; this.expanded = new Set([""]);
@@ -244,6 +305,7 @@ export default class PreviewPlus extends View {
           if (draft && (this.dirty(draft) || draft.saving)) {
             this.document = draft; draft.external = value !== draft.base;
             this.text = draft.text; this.truncated = false;
+            this.pin();
           } else {
             if (value === null) throw new Error("This file is no longer available.");
             if (value.includes("\0")) throw new Error("This binary file has no text preview.");
@@ -267,12 +329,31 @@ export default class PreviewPlus extends View {
       finally {
         if (this.current(request)) {
           this.loading = false;
+          if (this.handle.is_focused()) this.focusContent();
           if (this.reloadPending) { this.reloadPending = false; this.reload(cx); }
           cx.notify();
         }
       }
     });
     if (notify) cx.notify();
+  }
+
+  poll(cx) {
+    const type = kind(this.selected.file);
+    if (type !== "image" && type !== "pdf") { this.reload(cx); return; }
+    // Remote media is unsupported; polling must not repeatedly clear that state.
+    if (this.selected.on || this.loading || this.mediaPoll === this.request) return;
+    const request = this.mediaPoll = this.request, selected = this.selected;
+    cx.spawn(async cx => {
+      try {
+        const signature = await mediaSignature(selected);
+        if (!this.current(request)) return;
+        if (signature !== this.media?.signature) this.load(cx);
+        else if (this.error) { this.error = null; cx.notify(); }
+      } catch (error) {
+        if (this.current(request)) { this.error = String(error.message || error); cx.notify(); }
+      } finally { if (this.mediaPoll === request) this.mediaPoll = null; }
+    });
   }
 
   reload(cx) {
@@ -305,20 +386,22 @@ export default class PreviewPlus extends View {
   watchTargets(files, cx) {
     this.watchedFiles = new Set(files.map(normalize));
     const directories = new Set(files.map(dirname));
-    for (const dir of this.watchers.keys()) if (!directories.has(dir)) this.watchers.delete(dir);
+    for (const dir of this.watchErrors.keys()) if (!directories.has(dir)) this.watchErrors.delete(dir);
+    for (const [dir, token] of this.watchers) if (!directories.has(dir)) { this.watchers.delete(dir); token.pending?.cancel(); }
     for (const dir of directories) {
       if (this.watchers.has(dir)) continue;
-      const token = {}; this.watchers.set(dir, token);
+      const token = { pending: null }; this.watchers.set(dir, token);
       cx.spawn(async cx => {
         try {
           // Register first so saves during physical-path resolution remain queued.
-          let pending = watchFolder(dir);
+          token.pending = watchFolder(dir);
           const windows = window()?.platform === "windows";
-          const physical = windows ? dir : (await exec("pwd", ["-P"], { cwd: dir })).stdout.trim() || dir;
+          const physicalPath = windows ? Promise.resolve(dir) : exec("pwd", ["-P"], { cwd: dir }).then(result => result.stdout.trim() || dir);
           const pathKey = path => windows ? normalize(path).toLowerCase() : normalize(path);
           while (!this.closed && this.watchers.get(dir) === token) {
-            const changed = await pending;
-            if (this.closed || this.watchers.get(dir) !== token) return;
+            const [changed, physical] = await Promise.all([token.pending, physicalPath]);
+            if (this.closed || this.watchers.get(dir) !== token || !changed.length) return;
+            if (this.watchErrors.delete(dir)) cx.notify();
             // A directory event can represent an atomic save or a folder rename.
             if (changed.some(path => {
               const value = pathKey(path);
@@ -327,19 +410,29 @@ export default class PreviewPlus extends View {
                 return original === value || canonical === value || canonical.startsWith(value + "/");
               });
             })) this.reload(cx);
-            pending = watchFolder(dir);
+            token.pending = watchFolder(dir);
           }
-        } catch { if (this.watchers.get(dir) === token) this.watchers.delete(dir); }
+        } catch (error) {
+          if (this.watchers.get(dir) === token) { this.watchErrors.set(dir, String(error.message || error)); cx.notify(); }
+        } finally {
+          token.pending?.cancel();
+          if (this.watchers.get(dir) === token) this.watchers.delete(dir);
+        }
       });
     }
   }
+
+  get watchError() { return [...this.watchErrors.values()].join("\n") || null; }
 
   follow(href, cx) {
     if (!this.selected) return;
     try {
       const link = resolveLink(this.selected.file, href);
       if (link.url) cx.open_url(link.url);
-      else if (link.file && link.file !== this.selected.file) this.show({ ...this.selected, file: link.file }, cx, true, true, link.anchor || "");
+      else if (link.file && link.file !== this.selected.file) {
+        if (this.pinned()) throw new Error("Unpin before following another file.");
+        this.show({ ...this.selected, file: link.file }, cx, true, true, link.anchor || "");
+      }
       else if (link.anchor !== undefined && kind(this.selected.file) === "markdown") {
         if (link.anchor && !this.headings?.some(h => h.slug === link.anchor)) throw new Error(`Heading not found: #${link.anchor}`);
         if (this.anchor === link.anchor && !this.source) return;
@@ -349,16 +442,22 @@ export default class PreviewPlus extends View {
   }
 
   back(cx) {
+    if (this.pinned() && this.history.length && this.history[this.history.length - 1].target.file !== this.selected.file) {
+      run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" }); run("files-plus.return"); return;
+    }
     if (this.history.length) {
       const previous = this.history.pop();
       const same = this.selected?.file === previous.target.file && this.selected?.on === previous.target.on;
       this.selected = previous.target; this.source = previous.source; this.zoom = previous.zoom; this.page = previous.page; this.total = 0;
       this.anchor = previous.anchor || ""; this.contents = previous.contents || false; this.expanded = new Set(previous.expanded || [""]);
       if (same && this.code) { this.actionError = null; this.setSource(this.source, cx); } else this.load(cx);
-    } else if (this.owner.mode === "paired") run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
+    } else if (this.owner.mode === "paired") {
+      run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" });
+      run("files-plus.return");
+    }
     else if (this.owner.mode === "files") {
       this.selected = null; this.request = null; this.releaseEditor(); this.document = null; this.media = null; this.error = null; this.actionError = null;
-      this.watchTargets([], cx); this.tree?.refresh(cx); cx.notify();
+      this.watchTargets([], cx); this.tree?.watch(cx); this.tree?.refresh(cx); cx.notify();
     }
   }
 
@@ -460,12 +559,13 @@ export default class PreviewPlus extends View {
       cx.spawn(async cx => { if (!this.closed && this.selected?.file === file && !this.markdownBusy) this.refreshMarkdown(cx); });
     }
     const panelFrame = this.owner.mode !== "pane";
-    return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background)
+    return v_flex().id("preview-plus").track_focus(this.handle).size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background)
       .when(panelFrame, el => el.rounded(10).border_1().border_color(colors.border)).text_color(colors.foreground).font_family(font).text_size(13)
       .on_key_down((event, cx) => this.keyDown(event, cx))
       .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
         .when(Boolean(file) && panelFrame, el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
         .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "Files"))
+        .when(Boolean(file) && this.owner.mode === "paired", el => el.child(button("preview-pin", this.pinned() ? "Unpin (F7)" : "Pin (F7)", colors, cx => this.togglePin(cx), true, this.pinned(), "lock")))
         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
           .tooltip(this.document?.saving ? "Saving…" : "Unsaved changes").accessibility_label(this.document?.saving ? "Saving" : "Unsaved changes")))
         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
@@ -501,6 +601,7 @@ export default class PreviewPlus extends View {
           .child(div().px(6).text_size(12).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
           .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
       .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
+      .when(Boolean(this.watchError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(`Live refresh unavailable: ${this.watchError}. Periodic refresh remains active.`)))
       .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
       .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file in Files Plus.")))
@@ -536,7 +637,7 @@ export default class PreviewPlus extends View {
   }
 
   async close() {
-    this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release();
+    this.closed = true; this.request = null; this.watchTargets([], null); this.tree?.close(); this.releaseEditor(); this.zoomInput.release();
     this.persistDrafts(); await localStorage.flush();
   }
 }

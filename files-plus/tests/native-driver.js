@@ -11,6 +11,7 @@ import { fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 
 export default class NativeDriver extends FilesPlus {
+  commands() {}
   close(cx) {
     if (this.clipboardBefore !== undefined && cx.read_from_clipboard() === "files-plus clipboard baseline") cx.write_to_clipboard(this.clipboardBefore);
     super.close(cx);
@@ -44,7 +45,7 @@ export default class NativeDriver extends FilesPlus {
     if (spec.role) return;
     cx.spawn(async cx => {
       for (;;) {
-        await nextCommand();
+        if (this.command(await nextCommand(), cx)) continue;
         const request = JSON.parse(await readTextFile(`${spec.base}/request.json`));
         try {
           if (request.type === "workspace") {
@@ -105,9 +106,10 @@ export default class NativeDriver extends FilesPlus {
     if (!this.role && this.nativeOwnerEnabled && shared("files-plus.native-driver-owner")?.[id] !== this.nativeIdentity) return;
     const value = { role: this.role || "panel", file: this.file || null, fileError: this.fileError || null, error: this.error || null, busy: Boolean(this.busy),
       folders: [...(this.folders || [])], entries: Object.fromEntries(this.entries || []), marks: this.marks || {}, preview: this.code ? { readonly: true } : null, workspaces: shared("multi-root.spaces") || {} };
-    if (!this.role) Object.assign(value, { context: this.context, location: location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
+    if (!this.role) Object.assign(value, { context: this.context, location: this.location(), syncPending: this.syncPending, treeVersion: this.treeVersion, layout: layout(), zoom: settings().zoom,
       visible: this.visible, panelSize: this.panelSize, panelBounds: this.panelBounds, manualWidthSpace: this.manualWidthSpace, lastRequestedWidth: this.lastRequestedWidth, renderCount: this.renderCount, renderedLayout: this.renderedLayout,
       selectedFile: this.selectedFile, suppressClick: this.suppressClick, stats: globalThis.__fpStats, sizeEvents: this.sizeEvents,
+      watchers: this.watches.size, configWatch: Boolean(this.configWatch), watchStats: globalThis.__filesWatchStats,
       search: this.search ? { query: this.search.query, busy: this.search.busy, results: this.search.results, failures: this.search.failures, errors: this.search.errors, truncated: this.search.truncated, at: this.search.at } : null,
       treeLook: this.chunks[0] ? JSON.parse(this.chunks[0].key).slice(1) : null, previewStyle: this.previewStyle,
       dragStarts: shared("files-plus.native-drag"), motion: globalThis.__fpMotion });

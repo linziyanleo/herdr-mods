@@ -21,6 +21,20 @@ Browse Herdr catalogs or import a public GitHub package. Review the files, revis
 
 ## How it behaves
 
+Requires Herdr 0.1.16 or newer for `checking()`, retained native child views and `ScrollHandle`. Native checks skip helper scheduling; populated/deferred views require a live isolated instance as well.
+
+### Catalog work and motion
+
+Each four-card media job publishes cumulative asset snapshots atomically as URL futures complete, rather than waiting for the slowest URL in submission order. The UI consumes changed snapshots through the existing 500ms status channel and guards them by catalog/view ownership. Pending preview fields retain loading feedback even if an avatar arrives first. Matching media source identities share a job; changed URL identities cannot reuse an old in-flight media job. No per-image Python or job process is created, and package mutation workers/deadlines retain their existing behavior.
+
+Keep the existing cache-first metadata, four concurrent feeds, task deduplication/deadlines, 24-card pages and four-card image batches. Coalesce identical preview/avatar URLs within each image batch; cached URLs still use the existing disk cache. New pages are prioritized before earlier missing images. Failures remain visible on their cards and cannot cause an empty-response hot loop. Cached refresh failures keep the catalog and report stale/error state. Request identities reject superseded catalog/details results, and media responses belong to the immutable catalog snapshot that started them.
+
+Memoize derived filtering/sorting against package-array identity and controls. Retain native card child views; update only changed package/media/theme/width/motion props and release cards outside the revealed page. The native scroll container retains its position while details opens. Card clicks bubble to the parent before starting async details work so the task owns the correct context. Herdr 0.1.16 virtual row renderers cannot register these deferred callbacks; do not replace the retained grid with a callback-bearing virtual row.
+
+Only native opacity transitions are added: 120ms control feedback and 140ms image arrival. The macOS AppKit accessibility reduced-motion query enables motion only when it explicitly returns false. Other hosts and query failures remain static; `props.motion: false` opts out. The existing loading spinner also stays static in that mode, retaining its text. No frame timers, whole-grid entrance or animated layout reflow is used. `checking()` avoids the OS query during checks.
+
+The [implementation report](../docs/plans/interaction-performance-implementation.md) separates reproducible network body counts, JavaScript description work and inspected native behavior. It makes no unit-test-derived FPS claim. Review/install/enable, ownership, local modifications and candidate validation retain their existing gates.
+
 ### Background tasks and loading
 
 - Cached catalog entries appear before network refresh. Four official feeds refresh concurrently; media reads cached metadata without refreshing the feeds again.
@@ -113,6 +127,8 @@ Original Mods Plus code and assets are licensed under [MIT](LICENSE). Herdr/GPUI
 14. `python3 mods-plus/tests/jobs.test.py` passes, including a real 31-second task after its launcher exits, duplicate requests, failed-task retry, and timeout cleanup of descendants.
 
 ## Verification record
+
+The [0.1.16 interaction/performance record](../docs/plans/interaction-performance-implementation.md) contains current network/render measurements, regression results, inspected native behavior and remaining physical checks. The records below describe earlier 0.1.13 work.
 
 The Update all follow-up passed 53 Python cases across helper, catalog, updates, review and acceptance suites, 15 UI event cases, and the source native check on macOS with Herdr 0.1.13. Twelve isolated native flows include a two-package mod/layout update, keeping a stored layout inactive, and copying a full batch prompt without applying it. The macOS clipboard matched the saved prompt exactly. [The native screenshot](update-all-preview.png) shows the home action, pending marker and agent handoff result. Physical pointer/keyboard and additional narrow/dark states were not exercised in this follow-up. See the [bulk-update record](../docs/plans/mods-plus.md#bulk-updates-2026-11-06) for scope and evidence.
 

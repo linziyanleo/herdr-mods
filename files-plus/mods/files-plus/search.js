@@ -50,12 +50,13 @@ export class FileSearch {
     this.handle = cx.focus_handle();
     this.scroll = VirtualListScrollHandle.new();
     this.input.on("change", (_event, cx) => this.setQuery(this.input.value(), cx));
-    this.input.on("submit", (_event, cx) => this.open(this.results[this.at]?.key, cx));
+    this.input.on("submit", (_event, cx) => this.open(this.results[this.at]?.key, cx, true));
   }
   get active() { return pathTerms(this.query).length > 0; }
   setQuery(query, cx) {
     if (query === this.query) return;
     this.query = query;
+    this.panel.syncWatches(cx);
     if (this.input.value() !== query) this.input.set_value(query);
     this.refresh(cx, true);
   }
@@ -81,15 +82,15 @@ export class FileSearch {
     });
   }
   clear(cx) { this.setQuery("", cx); }
-  open(key, cx) {
+  open(key, cx, temporary = false) {
     const result = this.results.find(result => result.key === key);
     if (!result || this.busy || !this.panel.current(this.context) || result.on !== this.panel.on) return;
     this.at = this.results.indexOf(result);
-    this.panel.openFile(result.path, result.root, cx);
+    this.panel.openFile(result.path, result.root, cx, { temporary });
     cx.notify();
   }
   key(event, cx) {
-    if (event.key === "escape") { this.clear(cx); cx.stop_propagation(); }
+    if (event.key === "escape") { this.clear(cx); this.panel.handle.focus(); cx.stop_propagation(); }
     else if (this.active && ["up", "down"].includes(event.key)) {
       this.at = Math.max(0, Math.min(this.results.length - 1, this.at + (event.key === "down" ? 1 : -1)));
       if (this.results.length) this.scroll.scroll_to_item(this.at, "center");

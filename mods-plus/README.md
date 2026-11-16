@@ -4,6 +4,8 @@ Browse Herdr mods and layouts, import public GitHub packages, and review files a
 
 ![Mods Plus](preview.png)
 
+Requires Herdr **0.1.16 or newer**, Python 3, curl and Git. See the [measured implementation report](../docs/plans/interaction-performance-implementation.md) for the current host, before/after data and acceptance gaps.
+
 ## Browse and install
 
 Open Plugins from the sidebar or its configured shortcut. Browse Community and Examples, switch between Mods and Layouts, filter by installation status, or search and sort the catalog. Details show the recipe, source, preview and available actions.
@@ -49,6 +51,10 @@ To install manually:
 
 ## Development checks
 
+Catalog loading remains cache-first with concurrent metadata feeds, 24-card pages and four-card image batches. Cached content remains visible during refresh or failure, with freshness/error text. Shared image URLs within a batch download once; newly revealed pages get first image priority. Derived filtering/sorting and card views are retained across unrelated renders. Pagination bounds work; the gallery is not a virtualized grid.
+
+Short native opacity transitions use the macOS reduced-motion preference. Unknown/unsupported hosts stay static; `props.motion: false` explicitly keeps a disposable/layout instance static. No JavaScript frame timer is used. Search/filter state and native catalog scroll survive opening details and returning.
+
 ```sh
 python3 mods-plus/tests/helper.test.py
 python3 mods-plus/tests/catalog.test.py
@@ -60,7 +66,11 @@ node --test mods-plus/tests/ui.test.cjs
 herdr-app check mods-plus/mods/mods-plus
 ```
 
+For reproducible measurements, `python3 mods-plus/tests/benchmark.py --live --feeds /tmp/mods-feeds --samples 5` records the four public metadata feeds once, then measures real curl against loopback with 20ms response delay and 32KiB synthetic images. Reuse `--feeds` without `--live` and `--runtime <baseline-runtime>` for comparison. It reports cold/warm requests, body bytes, timings and verified image/error counts; it excludes TLS, the native bridge and image decoding. `node mods-plus/tests/benchmark.cjs <runtime> 100` measures JavaScript filtering/builders for 96, 1,302 and 4,096 entries. Neither script measures FPS or end-to-end responsiveness. Alternate before/after runs under the same load.
+
 The jobs suite includes a real 31-second operation. UI event tests require Node.js 18 or newer and no extra dependencies.
+
+Images publish cumulative progress through the existing batch job's atomic receipt. Fast preview/avatar files appear while a slow peer is still downloading; four-card batches and at most four download workers remain. Status polling stays at 500ms with no per-image jobs. Run `python3 mods-plus/tests/progressive-media.py --expect-progress` for a real curl cold/warm test with one 1s asset and three 20ms assets, including job/poll counts and valid PNG verification.
 
 For native checks, `node mods-plus/tests/native-fixture.mjs` prepares a disposable home and prints its session file. It does not start Herdr or herdr-core. Launch that home with the printed environment, then run `node mods-plus/tests/native-verify.mjs <session.json>`. The driver uses the production view and helper with a local fixture repository. It records results and screenshots. Keep it out of the normal app home.
 

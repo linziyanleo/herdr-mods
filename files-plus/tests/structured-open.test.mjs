@@ -24,7 +24,9 @@ test("every file type opens in Preview Plus using the selected center destinatio
       const call = r.calls.at(-1);
       assert.equal(call.command, destination === "tab" ? "tab.new" : "pane.split");
       assert.equal(call.args.mod, "preview-plus");
-      assert.deepEqual({ ...call.args.props }, { file, root: r.dir, on: null });
+      const { agent, space, ...target } = call.args.props;
+      assert.deepEqual({ ...target }, { file, root: r.dir, on: null });
+      assert.equal(space, "s1"); assert.equal(agent.active.terminal, "t1"); assert.equal(agent.on, null);
       assert.equal(r.shared["preview-plus.target"], undefined);
     }
   }
@@ -39,9 +41,13 @@ test("all file types use the paired sidebar stack without changing another space
   for (const name of ["data.json", "src.ts", "Dockerfile", ".env", "unknown.format", "archive.zip"]) {
     const file = path.join(r.dir, name);
     panel.openFile(file, r.dir, r.cx); await r.drain();
-    assert.equal(r.calls.at(-1).command, "layout.select");
-    assert.deepEqual({ ...r.calls.at(-1).args }, { stack: "files", child: "preview-plus" });
-    assert.deepEqual({ ...r.shared["preview-plus.target"].s1 }, { file, root: r.dir, on: null });
+    assert.equal(r.calls.at(-1).command, "preview-plus.focus");
+    assert.equal(r.calls.at(-2).command, "layout.select");
+    assert.deepEqual({ ...r.calls.at(-2).args }, { stack: "files", child: "preview-plus" });
+    const { agent, selection, ...target } = r.shared["preview-plus.target"].s1;
+    assert.deepEqual({ ...target }, { file, root: r.dir, on: null });
+    assert.equal(typeof selection, "string");
+    assert.equal(agent.active.terminal, "t1");
     assert.equal(r.shared["preview-plus.target"].other, other);
   }
 });

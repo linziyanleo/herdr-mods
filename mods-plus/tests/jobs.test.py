@@ -68,6 +68,16 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(self.wait(second["id"])["state"], "done")
         self.assertFalse(path.exists())
 
+    def test_media_deduplication_includes_source_identity(self):
+        self.helper.write_text('import time,json\ntime.sleep(.5)\nprint(json.dumps({"media": []}))\n')
+        first = jobs.start(self.root, ["media", '["one"]', "source-a"], self.helper)
+        same = jobs.start(self.root, ["media", '["one"]', "source-a"], self.helper)
+        changed = jobs.start(self.root, ["media", '["one"]', "source-b"], self.helper)
+        self.assertEqual(first["id"], same["id"])
+        self.assertNotEqual(first["id"], changed["id"])
+        self.assertEqual(self.wait(first["id"])["state"], "done")
+        self.assertEqual(self.wait(changed["id"])["state"], "done")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -53,8 +53,11 @@ test("workspace focus changes retain expansion and preview; paired mode sends th
   await fs.mkdir(path.join(r.dir, "app/mods/preview-plus"), { recursive: true });
   await fs.writeFile(path.join(r.dir, "app/mods/preview-plus/mod.json"), "{}");
   r.props.previewStack = "files"; panel.show(null); panel.openFile(file, web, r.cx); await r.drain();
-  assert.deepEqual(JSON.parse(JSON.stringify(r.shared["preview-plus.target"].s1)), { file, root: web, on: null });
-  assert.deepEqual(JSON.parse(JSON.stringify(r.calls.at(-1))), { command: "layout.select", args: { stack: "files", child: "preview-plus" } });
+  const handoff = r.shared["preview-plus.target"].s1;
+  assert.deepEqual({ file: handoff.file, root: handoff.root, on: handoff.on }, { file, root: web, on: null });
+  assert.equal(handoff.agent.active.terminal, "t1"); assert.equal(handoff.agent.space, "s1");
+  assert.deepEqual(JSON.parse(JSON.stringify(r.calls.at(-2))), { command: "layout.select", args: { stack: "files", child: "preview-plus" } });
+  assert.equal(r.calls.at(-1).command, "preview-plus.focus");
   assert.equal(panel.file, null); assert.ok(panel.folders.has(path.join(web, "src")));
 });
 
@@ -66,6 +69,49 @@ test("configured pairing falls back to source when Preview Plus is absent", asyn
   const panel = new Files(); panel.init({}, r.cx); await r.drain();
   panel.openFile(file, r.dir, r.cx); await r.drain();
   assert.equal(panel.code.value, "# Alone\n"); assert.equal(r.shared["preview-plus.target"], undefined);
+});
+
+test("keyboard preview returns to the selected result and explicitly inserts into the captured terminal", async t => {
+  const r = await runtime(t), { default: Files } = await r.load("main.js");
+  const name = "notes 中文 'draft'.txt", file = path.join(r.dir, name);
+  await fs.writeFile(file, "Draft fixture");
+  await fs.mkdir(path.join(r.dir, "app/mods/preview-plus"), { recursive: true });
+  await fs.writeFile(path.join(r.dir, "app/mods/preview-plus/mod.json"), "{}");
+  r.props.previewStack = "files";
+  const panel = new Files(); panel.init({}, r.cx); await r.drain();
+  panel.search.setQuery("notes", r.cx); await r.advance(180);
+  panel.search.input.handlers.submit({}, r.cx); await r.drain();
+  assert.equal(r.shared["preview-plus.target"].s1.file, file);
+  assert.equal(r.calls.some(call => call.command === "tab.new"), false);
+  r.shared["preview-plus.pinned"] = { s1: { file, on: null } };
+  panel.openFile(path.join(r.dir, "other.txt"), r.dir, r.cx, { temporary: true }); await r.drain();
+  assert.equal(r.shared["preview-plus.target"].s1.file, file);
+  r.focus = { space: "s1", terminal: null, pane: null };
+  panel.command("return", r.cx); assert.equal(panel.search.query, "notes"); assert.equal(panel.search.at, 0);
+  panel.treeKey({ key: "f7", keystroke: "shift-f7" }, r.cx); await r.drain(); assert.equal(r.pasted, undefined);
+  panel.treeKey({ key: "f7", keystroke: "f7" }, r.cx); await r.drain();
+  assert.equal(r.pasted, `@${JSON.stringify(name)} `); assert.equal(r.clipboard, "original clipboard");
+  assert.equal(r.focus.terminal, "t1"); assert.equal(r.calls.some(call => call.command === "terminal.send"), false);
+  panel.search.key({ key: "escape" }, r.cx); assert.equal(panel.search.query, ""); assert.equal(r.keyboard, panel.handle);
+  panel.close();
+});
+
+test("workspace identity changes when its machine or config file changes", async t => {
+  const r = await runtime(t), w = await r.load("workspace.js");
+  r.shared["multi-root.spaces"] = { s1: { folders: [{ path: r.dir }] } };
+  const local = w.location();
+  r.shared["multi-root.spaces"].s1.file = "/replacement.json";
+  assert.notEqual(w.location().key, local.key);
+  r.spaces[0].machine = "remote";
+  const remote = w.location(); assert.notEqual(local.key, remote.key); assert.equal(remote.on, "remote");
+});
+
+test("canonical Files pane identity preserves cwd when its terminal cwd disappears", async t => {
+  const r = await runtime(t), w = await r.load("workspace.js");
+  r.spaces[0].folder = "/tmp/project"; r.focus.cwd = null; r.panes[0].cwd = null;
+  const previous = { space: "s1", cwd: "/private/tmp/project", terminalCwd: "/private/tmp/project" };
+  r.panes[0].mod = "files-plus"; assert.equal(w.location(previous).cwd, "/private/tmp/project");
+  r.panes[0].mod = "files-plus-driver"; assert.equal(w.location(previous).cwd, "/tmp/project");
 });
 
 test("stale preview reads cannot replace the latest file or another space", async t => {

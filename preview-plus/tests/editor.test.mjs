@@ -142,3 +142,53 @@ test("remote and truncated files stay read-only and cannot save", async t => {
   assert.equal(p.code.readonly, true); assert.equal(find(r.render(), "preview-save"), null);
   p.save(r.cx); assert.equal((await fs.readFile(r.props.file, "utf8")).length, 400001);
 });
+
+test("paired preview pinning protects incoming selection and editing pins a recoverable draft", async t => {
+  const r = await setup(t), p = r.panel, file = r.props.file;
+  r.props = { previewStack: "files" };
+  r.shared["preview-plus.target"] = { s1: { file, root: r.dir, on: null } };
+  r.render(); await r.settle();
+  p.togglePin(r.cx); assert.equal(p.pinned(), true);
+  const other = path.join(r.dir, "other.txt"); await fs.writeFile(other, "Other");
+  r.shared["preview-plus.target"].s1 = { file: other, root: r.dir, on: null };
+  r.render(); await r.settle(); assert.equal(p.selected.file, file);
+  p.togglePin(r.cx); r.render(); await r.settle(); assert.equal(p.selected.file, file);
+  r.shared["preview-plus.target"].s1 = { file: other, root: r.dir, on: null, selection: "next" };
+  r.render(); await r.settle();
+  r.edit("Dirty draft"); assert.equal(p.pinned(), true);
+  p.togglePin(r.cx); assert.equal(p.pinned(), true); assert.match(p.actionError, /Save or confirm discard/);
+  r.shared["preview-plus.target"].s1 = { file, root: r.dir, on: null };
+  r.render(); assert.equal(p.code.value(), "Dirty draft");
+  await p.close(); await r.start(); assert.equal(r.panel.code.value(), "Dirty draft");
+  assert.equal(await fs.readFile(other, "utf8"), "Other");
+});
+
+test("pinning a followed file keeps editor focus; unpin and explicit reopening preserve navigation intent", async t => {
+  const r = await setup(t, "first.md"), p = r.panel, first = r.props.file;
+  const next = path.join(r.dir, "next.txt"); await fs.writeFile(next, "Next\n");
+  r.props = { previewStack: "files" };
+  r.shared["preview-plus.target"] = { s1: { file: first, root: r.dir, on: null, selection: "first" } };
+  r.render(); await r.settle();
+  p.follow("next.txt", r.cx); await r.settle();
+  p.focusContent(); const code = p.code;
+  r.edit("Draft on followed file"); r.render(); await r.settle();
+  assert.equal(p.code, code); assert.equal(r.keyboard, code); assert.equal(p.pinned(), true);
+  p.follow("first.md", r.cx); assert.equal(p.selected.file, next); assert.match(p.actionError, /Unpin before/);
+  p.back(r.cx); assert.equal(p.selected.file, next); assert.equal(r.calls.at(-1).command, "files-plus.return");
+  p.save(r.cx); await drain(r); p.togglePin(r.cx); r.render(); await r.settle();
+  assert.equal(p.selected.file, next); assert.equal(p.code, code);
+  r.shared["preview-plus.target"].s1 = { file: first, root: r.dir, on: null, selection: "reopen" };
+  r.render(); await r.settle(); assert.equal(p.selected.file, first);
+  p.follow("next.txt", r.cx); await r.settle();
+  r.shared["preview-plus.target"].s1.selection = "reopen-again";
+  r.render(); await r.settle(); assert.equal(p.selected.file, first);
+});
+
+test("agent focus accepts a live layout terminal and rejects closed or different-machine targets", async t => {
+  const r = await setup(t), p = r.panel;
+  r.props.agent = { space: "s1", on: null, active: { pane: null, terminal: "t1" } };
+  r.panes = []; p.focusAgent(r.cx); assert.equal(r.calls.at(-1).args.terminal, "t1");
+  r.terminals = []; p.focusAgent(r.cx); assert.match(p.actionError, /no longer available/);
+  r.terminals = [{ address: "remote/t1", state: "live" }]; r.props.agent.active.terminal = "remote/t1";
+  const before = r.calls.length; p.focusAgent(r.cx); assert.equal(r.calls.length, before);
+});

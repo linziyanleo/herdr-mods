@@ -208,10 +208,21 @@ class CatalogTests(unittest.TestCase):
         self.manager.cache_only = False
         with patch.object(gallery, "download", side_effect=OSError("image unavailable")) as fetch:
             result = gallery.media(self.manager, [self.pkg["id"]])
-        self.assertEqual(result, [{"id": self.pkg["id"]}])
+        self.assertEqual(result, [{"id": self.pkg["id"], "preview_error": "image unavailable", "avatar_error": "image unavailable"}])
         self.assertEqual(fetch.call_count, 2)
         self.assertTrue(all(call.kwargs == {"timeout": 6} for call in fetch.call_args_list))
         self.assertFalse(self.manager.cache_only)
+
+    def test_shared_media_urls_download_once_per_batch_and_warm_cache_downloads_nothing(self):
+        packages = [dict(self.pkg, id=f"alice/suite/{i}", avatar_url="https://assets.herdr.dev/shared.png") for i in range(4)]
+        with patch.object(gallery, "available_packages", return_value=packages), \
+                patch.object(gallery, "download", return_value=b"fixture image") as fetch:
+            first = gallery.media(self.manager, [p["id"] for p in packages])
+            self.assertEqual(fetch.call_count, 2)
+            self.assertEqual(len({p["avatar_path"] for p in first}), 1)
+            self.assertEqual(len({p["preview_path"] for p in first}), 1)
+            self.assertEqual(gallery.media(self.manager, [p["id"] for p in packages]), first)
+            self.assertEqual(fetch.call_count, 2)
 
 
 if __name__ == "__main__":

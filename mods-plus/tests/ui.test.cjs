@@ -23,9 +23,11 @@ function setup() {
     .replace(/^import .*;$/gm, '').replace('export default class ModsPlus', 'class ModsPlus');
   const runtime = { View: class {}, div: element, h_flex: element, v_flex: element, svg: element, image: element,
     TextView: { markdown: (_id, value) => element().child(value) }, Select: { new: element }, Popup: { new: element }, notify() {},
+    ScrollHandle: { new: () => ({ scroll_to_item() {}, release() {} }) },
+    hostChecking: () => false,
     Switch: { new: id => element().id(id) }, Input: { new: () => element() },
     InputState: { new: ({ value }) => ({ text: value, events: {}, value() { return this.text; },
-      set_value(value) { this.text = value; }, on(event, fn) { this.events[event] = fn; } }) },
+      set_value(value) { this.text = value; }, on(event, fn) { this.events[event] = fn; }, release() {} }) },
     shared: key => values.get(key), setShared: (key, value) => values.set(key, value),
     props: () => ({ entry: true, footer: true }), layout: () => ({ id: 'sidebar', size: { px: 240 } }),
     updates: () => ({ app: {} }), settings: () => ({ zoom: 1 }), theme: () => ({}), run() {}, appHome: () => '/fixture' };
@@ -33,12 +35,18 @@ function setup() {
   const view = new Mod();
   Object.assign(view, { settings: { auto_update: false, interval_value: 24, interval_unit: 'hr' }, workDepth: 0,
     entry: false, checking: false, savingSettings: false, preparedCount: 0, packages: [],
-    media: {}, loadingMedia: false, query: '', limit: 24, tab: 'mod', collection: 'community', filter: 'all', width: 1000 });
+    cards: new Map(), grid: [], catalogScroll: { scroll_to_item() {}, release() {} }, media: {}, loadingMedia: false, query: '', limit: 24, tab: 'mod', collection: 'community', filter: 'all', width: 1000 });
   view.initIntervalInput();
   view.initSourceInput();
   const tasks = [];
   function context(persistent = false) {
     return { valid: true, notify() { assert.ok(this.valid || persistent, 'expired cx'); },
+      new(Class, data) {
+        const view = new Class(); view.init(data);
+        const entity = { dirty: true, set_props(data) { view.update(data); this.dirty = true; }, release() {},
+          snapshot() { if (this.dirty) { this.element = view.render(); this.dirty = false; } return this.element; } };
+        return entity;
+      },
       stop_propagation() { assert.ok(this.valid || persistent); },
       async sleep() { assert.ok(this.valid || persistent); },
       spawn(fn) { assert.ok(this.valid || persistent); const task = Promise.resolve().then(() => fn(context(true))); tasks.push(task); return task; },
@@ -60,6 +68,7 @@ function setup() {
 function find(nodes, id) {
   for (const node of nodes) {
     if (!node || typeof node !== 'object') continue;
+    if (Object.hasOwn(node, 'snapshot')) { const found = find([node.snapshot()], id); if (found) return found; continue; }
     if (node.attrs?.id?.[0] === id) return node;
     const found = find(node.nodes || [], id);
     if (found) return found;
@@ -123,6 +132,18 @@ test('helper polls short RPCs and labels terminal errors with the operation', as
   await assert.rejects(view.helper(['install', 'owner/pkg'], context(true)), /install: Validation timed out/);
 });
 
+test('media progress uses the batch job channel and ignores repeated snapshots', async () => {
+  const { view, runtime, context } = setup(), calls = [], progress = [];
+  const partial = { media: [{ id: 'one', preview_path: 'fast.png' }] };
+  const replies = [{ id: 'job', state: 'running' }, { id: 'job', state: 'running', progress: partial },
+    { id: 'job', state: 'running', progress: partial }, { id: 'job', state: 'done', result: partial }];
+  runtime.exec = async (_command, args) => { calls.push(args); return { code: 0, stdout: JSON.stringify(replies.shift()) }; };
+  await view.helper(['media', '["one"]'], context(true), value => progress.push(value), 'source-identity');
+  assert.equal(progress.length, 1); assert.equal(progress[0].media[0].preview_path, 'fast.png');
+  assert.deepEqual(JSON.parse(calls[0][5]), ['media', '["one"]', 'source-identity']);
+  assert.deepEqual(calls.map(args => args[4]), ['start', 'status', 'status', 'status']);
+});
+
 test('cached catalog is visible before refresh finishes', async () => {
   const { view, context } = setup();
   let finish;
@@ -138,6 +159,71 @@ test('cached catalog is visible before refresh finishes', async () => {
   finish({ packages: [{ id: 'fresh' }] });
   await task;
   assert.equal(view.packages[0].id, 'fresh');
+});
+
+test('failed refresh retains cached data and superseded or closed requests cannot replace it', async () => {
+  const { view, context } = setup(); view.loadMedia = () => {};
+  view.helper = async args => args.includes('--cached') ? { packages: [importedPackage], stale: true } : Promise.reject(new Error('offline'));
+  await view.loadCatalog(context(true));
+  assert.equal(view.packages[0].id, importedPackage.id); assert.equal(view.catalogState, 'stale'); assert.match(view.message, /offline/);
+  const pending = [];
+  view.helper = () => new Promise(resolve => pending.push(resolve));
+  const old = view.loadCatalog(context(true)), recent = view.loadCatalog(context(true));
+  pending[1]({ packages: [{ ...importedPackage, name: 'New' }], stale: false }); await recent;
+  pending[0]({ packages: [{ ...importedPackage, name: 'Old' }], stale: false }); await old;
+  assert.equal(view.packages[0].name, 'New');
+  const closing = view.loadCatalog(context(true)); view.close();
+  pending[2]({ packages: [{ ...importedPackage, name: 'Closed' }], stale: false }); await closing;
+  assert.equal(view.packages[0].name, 'New');
+  const settings = setup(), before = settings.view.settings;
+  let finish; settings.view.helper = () => new Promise(resolve => { finish = resolve; });
+  const loading = settings.view.loadSettings(settings.context(true)); settings.view.close();
+  finish({ auto_update: true }); await loading; assert.equal(settings.view.settings, before);
+});
+
+test('an old image batch cannot overwrite a refreshed URL and filtering stays bounded', async () => {
+  const { view, context, drain } = setup(); view.collection = 'direct';
+  view.packages = Array.from({ length: 50 }, (_, i) => ({ ...importedPackage, id: String(i), name: `Panel ${i}` }));
+  let release; const batches = [];
+  view.helper = args => {
+    const ids = JSON.parse(args[1]); batches.push(ids);
+    if (batches.length === 1) return new Promise(resolve => { release = resolve; });
+    return Promise.resolve({ media: ids.map(id => ({ id, preview_path: 'fresh.png' })) });
+  };
+  view.loadMedia(context(true)); await Promise.resolve();
+  view.acceptCatalog({ packages: view.packages.map(pkg => ({ ...pkg, preview_url: 'new-url' })) });
+  view.query = 'Panel 49'; release({ media: [{ id: '0', preview_path: 'old.png' }] }); await drain();
+  assert.equal(view.media['0'], undefined); assert.equal(view.media['49'].preview_path, 'fresh.png');
+  assert.deepEqual(batches.map(ids => ids.length), [4, 1]); assert.equal(view.loadingMedia, false);
+});
+
+test('retained cards update badges and bubble clicks through their parent event context', async () => {
+  const { view, context, click, drain } = setup(); view.view = 'catalog'; view.collection = 'direct';
+  view.packages = [importedPackage]; view.syncCards(context());
+  const entity = view.cards.get(importedPackage.id).view;
+  view.syncCards(context()); assert.equal(view.cards.get(importedPackage.id).view, entity);
+  view.acceptCatalog({ packages: [{ ...importedPackage, has_update: true }] }); view.syncCards(context());
+  assert.match(textOf(entity.snapshot()), /Update Available/);
+  let opened; view.showDetails = async pkg => { opened = pkg; };
+  click(entity.snapshot()); click(find(view.renderCatalog({}), 'catalog-scroll')); await drain();
+  assert.equal(opened, view.packages[0]); assert.equal(opened.has_update, true);
+  view.motion = false; assert.equal(view.tabPill({}, 'filter', 'Filter', false, () => {}).attrs.transition, undefined);
+  view.motion = true; assert.equal(view.tabPill({}, 'filter', 'Filter', false, () => {}).attrs.transition[0], 'opacity');
+});
+
+test('details A-B-A and dismissed requests cannot publish late content or errors', async () => {
+  const { view, context } = setup(); view.view = 'details';
+  const pending = [];
+  view.helper = () => new Promise((resolve, reject) => pending.push({ resolve, reject }));
+  const first = view.showDetails(importedPackage, context(true));
+  const second = view.showDetails({ ...importedPackage, id: 'second' }, context(true));
+  const third = view.showDetails(importedPackage, context(true));
+  pending[2].resolve({ ...importedPackage, recipe: 'Current' }); await third;
+  pending[0].resolve({ ...importedPackage, recipe: 'Old' }); await first;
+  pending[1].reject(new Error('Old error')); await second;
+  assert.equal(view.selected.recipe, 'Current'); assert.equal(view.message, null);
+  const dismissed = view.showDetails(importedPackage, context(true)); view.view = 'catalog'; view.detailsRequest = null;
+  pending[3].reject(new Error('Dismissed error')); await dismissed; assert.equal(view.message, null);
 });
 
 test('media loads in small batches and a failed batch does not stop later cards', async () => {
@@ -157,6 +243,24 @@ test('media loads in small batches and a failed batch does not stop later cards'
   assert.equal(view.media['8'].preview_path, '8.png');
   assert.equal(view.loadingMedia, false);
   assert.equal(view.message, undefined);
+});
+
+test('partial media is visible before the batch finishes and stale progress is ignored', async () => {
+  const { view, context, drain } = setup(); view.view = 'catalog'; view.collection = 'direct';
+  view.packages = [importedPackage, { ...importedPackage, id: 'slow' }];
+  let progress, finish;
+  view.helper = (_args, _cx, onProgress) => new Promise(resolve => { progress = onProgress; finish = resolve; });
+  view.loadMedia(context(true)); await Promise.resolve();
+  progress({ media: [{ id: importedPackage.id, preview_path: 'fast.png' }, { id: 'slow', preview_pending: true }] });
+  assert.equal(view.loadingMedia, true); assert.equal(view.media[importedPackage.id].preview_path, 'fast.png');
+  assert.match(textOf(view.preview({}, { ...importedPackage, id: 'slow', preview_url: 'slow-url' }, 100, 60)), /Loading preview/);
+  view.view = 'details'; view.acceptCatalog({ packages: [{ ...importedPackage, preview_url: 'new-url' }] });
+  progress({ media: [{ id: importedPackage.id, preview_path: 'obsolete.png' }] });
+  assert.equal(view.media[importedPackage.id], undefined);
+  finish({ media: [{ id: importedPackage.id, preview_path: 'obsolete.png' }] }); await drain();
+  assert.equal(view.media[importedPackage.id], undefined); assert.equal(view.loadingMedia, false);
+  view.close(); progress({ media: [{ id: importedPackage.id, preview_path: 'closed.png' }] });
+  assert.equal(view.media[importedPackage.id], undefined);
 });
 
 test('settings toggles and intervals survive await, refresh and reject repeated clicks', async () => {
@@ -353,7 +457,7 @@ test('invalid interval does not write settings and can be corrected', async () =
 });
 
 test('home Update all covers both kinds regardless of filters, blocks duplicate clicks and refreshes badges', async () => {
-  const { view, click, drain, values } = setup();
+  const { view, click, drain, values, context } = setup();
   view.view = 'catalog';
   view.query = 'no matching cards';
   view.tab = 'layout';
@@ -367,7 +471,7 @@ test('home Update all covers both kinds regardless of filters, blocks duplicate 
     return { ok: true, updated: ['owner/repo/one', 'owner/repo/two'], errors: [], needs_agent: false,
       settings: { ...view.settings, prepared_updates_count: 0, prepared_update_ids: [] } };
   };
-  const button = find([view.render()], 'update-all');
+  const button = find([view.render(context())], 'update-all');
   assert.equal(textOf(button), 'Update all');
   click(button); click(button);
   await drain();

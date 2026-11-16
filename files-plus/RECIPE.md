@@ -22,6 +22,8 @@ The optional [sidebar pointer patch](patches/sidebar-default-pointer.patch) chan
 
 ## How it behaves
 
+Requires Herdr 0.1.16 or newer. Retain each `watchFolder` promise and cancel that caller's pending handle on context/config replacement, unneeded-root collapse and close. A recursive root watch remains while expanded, searched or needed by an internal preview; child collapse alone does not remove a still-needed root watch. Config and tree watches have separate owners, including when their directories coincide. An empty cancellation result terminates the loop. Keep request/generation guards after cancellation and include the machine in workspace identity. Watch failures remain visible; local safety polling and bounded remote polling still apply.
+
 ### Tree browsing and virtualization
 
 Folders load lazily, directories sort first, hidden entries are included and `.git` is omitted. Symlinks appear as files and are not recursively followed. Visible rows are flattened and partitioned into retained chunks of 100 rows in child views inside a native scrolling container. Scrolling executes entirely in native Rust with zero JavaScript calls per frame. Unrelated live updates (such as agent ticks or terminal output in other panes) rebuild zero tree rows.
@@ -38,7 +40,7 @@ The search scans complete directory listings, independently of the tree's 500-pe
 
 Typing is debounced by 180ms. New queries, changed roots/spaces/machines and closing the view invalidate pending replies. The query is re-run against changed roots; focus movement within an unchanged workspace retains it. Filesystem events and existing safety polls refresh an active search, including changes below unopened folders. A running scan finishes before a later poll can restart it; files changing during a scan are not an atomic snapshot and are picked up by subsequent refreshes.
 
-Up/down moves the selection and scrolls it into view. Enter or a result click calls the existing file-open path, preserving machine/root identity, Tab/Pane reuse, Preview Plus handoff and the saved opening preference. Clear or Escape returns to the same retained tree and expansion state. An internal source preview's Back returns to the search first. Search adds no global shortcut or key binding.
+Up/down moves the selection and scrolls it into view. A result click respects the saved opening preference; Enter requests the paired temporary slot, falling back to that preference without pairing. Both preserve machine/root identity and existing Tab/Pane reuse. Clear or Escape returns to the retained tree and focuses it. Back from the paired Preview restores search focus when a query is active. Search adds no global shortcut or key binding.
 
 ### Text editing and Preview Plus handoff
 
@@ -51,6 +53,12 @@ Before opening, reuse an existing Files Plus or Preview Plus file Tab/Pane with 
 Inside right panel uses Preview Plus when paired in a layout stack. Without that pairing, it replaces the tree with the built-in read-only syntax-highlighted source viewer (`EditorState` with `readonly: true`). Back returns to the existing expanded tree and restores row selection. File changes refresh the tree, Git marks and an open preview. An unchanged file and look keep the existing editor and scroll state. A code-font or syntax-color change recreates the read-only editor from its cached text because Herdr exposes these options only at construction. Switching terminal focus within a workspace preserves expansions and previews.
 
 In Inside right panel mode, when paired with Preview Plus via `props.previewStack` in a layout stack, clicking any file publishes the target `{ file, root, on }` to `shared("preview-plus.target")[spaceId]` and selects `preview-plus` in that stack. Preview Plus owns content handling and the editor toolbar. If Preview Plus is not installed, files fall back to the built-in source viewer.
+
+### Keyboard handoff
+
+`files-plus.search`/`focus` enters search; `return` restores search or tree focus; `preview`, `add-to-agent` and `agent` operate on the selected result/row. Unmodified F6/F7/F8 provide those three actions while Files has focus. Tree arrows and Enter select/collapse/expand/open; Escape focuses search. Preview F6 returns and F7 pins. See the [keyboard table](README.md#keyboard-workflow) and path-free [example layout](../preview-plus/examples/files-preview-agent.json).
+
+Keyboard preview reuses the paired slot independently of the pointer opening preference. The payload includes file/root/machine, a selection identity and the captured agent target. A pinned slot refuses a different file; no new pinned pane is created. Explicit `@` insertion uses the captured terminal even after focus returns from Preview, rejects a changed/closed space or a different machine, quotes paths and restores its clipboard text without submitting Enter. Existing pointer drag and opening preferences retain their behavior.
 
 ### Native motion and transitions
 
@@ -123,13 +131,14 @@ Keep tree state, incremental local watchers, Git marks and read-only previews in
 {
   "place": "right",
   "size": 320,
+  "focusable": true,
   "cloned_from": { "name": "files", "version": "0.1.9" }
 }
 ```
 
 No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It reuses `workspace.js` directory listing with the tree-only entry cap disabled; it never populates or expands the tree as a side effect.
 
-The current implementation has been checked with native Herdr 0.1.13. Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/focus/settings, `shared`, `setShared`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `pickFolder`, overlays and `run`. Commands are `pane.focus`, `terminal.paste`, `tab.new` and optional `layout.select`.
+The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
 
 ### Optional panel fitting
 
@@ -228,6 +237,8 @@ Keep the inherited tree/preview limits: 500 entries per folder, 5,000 loaded tre
 Workspace management supports local POSIX spaces; Windows and remote spaces retain single-folder browsing. Windows/Linux/remote native interactions need verification on those systems. Clipboard operations can restore previous text, but not a previous non-text clipboard. Tests do not install into the person's normal app home, replace their layout or change shortcuts.
 
 ## Done when
+
+The [0.1.16 implementation/verification record](../docs/plans/interaction-performance-implementation.md) covers current lifecycle and keyboard changes, with physical gaps kept open. Historical paragraphs below retain their original acceptance scope.
 
 All-file routing verification (2026-11-06): the combined automated checks, affected-test rerun, both native mod checks, eight paired handoff groups and four native editor groups pass as detailed in the [delivery record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06). The paired groups include TypeScript, YAML, hidden, extensionless and unknown-extension text with exact save readback, wrap, confirmed discard and retained tree state. Rich-preview formats are unchanged.
 

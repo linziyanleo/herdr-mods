@@ -32,12 +32,16 @@ def job_path(root, job_id):
 
 
 def status(root, job_id):
-    state = json.loads((job_path(root, job_id) / "status.json").read_text())
+    folder = job_path(root, job_id)
+    state = json.loads((folder / "status.json").read_text())
     if state["state"] == "running":
         try:
             os.kill(state["pid"], 0)
         except ProcessLookupError:
             return {"id": job_id, "state": "failed", "error": "Task stopped before completing. Retry the operation."}
+        progress = folder / "progress.json"
+        if progress.exists():
+            state["progress"] = json.loads(progress.read_text())
     return state
 
 
@@ -52,7 +56,7 @@ def start(root, args, helper_path=None, timeout=JOB_TIMEOUT):
         if pointer.exists():
             previous = json.loads(pointer.read_text())
             if job_path(root, previous).exists() and status(root, previous)["state"] == "running":
-                return {"id": previous, "state": "running"}
+                return status(root, previous)
         # Finished receipts are useful after a view closes, but not indefinitely.
         for old in base.iterdir():
             if old.is_dir() and time.time() - old.stat().st_mtime > 86400:
@@ -63,7 +67,9 @@ def start(root, args, helper_path=None, timeout=JOB_TIMEOUT):
         folder.mkdir()
         script = str(helper_path or Path(__file__).with_name("helper.py"))
         write_json(folder / "request.json", {
-            "argv": [sys.executable, "-B", script, "--app-home", str(root), "--json", *args],
+            "argv": [sys.executable, "-B", script, "--app-home", str(root), "--json",
+                     *(["--progress-file", str(folder / "progress.json")] if args[0] == "media" else []),
+                     *(args[:2] if args[0] == "media" else args)],
             "timeout": timeout,
         })
         worker = subprocess.Popen(
@@ -74,7 +80,7 @@ def start(root, args, helper_path=None, timeout=JOB_TIMEOUT):
         threading.Thread(target=worker.wait, daemon=True).start()
         write_json(folder / "status.json", {"id": job_id, "state": "running", "pid": worker.pid})
         write_json(pointer, job_id)
-        return {"id": job_id, "state": "running"}
+    return {"id": job_id, "state": "running"}
 
 
 def run(root, job_id):

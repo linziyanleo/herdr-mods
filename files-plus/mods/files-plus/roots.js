@@ -80,15 +80,15 @@ export async function loadConfig(file) {
   if (text === null) throw new Error("Workspace file not found");
   return { ...parseConfig(text, file), text };
 }
-export async function reloadWorkspace(id) {
+export async function reloadWorkspace(id, current = () => true) {
   const entry = workspaceOf(id);
   if (!entry?.file) return null;
   try {
     const snapshot = await loadConfig(entry.file);
-    if (workspaceOf(id)?.file === entry.file) setWorkspace(id, { name: snapshot.name, file: entry.file, folders: snapshot.folders });
+    if (current() && workspaceOf(id)?.file === entry.file) setWorkspace(id, { name: snapshot.name, file: entry.file, folders: snapshot.folders });
     return snapshot;
   } catch (error) {
-    if (workspaceOf(id)?.file === entry.file) setWorkspace(id, { ...workspaceOf(id), error: error.message || String(error) });
+    if (current() && workspaceOf(id)?.file === entry.file) setWorkspace(id, { ...workspaceOf(id), error: error.message || String(error) });
     throw error;
   }
 }

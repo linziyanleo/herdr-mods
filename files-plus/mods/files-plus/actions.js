@@ -33,7 +33,7 @@ export function captureTarget(space, path, kind, root, on, physicalRoot = root) 
     const tab = spaces().find(s => s.id === space)?.tabs.find(t => t.active);
     const candidates = panes().filter(p => p.tab === tab?.id && p.terminal);
     const pane = candidates.find(p => p.focused) || candidates.find(p => p.program?.agent) || candidates[0];
-    if (pane) active = { pane: pane.pane, terminal: pane.terminal, cwd: pane.cwd };
+    if (pane) active = { pane: pane.pane, terminal: pane.shown || pane.terminal, cwd: pane.cwd };
   }
   return { space, path, kind, root, physicalRoot, on: on ?? null, active };
 }
@@ -41,6 +41,7 @@ export function ensureTarget(target) {
   if (!spaces().some(s => s.id === target.space && s.machine === target.on)) throw new Error("The target space is no longer available");
 }
 export function reference(target) {
+  if (/[\x00-\x1f\x7f]/.test(target.path)) throw new Error("File references cannot contain control characters");
   let cwd = target.active?.cwd;
   // Herdr reports physical terminal cwd paths; workspace roots keep their spelling.
   if (cwd && target.physicalRoot && contains(target.physicalRoot, cwd)) {
@@ -48,24 +49,36 @@ export function reference(target) {
     cwd = relative === "." ? target.root : joinPath(target.root, relative);
   }
   const path = cwd && contains(target.root, cwd) && contains(cwd, target.path) ? relativePath(cwd, target.path) : target.path;
-  return `@${/[\s"\\]/.test(path) ? JSON.stringify(path) : path} `;
+  return `@${/[\s'"\\]/.test(path) ? JSON.stringify(path) : path} `;
 }
 export async function insertReference(target, cx) {
   ensureTarget(target);
   const active = target.active;
   if (!active?.terminal) throw new Error("There is no active terminal in this space");
-  const space = spaces().find(s => s.id === target.space), tabs = new Set(space.tabs.map(t => t.id));
-  if (active.pane && !panes().some(p => p.pane === active.pane && tabs.has(p.tab) && p.terminal)) throw new Error("The target terminal is no longer available");
+  const machine = active.terminal.includes("/") ? active.terminal.split("/")[0] : null;
+  if (machine !== target.on) throw new Error("The file and captured terminal are on different machines");
+  const validateDestination = () => {
+    ensureTarget(target);
+    const space = spaces().find(s => s.id === target.space), tabs = new Set(space.tabs.map(t => t.id));
+    if (active.pane && !panes().some(p => p.pane === active.pane && tabs.has(p.tab) && (p.shown || p.terminal) === active.terminal)) throw new Error("The target terminal is no longer available");
+  };
+  validateDestination();
   const previous = cx.read_from_clipboard();
+  const text = reference(target);
   // run() queues a command. Yield before reading focus or restoring clipboard text.
   run("pane.focus", { terminal: active.terminal });
   await cx.sleep(0);
-  if (focused()?.terminal !== active.terminal && focused()?.shown !== active.terminal) throw new Error("Could not focus the target terminal");
   try {
-    cx.write_to_clipboard(reference(target));
+    validateDestination();
+    const destination = focused();
+    if ((destination?.shown || destination?.terminal) !== active.terminal) throw new Error("Could not focus the target terminal");
+    cx.write_to_clipboard(text);
+    validateDestination();
+    const receiving = focused();
+    if ((receiving?.shown || receiving?.terminal) !== active.terminal) throw new Error("The target terminal changed before paste");
     run("terminal.paste");
     await cx.sleep(0);
-  } finally { if (previous !== undefined) cx.write_to_clipboard(previous); }
+  } finally { if (previous !== undefined && cx.read_from_clipboard() === text) cx.write_to_clipboard(previous); }
 }
 export function validateName(name) {
   if (!name.trim() || name === "." || name === ".." || /[/\\\x00-\x1f\x7f]/.test(name)) throw new Error("Enter a name without path separators or control characters");

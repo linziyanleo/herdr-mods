@@ -98,7 +98,7 @@ export class TreeView extends View {
   update(p) { this.data = p; }
   render() {
     const { chunks, panel, look } = this.data;
-    return v_flex().id("files-tree").w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(6)
+    return v_flex().id("files-tree").track_focus(panel.handle).w_full().min_w(0).flex_1().min_h(0).overflow_y_scrollbar().p(6)
       .on_mouse_down("right", (event, cx) => { if (!panel.workspace && panel.root) panel.menu(panel.root, "dir", panel.root, event, cx); })
       .children(chunks);
   }

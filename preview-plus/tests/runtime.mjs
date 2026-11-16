@@ -13,7 +13,7 @@ export async function until(accept) {
   throw new Error("Expected state was not reached");
 }
 
-const execute = promisify(execFile), runtimeDir = fileURLToPath(new URL("../mods/preview-plus/", import.meta.url));
+const execute = promisify(execFile), runtimeDir = process.env.PREVIEW_PLUS_RUNTIME || fileURLToPath(new URL("../mods/preview-plus/", import.meta.url));
 
 export async function runtime(t) {
   const dir = await fs.mkdtemp("/tmp/pp-test.");
@@ -27,7 +27,7 @@ export async function runtime(t) {
   state.panes = [{ pane: "p1", cwd: dir }]; state.focus = { space: "s1", pane: "p1", cwd: dir, terminal: "t1" };
   const host = {
     appHome: () => path.join(dir, "app"), window: () => ({ platform: state.platform }), settings: () => ({ ...state.settings, zoom: state.zoom || 1 }), theme: () => state.theme,
-    props: () => state.props, shared: key => state.shared[key], spaces: () => state.spaces, panes: () => state.panes, focused: () => state.focus,
+    props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; }, spaces: () => state.spaces, panes: () => state.panes, terminals: () => state.terminals || [{ address: "t1", state: "live" }], focused: () => state.focus,
     readTextFile: async (file, options) => {
       if (state.hooks.read) return state.hooks.read(file, options);
       try { const value = await fs.readFile(file, "utf8"); if (Buffer.byteLength(value) > 1048576) throw new Error("File too large"); return value; }
@@ -45,7 +45,14 @@ export async function runtime(t) {
       try { return { code: 0, ...(await execute(command, [...args], { cwd: options.cwd, maxBuffer: 8 * 1024 * 1024 })) }; }
       catch (error) { if (typeof error.code !== "number") throw error; return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
     },
-    watchFolder: dir => new Promise(resolve => { state.watches.set(dir, resolve); }),
+    checking: () => false,
+    watchFolder: dir => {
+      const calls = state.watches.get(dir) || new Set(); state.watches.set(dir, calls);
+      let finish, settled = false;
+      const pending = new Promise(resolve => { finish = paths => { if (settled) return; settled = true; calls.delete(finish); if (!calls.size) state.watches.delete(dir); resolve(paths); }; calls.add(finish); });
+      pending.cancel = () => finish([]);
+      return pending;
+    },
     nextCommand: () => new Promise(() => {}),
     run: (command, args) => state.calls.push({ command, args })
   };
@@ -71,7 +78,7 @@ export async function runtime(t) {
     Input: { new: state => builder("input", state) },
     TextView: { markdown: (id, text) => builder("markdown", text).id(id) },
     EditorState: { new: options => ({ ...options, text: options.value, handlers: {}, value() { return this.text; },
-      set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
+      set_value(text) { this.text = text; }, focus() { state.keyboard = this; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
   const context = vm.createContext({ console, localStorage, atob }), cache = new Map();
   async function module(file) {
     if (cache.has(file)) return cache.get(file);
@@ -86,7 +93,7 @@ export async function runtime(t) {
     return result;
   }
   state.load = async name => { const loaded = await module(path.join(runtimeDir, name)); if (loaded.status !== "evaluated") await loaded.evaluate(); return loaded.namespace; };
-  state.cx = { stop_propagation() {}, notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
+  state.cx = { focus_handle: () => { const handle = { focus() { state.keyboard = handle; }, is_focused() { return state.keyboard === handle; } }; return handle; }, stop_propagation() {}, notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
     spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; }, timer: { after: (_ms, fn) => Promise.resolve().then(() => fn(state.cx)), every: (ms, fn) => state.timers.push({ ms, fn }) } };
   // Watchers and nextCommand deliberately remain pending. Drain only finite work.
   state.settle = async () => {
@@ -99,7 +106,7 @@ export async function runtime(t) {
   state.start = async () => { const { default: Panel } = await state.load("main.js"); state.panel = new Panel(); state.panel.init({}, state.cx); await state.settle(); return state.panel; };
   state.edit = text => { state.panel.code.set_value(text); state.panel.code.handlers.change({}, state.cx); };
   state.render = () => { state.rendering = true; try { return state.panel.render(state.cx); } finally { state.rendering = false; } };
-  state.change = async (dir, paths) => { const resolve = state.watches.get(dir); if (!resolve) throw new Error("No watcher for " + dir); resolve(paths); await new Promise(resolve => setImmediate(resolve)); await state.settle(); };
+  state.change = async (dir, paths) => { const calls = state.watches.get(dir); if (!calls) throw new Error("No watcher for " + dir); for (const finish of [...calls]) finish(paths); await new Promise(resolve => setImmediate(resolve)); await state.settle(); };
   return state;
 }
 

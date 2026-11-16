@@ -25,13 +25,17 @@ async function directory(path, on) {
 export class Tree {
   constructor(location, current) {
     this.location = location; this.current = current;
-    this.entries = new Map(); this.folders = new Set(); this.pending = new Set();
+    this.entries = new Map(); this.folders = new Set(); this.pending = new Map();
+    this.requests = new Map(); this.generation = 0;
     this.loading = false; this.error = null; this.limited = false; this.marks = {};
   }
 
   async load(path) {
-    const entries = await directory(join(this.location.cwd, path), this.location.on);
-    if (!this.current() || (path && !this.folders.has(path))) return;
+    const request = {}; this.requests.set(path, request);
+    let entries;
+    try { entries = await directory(join(this.location.cwd, path), this.location.on); }
+    catch (error) { if (this.requests.get(path) === request && this.current()) throw error; return; }
+    if (this.requests.get(path) !== request || !this.current() || (path && !this.folders.has(path))) return;
     const used = [...this.entries].filter(([p]) => p !== path).reduce((n, [, values]) => n + values.length, 0);
     this.entries.set(path, entries.slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used))).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)));
     if (entries.length > PER_FOLDER || used + entries.length > TOTAL) this.limited = true;
@@ -40,10 +44,11 @@ export class Tree {
   refresh(cx) {
     if (!this.location.cwd || this.loading || !this.current()) return;
     this.loading = true; this.limited = false;
+    const generation = this.generation;
     cx.spawn(async cx => {
       try {
         for (const path of ["", ...this.folders]) {
-          if (!this.current()) return;
+          if (!this.current() || this.generation !== generation) return;
           // A removed expanded folder must not prevent the rest of the tree reloading.
           try { await this.load(path); }
           catch (error) { if (!path) throw error; this.entries.delete(path); }
@@ -58,10 +63,10 @@ export class Tree {
             marks[join(top.stdout.trim(), entry.slice(3))] = xy === "??" || xy.includes("A") ? "A" : xy.includes("D") ? "D" : xy.includes("U") ? "U" : "M";
           }
         }
-        if (this.current()) { this.marks = marks; this.error = null; }
-      } catch (error) { if (this.current()) this.error = String(error.message || error); }
+        if (this.current() && this.generation === generation) { this.marks = marks; this.error = null; }
+      } catch (error) { if (this.current() && this.generation === generation) this.error = String(error.message || error); }
       finally {
-        if (this.current()) {
+        if (this.current() && this.generation === generation) {
           this.loading = false;
           if (this.dirty) { this.dirty = false; this.refresh(cx); }
           cx.notify();
@@ -71,29 +76,42 @@ export class Tree {
   }
 
   watch(cx) {
-    if (this.location.on || !this.location.cwd) return;
+    if (this.location.on || !this.location.cwd || this.watching) return;
+    const token = this.watching = {};
     cx.spawn(async cx => {
       try {
-        while (this.current()) {
-          await watchFolder(this.location.cwd);
-          if (!this.current()) return;
+        while (this.watching === token && this.current()) {
+          token.pending = watchFolder(this.location.cwd);
+          const paths = await token.pending;
+          if (this.watching !== token || !this.current() || !paths.length) return;
           if (this.loading) this.dirty = true; else this.refresh(cx);
         }
-      } catch { /* Refresh remains available if an OS watcher cannot be created. */ }
+      } catch (error) {
+        if (this.current()) { this.error = `Live refresh unavailable: ${String(error.message || error)}`; cx.notify(); }
+      } finally {
+        token.pending?.cancel();
+        if (this.watching === token) this.watching = null;
+      }
     });
   }
 
+  close() { this.watching?.pending?.cancel(); this.watching = null; this.generation++; this.requests.clear(); this.pending.clear(); this.loading = false; this.dirty = false; }
+
   toggle(path, cx) {
     if (this.folders.has(path)) {
-      for (const folder of [...this.folders]) if (folder === path || folder.startsWith(path + "/")) { this.folders.delete(folder); this.entries.delete(folder); }
+      for (const folder of [...this.folders]) if (folder === path || folder.startsWith(path + "/")) { this.folders.delete(folder); this.entries.delete(folder); this.requests.delete(folder); this.pending.delete(folder); }
     } else {
       this.folders.add(path);
       if (!this.entries.has(path) && !this.pending.has(path)) {
-        this.pending.add(path);
+        const token = {}, generation = this.generation;
+        this.pending.set(path, token);
         cx.spawn(async cx => {
           try { await this.load(path); }
-          catch (error) { if (this.current()) this.error = String(error.message || error); }
-          finally { this.pending.delete(path); cx.notify(); }
+          catch (error) { if (this.current() && this.generation === generation && this.pending.get(path) === token) this.error = String(error.message || error); }
+          finally {
+            if (this.pending.get(path) === token) this.pending.delete(path);
+            if (this.current() && this.generation === generation) cx.notify();
+          }
         });
       }
     }

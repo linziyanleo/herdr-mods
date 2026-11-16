@@ -20,6 +20,8 @@ Buttons retain the default arrow pointer. Hover changes only the control's own b
 
 ## How it behaves
 
+Requires Herdr 0.1.16 or newer for cancellable `watchFolder` promises and `checking()`. Native checks skip initial helpers/reads; deferred rendering and interaction still require a live disposable instance.
+
 The rich Preview/Source toggle also applies to JSON, CSV and TSV. Markdown adds a Contents icon when it has headings. It opens a list above the document with 28px virtual rows, 12px text, 12px indentation per heading level and at most 180px height. Selecting a heading starts the document at that section, with a 28px Whole document action above it. JSON and delimited data use 28px virtual rows, 12px text, theme colors and 0.5px separators. JSON containers have disclosure glyphs; table row numbers occupy 48px, columns measure 80–320px and scroll horizontally. The first record is emphasized without discarding it or assuming a header. No editable cells or additional table toolbar are added.
 
 ### Three operating modes
@@ -27,6 +29,12 @@ The rich Preview/Source toggle also applies to JSON, CSV and TSV. Markdown adds 
 - **Standalone Files panel mode** (with no `file` or `previewStack` prop): displays the focused terminal's single-folder tree. Loads folders lazily; sorts directories first, includes hidden entries, omits `.git` and avoids recursing through symlink directories. Retains expansion state while a file replaces the tree. Clicking Back (`←`) walks link history first, then returns to that tree. Remote trees refresh on a 10-second timer and offer manual Refresh.
 - **Paired with Files Plus** (`props.previewStack` set): receives file targets from Files Plus via `shared("preview-plus.target")[spaceId]`. At the root of history, clicking Back runs `run("layout.select", { stack: props().previewStack, child: "files-plus-tree" })` to return to Files Plus. Leaves the source tree and other shared state alone.
 - **Standalone mod pane or tab** (`props.file` passed via `pane.split` or `tab.new`): shows that absolute path directly, defaulting `root` to its directory and `on` to local. The header has no Back button or additional rounded outer frame; the `preview-plus.back` command can still walk followed-link history.
+
+### Temporary slot, pin and focus
+
+The paired slot is temporary until Pin/F7 or a local edit fixes its current file in `shared("preview-plus.pinned")[spaceId]`. Dirty/recovered drafts pin automatically. Pinning keeps the existing editor and focus; it does not create a duplicate pane. A different Files selection or cross-file link cannot replace a pinned file. Save or confirmed discard permits unpinning; unpin preserves the current file until another explicit selection. A selection identity distinguishes reopening the original target after following links. Tab/Pane files remain fixed without the paired pin mechanism.
+
+Unmodified F6 walks history then returns to Files with `files-plus.return`; a cross-file Back while pinned returns without replacing the file. F8 focuses Files' captured terminal only while that space/machine and terminal remain available. `focus` focuses the editor or preview root; a slow completion focuses the editor only if the root still owns focus. No global key bindings are added. Use the [reusable layout](examples/files-preview-agent.json) and [Files keyboard table](../files-plus/README.md#keyboard-workflow).
 
 ### Markdown preview and source editing
 
@@ -74,13 +82,15 @@ On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page
 
 ### File watching and reload
 
-Watch the displayed local file and local images referenced by Markdown using `watchFolder`. Resolve parent-directory aliases to physical paths (`pwd -P`) when comparing native events to handle macOS `/private/tmp` vs `/tmp` paths. Reload clean modified, atomically replaced, deleted and restored files. Preserve dirty/in-flight buffers and report external changes instead. Unchanged source events, including the mod's own save, retain the editor and undo history. Refresh referenced Markdown images from the draft. Queue a reload if an update arrives during an active read or conversion. Ignore unrelated file events. Remote previews reload when reopened or sent `preview-plus.refresh`.
+Watch the displayed local file and local images referenced by Markdown using independent cancellable `watchFolder` promises per view/directory. Register before resolving physical aliases, cancel removed image watches and close the old tree watch on navigation/context replacement or close, and stop on an empty cancellation batch. Cancellation never replaces generation/request guards or cancels another pane's call. Resolve parent-directory aliases with `pwd -P` on POSIX when comparing events. Reload clean modified, atomically replaced, deleted and restored files. Preserve dirty/in-flight buffers and report external changes instead. Unchanged source events, including the mod's own save, retain the editor and undo history. Refresh referenced Markdown images from the draft. Queue a reload during an active read/conversion; ignore unrelated events. Local safety refresh runs every 60 seconds and remote text/tree polling every 10 seconds. Watch failures stay visible.
 
 ### Request identity and external commands
 
-Apply async results only when the target request, file, machine and active space still match. Switching a target resets link history. Release retained editors when the target or view closes.
+Periodic media recovery uses a metadata signature probe, not unconditional decoding/reload. Equal signatures preserve media identity and presentation; changed signatures load the new version. Failed probes remain observable and restored files recover on the next poll. Explicit Refresh retains its force-reload behavior. Unsupported remote image/PDF polling does not repeatedly reset the error. Watch errors are tracked by current directory ownership; a healthy dependency cannot hide another active failure.
 
-Optional external commands can be sent via `nextCommand()`: `back`, `source`, `preview`, `save`, `wrap`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
+Apply async results only when the request and owning target/machine still match. Fixed-file pane identity uses its captured space prop, not global focused-space identity: background slow A→B→A reads can finish without remounting or losing drafts. Paired and standalone Files modes remain space-sensitive. Switching a target resets link history. Tree listing tokens prevent collapse/reopen reads from replacing newer work. Release retained editors and watches when the target or view closes.
+
+Optional external commands can be sent via `nextCommand()`: `focus`, `pin`, `agent`, `back`, `source`, `preview`, `save`, `wrap`, `refresh`, `fit`, `zoom-in`, `zoom-out`, `next` and `previous`, delivered as `preview-plus.<command>`.
 
 Agent working, blocked, done and idle displays remain the surrounding Herdr UI's responsibility.
 
@@ -99,9 +109,9 @@ preview-plus/
 
 Default-export a class extending `View`. `main.js` owns mode selection, request identity, source state, history, watchers, page/zoom controls and rendering. `tree.js` owns lazy enumeration and Git marks. `paths.js` normalizes paths and resolves links. `markdown.js` extracts local image references without rewriting code examples. `media.js` stages images and renders a single PDF page through argument-separated external calls. `appearance.js` reads Herdr colors and configured fonts directly. Retained source editors update their font and syntax from cached text on a theme/font change without rereading the file.
 
-Use GPUI `div`, `svg`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `nextCommand` and `run`. Use host `localStorage` for draft recovery and the wrap preference. The toolbar's original SVG assets follow Herdr's tintable outline style and are packaged with this mod. Only paired Back runs `layout.select`; it never writes the shared target.
+Use GPUI `div`, `svg`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `setShared`, `checking`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `nextCommand` and `run`. Use host `localStorage` for draft recovery and the wrap preference. The toolbar's original SVG assets follow Herdr's tintable outline style and are packaged with this mod. Paired Back runs `layout.select`; pin/unpin updates the per-space shared pin/target without changing another space.
 
-The mod manifest is `{ "place": "none" }`. Supported layout setups include:
+The mod manifest is `{ "place": "none", "focusable": true }`. Supported layout setups include:
 
 1. **Standalone Files panel**:
 ```json
@@ -131,10 +141,11 @@ Shared state contract when paired with Files Plus:
   file: string;
   root: string;
   on: string | null;
+  selection?: string;
 }>
 ```
 
-Files Plus dispatches every file to this receiver without changing the target object; choose its Inside right panel setting for the paired stack. Complete local UTF-8 code, configuration, hidden files, unknown extensions and extensionless files use the native text editor. Rich preview formats remain unchanged. Older Files Plus versions may route ordinary text to their read-only source viewer; update both packages to use this contract.
+Files Plus dispatches every file to this receiver and includes `agent`, its captured Files target (space/machine/path/root and terminal identity). Keyboard Enter/F6 uses the paired slot; pointer clicks use the saved opening setting. The optional selection identity preserves older target senders while distinguishing an explicit reopen from link navigation. `preview-plus.pinned` maps space ids to fixed file/root/machine targets. Complete local UTF-8 code, configuration, hidden files, unknown extensions and extensionless files use the native text editor. Rich preview formats remain unchanged. Update both packages together.
 
 `markdown-structure.js` owns heading/fence offsets, `markdown.js` stages images and diagrams, and `markdown-view.js` owns rich document/contents rendering. `structured.js` owns pure parsing and JSON rows; `structured-view.js` owns virtual rows with `uniform_list` and `Scrollbar`. `mermaid.js` owns bounded SVG conversion and content/theme caching, using Herdr's restricted `fs/promises.mkdir` to prepare its cache directory. The renderer loads lazily through a module import. Rebuild from public npm with `cd preview-plus && npm ci --ignore-scripts && npm run build`; `npm run build -- --check` compares the generated bytes. The install includes the bundle and its runtime license notices, not Node dependencies.
 
@@ -163,6 +174,8 @@ A native 0.1.11 probe rendered the same cached PNG through `image()` while both 
 Media is local-only, and PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Remote images, missing inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large images remain subject to the native decoder's resource limits.
 
 ## Done when
+
+Current 0.1.16 lifecycle, temporary/pinned workflow and independent reproduction are recorded in the [interaction/performance implementation report](../docs/plans/interaction-performance-implementation.md). The paragraphs below retain their original 0.1.13 verification boundary; they do not assert that every physical check has since passed.
 
 The latest checks on macOS with Herdr 0.1.13 cover file routing, editing, drafts, conflict handling, Markdown navigation, Mermaid rendering and structured previews. Eight paired handoff groups passed for JSON, CSV, TSV and ordinary text. Four native editor groups passed for save, wrapping, navigation, conflicts and draft recovery. Inspected screenshots show rendered diagrams and structured rows. Physical input, scrolling and additional platform/theme combinations remain unverified for these changes.
 

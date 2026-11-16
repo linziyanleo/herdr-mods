@@ -26,6 +26,35 @@ test("watch changes map physical aliases, ignore locks and reload expanded paren
   assert.equal(changedDirectories(["/tmp/project/.git/refs/heads/main"], roots, expanded).git, true);
 });
 
+test("100 browsing roots cancel owned handles and same-directory panels refresh independently", async t => {
+  const r = await runtime(t), { default: Files } = await r.load("main.js");
+  const pending = new Set(); let started = 0, peak = 0;
+  r.hooks.watch = dir => {
+    let finish, settled = false;
+    const token = { dir };
+    const promise = new Promise(resolve => { finish = paths => { if (settled) return; settled = true; pending.delete(token); resolve(paths); }; });
+    token.finish = finish; promise.cancel = () => finish([]); pending.add(token); started++; peak = Math.max(peak, pending.size);
+    return promise;
+  };
+  const panel = new Files(); panel.init({}, r.cx); await r.drain();
+  for (let n = 0; n < 100; n++) {
+    const dir = path.join(r.dir, `root-${n}`); await fs.mkdir(dir);
+    r.focus.cwd = dir; r.panes[0].cwd = dir; panel.refresh(r.cx); await r.drain();
+    assert.equal(pending.size, 1); assert.equal(panel.watches.size, 1);
+  }
+  const peer = new Files(); peer.init({}, r.cx); await r.drain(); assert.equal(pending.size, 2);
+  panel.close(); await r.drain(); assert.equal(pending.size, 1);
+  await fs.writeFile(path.join(peer.root, "updated.txt"), "live");
+  for (const token of [...pending]) token.finish([path.join(peer.root, "updated.txt")]);
+  await new Promise(resolve => setImmediate(resolve)); await r.advance(200);
+  assert.ok(peer.entries.get(peer.root).some(entry => entry.name === "updated.txt"));
+  peer.toggle(peer.root, r.cx); await r.drain(); assert.equal(pending.size, 0);
+  peer.show(path.join(peer.root, "updated.txt"), r.cx); await r.drain(); assert.equal(pending.size, 1);
+  peer.show(null, r.cx); await r.drain(); assert.equal(pending.size, 0);
+  const stopped = started; await r.drain(); assert.equal(started, stopped); assert.ok(peak <= 2);
+  peer.close();
+});
+
 test("refresh caches root discovery, throttles status and suppresses no-op redraws", async t => {
   const r = await runtime(t), { default: Files } = await r.load("main.js");
   await r.load("roots.js");
