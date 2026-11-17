@@ -38,12 +38,26 @@ export function changedDirectories(paths, roots, expanded) {
   return { paths: directories, git, search };
 }
 
-export function location(previous) {
-  const space = spaces().find(s => s.active), f = focused();
+export function location(previous, terminalLocations = new Map()) {
+  const liveSpaces = spaces(), space = liveSpaces.find(s => s.active), f = focused();
+  for (const [id, value] of terminalLocations) {
+    if (!liveSpaces.some(s => s.id === id && (s.machine ?? null) === value.spaceMachine)) terminalLocations.delete(id);
+  }
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const preview = ["files-plus", "preview-plus"].includes(pane?.mod);
-  const cwd = (f?.space === space?.id ? pane?.cwd || f?.cwd || (preview && previous?.space === space.id ? previous.terminalCwd || previous.cwd : null) : null) || space?.folder;
-  const on = f && space && f.space === space.id && f.pane === null && f.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
+  const remembered = terminalLocations.get(space?.id);
+  const focusedTerminal = space && f?.space === space.id && (pane?.terminal || f?.terminal);
+  const focusCwd = space && f?.space === space.id ? pane?.cwd || f?.cwd : null;
+  const neutral = space && f?.space === space.id && pane?.mod && !focusedTerminal && !focusCwd;
+  const on = focusedTerminal
+    ? (f.pane === null ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space.machine ?? null)
+    : neutral && remembered ? remembered.on : space?.machine ?? null;
+  // Keep the path and execution host together, including remote terminal blocks.
+  // This panel's memory is never persisted and cannot outlive a space's machine.
+  if (focusCwd && focusedTerminal) terminalLocations.set(space.id, { spaceMachine: space.machine ?? null, cwd: focusCwd, on });
+  const previewCwd = space && f?.space === space.id && preview && previous?.space === space.id && (previous.on ?? null) === on
+    ? previous.terminalCwd || (!previous.browsing ? previous.cwd : null) : null;
+  const cwd = focusCwd || (neutral ? remembered?.cwd : null) || previewCwd || (on === (space?.machine ?? null) ? space?.folder : undefined);
   const browsing = browsingFolder(space?.id, on);
   const entry = browsing ? null : workspaceOf(space?.id);
   const base = browsing || cwd;
@@ -69,7 +83,7 @@ export async function directory(path, on, limit = PER_FOLDER) {
 
 export class FilesPanel extends View {
   location() {
-    const loc = location(this.browsingLocation);
+    const loc = location(this.browsingLocation, this.terminalLocations ||= new Map());
     this.browsingLocation = loc;
     return loc;
   }

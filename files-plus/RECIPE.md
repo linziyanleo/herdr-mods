@@ -230,6 +230,12 @@ The Files tree, editor and original SVGs derive from [Herdr files 0.1.9](https:/
 
 Filename search takes interaction concepts from [cybertron288's filetree](https://github.com/cybertron288/herdr-mods/tree/main/filetree) and [Mantiq's Telescope](https://github.com/Mantiq-com/herdr-telescope): search alongside browsing and keyboard selection of file results. The implementation uses this package's existing listing and opening contracts. No source, assets or dependencies from those projects are copied.
 
+### Focus and terminal folders
+
+A cwd-less third-party mod pane retains this Files panel's most recently observed terminal folder for the active space, retaining the terminal's execution machine with its path, rather than returning to the space's initial folder. Current terminal cwd wins. A neutral pane uses the remembered terminal pair before the older paired Files/Preview fallback, so transient missing focus cannot overwrite it with the initial folder. Manual browsing still overrides the displayed folder without replacing terminal history, and workspace roots and preview pins are unchanged.
+
+The fallback lives only in the panel instance, is discarded for removed spaces or a changed space machine, and is not written to shared state or restored after reload. A cold panel with no observed terminal cwd uses the space's initial folder; it does not guess from an unfocused terminal or check whether a remembered directory still exists. Missing folders retain the normal error behavior.
+
 ## Watch out
 
 Keep the inherited tree/preview limits: 500 entries per folder, 5,000 loaded tree entries across all roots, 40 nested tree levels, 400,000 preview characters and Herdr's 1 MiB text-read ceiling. Filename search has its separate 200-result bound and does not inherit the tree traversal limits. Binary, missing, unreadable and oversized files show explicit source-preview states. Preview Plus owns rich rendering, links, images, PDF conversion and structured-data views.
@@ -268,3 +274,9 @@ On macOS with Herdr 0.1.15, all 88 Files Plus Node tests passed, including seven
 Physical system-picker interaction, Windows/Linux rendering and remote behavior in a real remote session were not exercised. Native screenshots were captured and inspected, but this session's frame capture remained on a prior panel state, so visual acceptance of the override/reset controls is still pending. The existing preview image is intentionally unchanged; do not treat model-state checks as visual acceptance. No files were installed in the normal app home.
 
 Installation follow-up: the three changed runtime files were installed in the maintainer’s normal Herdr home after backing up the two existing files. The installed mod passed `herdr-app check` (a first checker-launch timeout succeeded on retry). This does not establish physical picker acceptance.
+
+### Cwd-less pane regression checks (2026-11-17, issue #8)
+
+`node --experimental-vm-modules --test files-plus/tests/location.test.mjs` exercises third-party pane focus, repeated terminal changes, independent spaces, local/remote identity (including terminal blocks), manual Browse, paired preview/pins, cold copies and removed spaces through the production location resolver. Eight of the eleven groups reproduce failures on the preceding `b0c43c1` runtime. These are host-model behavioral tests, not physical pointer/keyboard acceptance. No normal app-home installation or live UI changes are part of this verification.
+
+Final-code validation: all 216 Node tests passed with `node --experimental-vm-modules --test --test-concurrency=1 files-plus/tests/*.test.mjs preview-plus/tests/*.test.mjs mods-plus/tests/*.test.cjs tests/*.test.mjs`; the affected location/browsing/panel subset passed 31 tests, and `herdr-app check files-plus/mods/files-plus` passed on macOS / Herdr 0.1.16. The initial concurrent aggregate hit an unchanged Preview Plus PDF readiness timeout; the serial final-code run passed without changing that test. Physical UI acceptance and a new screenshot were deliberately not run, to leave the daily app undisturbed.
