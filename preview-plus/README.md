@@ -72,7 +72,39 @@ herdr-app do pane.split '{"direction":"right","mod":"preview-plus","props":{"fil
 herdr-app do tab.new '{"name":"Document","mod":"preview-plus","props":{"file":"/absolute/path/guide.pdf"}}'
 ```
 
-Pass `on` with the machine name for remote Markdown and text. Images and PDFs are local-only. PDF rendering is macOS-only; the Open control can launch a local PDF in its system application on other platforms.
+Pass `on` with the machine name for remote Markdown and text. Images and PDFs are local-only by default; explicitly opted-in sync roots can supply a local copy as described below. PDF rendering is macOS-only; the Open control can launch a local PDF in its system application on other platforms.
+
+### Opt-in local copies of remote images and PDFs
+
+For a folder synchronized independently by Dropbox, iCloud, Syncthing or another tool, set `localSyncRoots` on the **receiving Preview Plus instance**. Roots must be absolute directory paths on this machine; there is no automatic discovery, home expansion or remote-to-local path mapping. The default is an empty list (disabled).
+
+For the paired right panel, add the setting to Preview Plus's content props, not Files Plus's:
+
+```json
+{
+  "mod": "preview-plus",
+  "props": {
+    "previewStack": "files",
+    "localSyncRoots": ["/absolute/path/to/synchronized-folder"]
+  }
+}
+```
+
+For a fixed pane or tab, include the same setting with `file` and `on`:
+
+```sh
+herdr-app do tab.new '{"name":"Synced image","mod":"preview-plus","props":{"file":"/absolute/path/to/synchronized-folder/photo.png","on":"other-machine","localSyncRoots":["/absolute/path/to/synchronized-folder"]}}'
+```
+
+Only remote image/PDF targets underneath a configured directory can use the file at the **same absolute path on this machine**. Directory boundaries are checked after path normalization; symlinks resolving outside the configured physical roots are rejected. Local files keep their existing behavior. Configuration is per instance: Files Plus-created tabs/panes without this prop remain opted out.
+
+The preview displays **“Local copy”** with a warning that contents may differ and sync status is not verified. It never downloads, reads or compares the remote media, so it cannot certify equivalence or freshness. Missing, unreadable or invalid local files show an error, not a remote fallback. Refresh/recovery checks and file watching inspect the local copy; PDF paging and image zoom/pan work as for a local preview.
+
+Remote target identity is preserved. **Open remains disabled**, remote text and Markdown inline images retain their existing behavior, and Files Plus's external open/reveal and double-click behavior are unchanged. Only enable roots whose local contents you trust.
+
+![Opt-in local copies, a missing copy, and default opt-out in Herdr](local-copy-preview.png)
+
+The unedited native capture shows a local image and page 2 of a local PDF above the missing-copy and default-opt-out states. Targets use a simulated remote machine; all displayed documents are generated test fixtures.
 
 ## Edit and save
 
@@ -103,17 +135,21 @@ Development fixtures require Node 22+; the installed mod does not use Node.
 ```sh
 herdr-app check preview-plus/mods/preview-plus
 node --experimental-vm-modules --test preview-plus/tests/*.test.mjs
+node --experimental-vm-modules --test preview-plus/tests/local-copy.test.mjs
 node preview-plus/tests/check-mermaid.mjs
 node preview-plus/tests/native-session.mjs
 node preview-plus/tests/native-verify.mjs /tmp/pp.<session>/session.json
 node preview-plus/tests/native-editor-verify.mjs /tmp/pp.<session>/session.json
 node preview-plus/tests/native-rich-verify.mjs /tmp/pp.<session>/session.json
 node preview-plus/tests/native-structured-pair.mjs /tmp/pp.<session>/session.json
+node preview-plus/tests/native-local-copy.mjs /tmp/pp.<session>/session.json
 ```
 
 Earlier rich-preview/editor checks used Herdr 0.1.13. The [interaction/performance record](../docs/plans/interaction-performance-implementation.md) separates current 0.1.16 lifecycle, keyboard, native and physical checks and their remaining gaps. See the [all-file editor record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06) for the earlier scope.
 
 The native session command prints the exact receipt path. It starts a disposable app home and core, creates synthetic files and copies the runtime plus test drivers into that home. The verifier exercises production handlers and actual rendering; screenshots still require visual inspection. It does not change the user's app home, layout or key bindings. Close the disposable instance with `HERDR_APP_HOME=<receipt-app-home> herdr-app do app.quit`; its temporary core and files are scoped by the environment recorded in the receipt.
+
+`native-local-copy.mjs` uses that already-running receipt; it does not launch an app. It creates a temporary fixture-only layout, exercises local image/PDF loading, missing/default-opt-out states, PDF paging, zoom/Fit, local update/deletion and refresh recovery, and captures a screenshot. It restores the previous layout in `finally`. Remote targets and differing remote fixture bytes are simulated; it does not test real cross-machine synchronization or physical keyboard/mouse input.
 
 For lifecycle acceptance, run `node preview-plus/tests/native-session.mjs --distinct-bundle --lifecycle`, then `node preview-plus/tests/native-lifecycle.mjs <session.json>`. This instruments pending native watch calls in the disposable copy and adds a one-second slow read. Its report covers 100 directories, independent same-directory callers and fixed-file A→B→A. Physical keyboard input remains a separate check.
 

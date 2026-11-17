@@ -12,6 +12,8 @@ In Files panel modes, the 42px header holds Back, the file name or "Files" (13px
 
 An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, an editable percentage and + zoom controls. The percentage frame is 76px wide and 28px high, with a 0.5px border and centered 12px Geist Mono text. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. Drag enlarged media with the left mouse button to pan in both directions; the pointer changes from grab to grabbing. Releasing or leaving the canvas stops the drag. Fit resets panning, centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
+An opted-in remote image/PDF shows a persistent 12px muted **Local copy** notice between the path and media toolbar, including while loading or reporting a missing copy. It identifies the remote machine and warns that contents may differ and sync status is not verified. It is not a claim that the two files match.
+
 Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in the native syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. Complete local text is editable; remote and truncated text stays read-only. The standalone Files tree has 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
 Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI/code font families from resolved `settings()`. Preserve color alpha, custom color overrides and same-appearance theme changes. Unexposed fields use the actual Herdr 0.1.11 Files/Changes defaults: a 1px theme-colored border, 10px panel corners, a semibold title, 13px interface text, 12px secondary text and 1px separators. Rows use 7px corners, 18px indentation and 6px tree padding. There is no separate Preview Plus palette or type/spacing/radius scale. The generic `cx.theme()` scale is not Herdr's shipped panel styling. Native editor and rich-text internals retain Herdr's theme. UI and code sizes receive zoom exactly once; version upgrades require rechecking unexposed control defaults.
@@ -80,6 +82,14 @@ Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cach
 
 On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page count and rasterize only the requested page, never the entire PDF into memory at once. Cache each page separately as PNG, limiting the raster's longest edge to 2,048 pixels and its scale to 2×; zoom enlarges that raster. Previous and Next controls turn pages with bounds checking. Clamp the page if an external edit reduces the page count. Reject locked, empty or unreadable PDFs with a visible error.
 
+### Opt-in sync roots for local media copies
+
+The receiving instance's `props.localSyncRoots` is an array of absolute local directory paths, defaulting to `[]`. It is never taken from a shared incoming file target. Apply it to Preview Plus in a paired/standalone layout or pass it explicitly with a fixed pane/tab's props; Files Plus-created instances without the prop stay opted out. See the [configuration examples](README.md#opt-in-local-copies-of-remote-images-and-pdfs).
+
+Only remote image/PDF targets whose normalized paths fall beneath an explicitly configured root may use the same path locally. Staging and metadata helpers additionally resolve symlinks and reject physical paths outside those roots. A local copy may be absent, unreadable, stale or different; preview the local bytes with the notice above or show an explicit error. Never fetch remote media or claim synchronization/equality. PDF page counts are local too.
+
+Keep the target's original machine for ownership, history and Open eligibility. External Open stays disabled for remote targets. Text reads, Markdown inline images, Files Plus external open/reveal and double-click behavior are unchanged. Successful copies use local file watches and local metadata probes for recovery, with the existing remote-target ten-second recovery timer. Unchanged metadata retains media and presentation. Removing the opt-in invalidates in-flight results and watches.
+
 ### File watching and reload
 
 Watch the displayed local file and local images referenced by Markdown using independent cancellable `watchFolder` promises per view/directory. Register before resolving physical aliases, cancel removed image watches and close the old tree watch on navigation/context replacement or close, and stop on an empty cancellation batch. Cancellation never replaces generation/request guards or cancels another pane's call. Resolve parent-directory aliases with `pwd -P` on POSIX when comparing events. Reload clean modified, atomically replaced, deleted and restored files. Preserve dirty/in-flight buffers and report external changes instead. Unchanged source events, including the mod's own save, retain the editor and undo history. Refresh referenced Markdown images from the draft. Queue a reload during an active read/conversion; ignore unrelated events. Local safety refresh runs every 60 seconds and remote text/tree polling every 10 seconds. Watch failures stay visible.
@@ -102,12 +112,14 @@ preview-plus/
   mods/preview-plus/
     main.js, tree.js, paths.js, markdown.js, markdown-structure.js, markdown-view.js,
     structured.js, structured-view.js, mermaid.js, mermaid.bundle.js,
-    media.js, appearance.js, mod.json, icons/, LICENSE, licenses/, THIRD_PARTY.md
+    media.js, local-copy.js, appearance.js, mod.json, icons/, LICENSE, licenses/, THIRD_PARTY.md
   build/, package.json, package-lock.json
   tests/
 ```
 
 Default-export a class extending `View`. `main.js` owns mode selection, request identity, source state, history, watchers, page/zoom controls and rendering. `tree.js` owns lazy enumeration and Git marks. `paths.js` normalizes paths and resolves links. `markdown.js` extracts local image references without rewriting code examples. `media.js` stages images and renders a single PDF page through argument-separated external calls. `appearance.js` reads Herdr colors and configured fonts directly. Retained source editors update their font and syntax from cached text on a theme/font change without rereading the file.
+
+`local-copy.js` validates explicit sync-root props and selects eligible local media without rewriting the owning target. `media.js` enforces physical-root containment in both staging and metadata helpers. No new external program, service or dependency is introduced.
 
 Use GPUI `div`, `svg`, `image`, `v_flex`, `h_flex`, `TextView`, `EditorState` and `Editor`. Use `cx.spawn` for work, callback-owned contexts for updates, and `on_size_change` for viewport measurements. Herdr supplies `props`, `shared`, `setShared`, `checking`, `spaces`, `panes`, `focused`, `settings`, `theme`, `window`, `appHome`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`, `nextCommand` and `run`. Use host `localStorage` for draft recovery and the wrap preference. The toolbar's original SVG assets follow Herdr's tintable outline style and are packaged with this mod. Paired Back runs `layout.select`; pin/unpin updates the per-space shared pin/target without changing another space.
 
@@ -171,9 +183,19 @@ Herdr runs native GPUI JavaScript without a DOM, Node APIs or `setTimeout`. Use 
 
 A native 0.1.11 probe rendered the same cached PNG through `image()` while both Markdown and HTML TextViews omitted it, including with data URIs. Therefore text remains in `TextView` and local images use native image blocks in the same scroll region. Do not replace this with a path-only rewrite without verifying the real window again. Upstream [TextView image documentation](https://gpui-kit.com/component/text-view/#images) describes URI loading, but the bundled runtime's observed behavior is the acceptance boundary.
 
-Media is local-only, and PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Remote images, missing inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large images remain subject to the native decoder's resource limits.
+Media uses local bytes only (including explicitly opted-in local copies of remote targets), and PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Unconfigured remote images, missing local copies/inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large images remain subject to the native decoder's resource limits.
 
 ## Done when
+
+### Local-copy verification (2026-11-17)
+
+For [issue #6](https://github.com/linziyanleo/herdr-mods/issues/6), the full Preview Plus suite passes **94 tests**, including 13 focused local-copy tests, on macOS 27.0.1 / Node 24.14.1 / Herdr 0.1.16. The suite exercises real JXA/PDFKit helpers and the Python image fallback on macOS; it is not a native Linux/Windows verification. The test VM loader now caches modules before asynchronous reads and lets VM link the graph, avoiding duplicate modules in the new diamond imports.
+
+`herdr-app check preview-plus/mods/preview-plus` passes. The `native-local-copy.mjs` verifier also passes in an isolated, separately named test copy inside the already-running app, with a fixture-only layout; the normal layout is restored afterward and the installed working mods remain unchanged. This used the same native driver as `native-session.mjs`, without launching another window. No global shortcuts were changed.
+
+The inspected, unedited [native capture](local-copy-preview.png) shows the **Local copy** notices, image, local PDF page 2, missing-copy error and default opt-out. Production-handler checks cover PDF paging, zoom/Fit, local watcher updates/deletions and refresh recovery. Unconfigured targets reject synchronously without invoking a helper. All target machines are simulated; no live cross-machine sync, physical input, narrow-panel, alternate-theme or native Linux/Windows checks are claimed. Automated tests use differing local/remote image and PDF fixtures and assert that remote reads are never requested.
+
+### Earlier verification
 
 Current 0.1.16 lifecycle, temporary/pinned workflow and independent reproduction are recorded in the [interaction/performance implementation report](../docs/plans/interaction-performance-implementation.md). The paragraphs below retain their original 0.1.13 verification boundary; they do not assert that every physical check has since passed.
 
@@ -202,3 +224,4 @@ Build and verify these observable behaviors using disposable files:
 15. Use Contents and same/cross-document anchors with duplicate and Unicode headings; Back restores the prior section/source/draft. Fenced headings remain code. Missing fragments show an error; Whole document restores earlier sections.
 16. Inspect native Mermaid flowchart, sequence, state, class and ER pictures in light/dark/custom-color themes. Unsupported/malformed/oversized/unclosed input retains its source. Theme changes refresh picture colors and late renders cannot replace a newer file.
 17. Expand/collapse JSON and scroll CSV/TSV virtual rows horizontally/vertically. Inspect malformed, empty, primitive, deep and bounded-data cases. Toggle source, edit, preview without writing, save/read back exact bytes, and confirm external changes retain the draft and reject stale writes. Exercise actual paired Files Plus dispatch and standalone panes for all three extensions.
+18. Opt-in local copies: without `localSyncRoots`, remote media stays unsupported even if a same-path local file exists. With an explicit root, preview local image/PDF bytes with the **Local copy** warning and Open still disabled. Test missing copies, differing local/remote fixture contents, root boundaries/traversal and symlink escapes, local update/delete/recovery, PDF paging, unchanged metadata, and revoking permission during an in-flight request. Remote text/inline-image behavior must remain unchanged. The focused automated check is `node --experimental-vm-modules --test preview-plus/tests/local-copy.test.mjs`.
