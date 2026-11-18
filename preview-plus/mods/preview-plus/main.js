@@ -4,6 +4,7 @@ import { props, shared, setShared, spaces, panes, terminals, focused, run, readT
 import { target, dirname, basename, extension, kind, richText, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { loadMedia, mediaSignature, openFile } from "./media.js";
+import { syncRoots, localCopyTarget, mediaSource } from "./local-copy.js";
 import { stageMarkdown } from "./markdown.js";
 import { markdownView } from "./markdown-view.js";
 import { structuredPreview } from "./structured.js";
@@ -16,14 +17,15 @@ const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", js
 function context() {
   const p = props() || {}, f = focused(), space = spaces().find(s => s.id === f?.space) || spaces().find(s => s.active);
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
-  if (p.file !== undefined) return { mode: "pane", spaceId: p.space || null, target: target(p) };
+  const localSyncRoots = syncRoots(p.localSyncRoots);
+  if (p.file !== undefined) return { mode: "pane", spaceId: p.space || null, target: target(p), localSyncRoots };
   if (p.previewStack) {
     const incoming = shared("preview-plus.target")?.[space?.id];
     return { mode: "paired", stack: p.previewStack, spaceId: space?.id || null,
-      target: target(shared("preview-plus.pinned")?.[space?.id] || incoming), selection: incoming?.selection };
+      target: target(shared("preview-plus.pinned")?.[space?.id] || incoming), selection: incoming?.selection, localSyncRoots };
   }
   const on = f?.pane === null && f?.terminal ? (f.terminal.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine || null;
-  return { mode: "files", spaceId: space?.id || null, cwd: pane?.cwd || f?.cwd || space?.folder || null, on };
+  return { mode: "files", spaceId: space?.id || null, cwd: pane?.cwd || f?.cwd || space?.folder || null, on, localSyncRoots };
 }
 const contextKey = () => JSON.stringify(context());
 
@@ -98,6 +100,7 @@ export default class PreviewPlus extends View {
     const next = context(), key = JSON.stringify(next);
     if (this.owner?.key === key) return;
     if (next.mode === "paired" && this.owner?.mode === "paired" && next.spaceId === this.owner.spaceId
+      && JSON.stringify(next.localSyncRoots) === JSON.stringify(this.owner.localSyncRoots)
       && next.target?.file === this.selected?.file && next.target?.on === this.selected?.on) {
       this.owner = { ...next, key };
       if (this.request) this.request.owner = this.owner;
@@ -289,13 +292,25 @@ export default class PreviewPlus extends View {
     this.zoomDirty = false; this.zoomEditing = false;
     this.pan = { x: 0, y: 0 }; this.drag = null;
     this.error = null; this.actionError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
+    const localCopy = localCopyTarget(selected, this.owner.localSyncRoots);
     this.watchTargets(selected.on ? [] : [selected.file], cx);
+    // Reject unsupported media synchronously, including during the first init.
+    // No helper or remote read is needed for an unconfigured target.
+    if (type === "image" || type === "pdf") {
+      try { mediaSource(selected, this.owner.localSyncRoots); }
+      catch (error) {
+        this.error = String(error.message || error); this.loading = false;
+        if (notify) cx.notify();
+        return;
+      }
+    }
     cx.spawn(async cx => {
       try {
         if (type === "image" || type === "pdf") {
-          const media = await loadMedia(selected, request.page, type);
+          const media = await loadMedia(selected, request.page, type, request.owner.localSyncRoots);
           if (!this.current(request)) return;
           this.media = media; this.page = media.page; this.total = media.pages;
+          if (localCopy) this.watchTargets([localCopy.file], cx);
         } else {
           const draft = !selected.on && this.documents.get(selected.file);
           let value;
@@ -341,12 +356,12 @@ export default class PreviewPlus extends View {
   poll(cx) {
     const type = kind(this.selected.file);
     if (type !== "image" && type !== "pdf") { this.reload(cx); return; }
-    // Remote media is unsupported; polling must not repeatedly clear that state.
-    if (this.selected.on || this.loading || this.mediaPoll === this.request) return;
+    // Unconfigured remote media stays unsupported; opt-in copies probe local metadata only.
+    if ((this.selected.on && !localCopyTarget(this.selected, this.owner.localSyncRoots)) || this.loading || this.mediaPoll === this.request) return;
     const request = this.mediaPoll = this.request, selected = this.selected;
     cx.spawn(async cx => {
       try {
-        const signature = await mediaSignature(selected);
+        const signature = await mediaSignature(selected, request.owner.localSyncRoots);
         if (!this.current(request)) return;
         if (signature !== this.media?.signature) this.load(cx);
         else if (this.error) { this.error = null; cx.notify(); }
@@ -584,6 +599,9 @@ export default class PreviewPlus extends View {
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
         .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+      .when(Boolean(localCopyTarget(this.selected, this.owner.localSyncRoots)), el => el.child(div().id("preview-local-copy")
+        .flex_none().px(16).py(8).text_size(12).text_color(colors.muted).accessibility_label("Local copy")
+        .child(`Local copy — previewing this machine's file, not ${this.selected.on}. Contents may differ; sync status is not verified.`)))
       .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
       .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)

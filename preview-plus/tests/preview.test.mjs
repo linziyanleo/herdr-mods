@@ -186,7 +186,8 @@ test("periodic media polling preserves unchanged presentation and remote unsuppo
       timer.fn(state.cx); await until(() => panel.media?.signature !== media.signature && !panel.loading);
       assert.equal(panel.page, page); assert.equal(state.keyboard, focus);
     }
-    panel.reload(state.cx); assert.equal(panel.loading, true); await state.settle(); await panel.close();
+    // Unconfigured remote media rejects synchronously without starting a helper.
+    panel.reload(state.cx); assert.equal(panel.loading, !on); await state.settle(); await panel.close();
   });
 });
 

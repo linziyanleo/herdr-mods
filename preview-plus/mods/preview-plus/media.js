@@ -1,11 +1,42 @@
 import { exec, appHome, window } from "herdr";
+import { mediaSource } from "./local-copy.js";
+
+// Also check physical paths: a symlink inside a sync root must not grant access outside it.
+const MAC_LOCAL_COPY_CHECK = String.raw`
+function checkLocalCopy(source, rootsJSON) {
+  var roots = JSON.parse(rootsJSON || '[]');
+  if (!roots.length) return;
+  if (!$.NSFileManager.defaultManager.fileExistsAtPath($(source)))
+    throw new Error('This local copy is missing or cannot be read.');
+  function physical(path) { return ObjC.unwrap($(path).stringByStandardizingPath.stringByResolvingSymlinksInPath); }
+  var file = physical(source);
+  if (!roots.some(function(root) { var base = physical(root); return file.indexOf(base.replace(/\/$/, '') + '/') === 0; }))
+    throw new Error('The local copy resolves outside the configured sync roots.');
+}`;
+
+const PYTHON_LOCAL_COPY_CHECK = String.raw`
+def check_local_copy(source, roots):
+    if not roots:
+        return
+    source_path = os.path.normcase(os.path.realpath(source))
+    def inside(root):
+        base = os.path.normcase(os.path.realpath(root))
+        try:
+            return source_path != base and os.path.commonpath([source_path, base]) == base
+        except ValueError:
+            return False
+    if not any(inside(root) for root in roots):
+        raise ValueError('The local copy resolves outside the configured sync roots.')
+`;
 
 // Arguments remain separate from executable code, including names containing quotes.
 export const MAC_MEDIA = String.raw`
 ObjC.import('Foundation');
 ObjC.import('AppKit');
+${MAC_LOCAL_COPY_CHECK}
 function run(args) {
   var source = args[0], cache = args[1], pageNumber = Number(args[2]), pdf = args[3] === 'pdf';
+  checkLocalCopy(source, args[4]);
   var fm = $.NSFileManager.defaultManager;
   var attrs = fm.attributesOfItemAtPathError($(source), null);
   if (!attrs) throw new Error('This file is no longer available or cannot be read.');
@@ -60,7 +91,9 @@ function run(args) {
 // Linux/Windows fallback needs Python 3, but no third-party Python packages.
 export const PYTHON_IMAGE = String.raw`
 import hashlib, json, os, re, shutil, struct, sys, tempfile
+${PYTHON_LOCAL_COPY_CHECK}
 source, cache = sys.argv[1:3]
+check_local_copy(source, json.loads(sys.argv[3]) if len(sys.argv) > 3 else [])
 stat = os.stat(source)
 signature = source + ':' + str(stat.st_mtime_ns) + ':' + str(stat.st_size)
 ext = source.rsplit('.', 1)[-1].lower()
@@ -112,26 +145,30 @@ if not os.path.exists(destination):
 print(json.dumps(dict(path='mods/preview-plus/.cache/' + name, width=width, height=height, pages=1, page=1, signature=signature)))
 `;
 
-export async function loadMedia(target, page = 1, type = "image") {
-  if (target.on) throw new Error("Image and PDF previews are only available for local files.");
+export async function loadMedia(target, page = 1, type = "image", roots = []) {
+  const source = mediaSource(target, roots);
   const platform = window()?.platform;
-  if (type === "pdf" && platform !== "macos") throw new Error("PDF previews require macOS and PDFKit. Use Open to view this file.");
+  if (type === "pdf" && platform !== "macos") throw new Error("PDF previews require macOS and PDFKit." + (target.on ? "" : " Use Open to view this file."));
   const cache = `${appHome()}/mods/preview-plus/.cache`;
   const result = platform === "macos"
-    ? await exec("osascript", ["-l", "JavaScript", "-e", MAC_MEDIA, target.file, cache, String(page), type])
-    : await exec(platform === "windows" ? "python" : "python3", ["-c", PYTHON_IMAGE, target.file, cache]);
-  if (result.code !== 0) throw new Error(result.stderr.trim() || "Cannot preview this file.");
+    ? await exec("osascript", ["-l", "JavaScript", "-e", MAC_MEDIA, source.file, cache, String(page), type, JSON.stringify(source.syncRoots || [])])
+    : await exec(platform === "windows" ? "python" : "python3", ["-c", PYTHON_IMAGE, source.file, cache, JSON.stringify(source.syncRoots || [])]);
+  if (result.code !== 0) throw new Error((source.localCopy ? "Local copy unavailable: " : "") + (result.stderr.trim() || "Cannot preview this file."));
   const media = JSON.parse(result.stdout.trim());
   if (!media.path?.startsWith("mods/preview-plus/.cache/") || !(media.width > 0 && media.height > 0 && media.pages > 0)) throw new Error("The media preview returned invalid data.");
-  return media;
+  return { ...media, localCopy: Boolean(source.localCopy) };
 }
 
-export async function mediaSignature(target) {
+export async function mediaSignature(target, roots = []) {
+  const source = mediaSource(target, roots);
   const platform = window()?.platform;
   const result = platform === "macos"
-    ? await exec("osascript", ["-l", "JavaScript", "-e", "ObjC.import('Foundation'); function run(args) { var attrs=$.NSFileManager.defaultManager.attributesOfItemAtPathError($(args[0]),null); if(!attrs) throw new Error('This file is no longer available or cannot be read.'); return args[0]+':'+ObjC.unwrap(attrs.objectForKey($.NSFileModificationDate).timeIntervalSince1970)+':'+ObjC.unwrap(attrs.objectForKey($.NSFileSize)); }", target.file])
-    : await exec(platform === "windows" ? "python" : "python3", ["-c", "import os,sys; s=os.stat(sys.argv[1]); print(sys.argv[1]+':'+str(s.st_mtime_ns)+':'+str(s.st_size))", target.file]);
-  if (result.code !== 0) throw new Error(result.stderr.trim() || "Cannot read media metadata.");
+    ? await exec("osascript", ["-l", "JavaScript", "-e", `ObjC.import('Foundation'); ${MAC_LOCAL_COPY_CHECK} function run(args) { checkLocalCopy(args[0], args[1]); var attrs=$.NSFileManager.defaultManager.attributesOfItemAtPathError($(args[0]),null); if(!attrs) throw new Error('This file is no longer available or cannot be read.'); return args[0]+':'+ObjC.unwrap(attrs.objectForKey($.NSFileModificationDate).timeIntervalSince1970)+':'+ObjC.unwrap(attrs.objectForKey($.NSFileSize)); }`, source.file, JSON.stringify(source.syncRoots || [])])
+    : await exec(platform === "windows" ? "python" : "python3", ["-c", `import os,sys,json
+${PYTHON_LOCAL_COPY_CHECK}
+check_local_copy(sys.argv[1], json.loads(sys.argv[2]))
+s=os.stat(sys.argv[1]); print(sys.argv[1]+':'+str(s.st_mtime_ns)+':'+str(s.st_size))`, source.file, JSON.stringify(source.syncRoots || [])]);
+  if (result.code !== 0) throw new Error((source.localCopy ? "Local copy unavailable: " : "") + (result.stderr.trim() || "Cannot read media metadata."));
   return result.stdout.trim();
 }
 
