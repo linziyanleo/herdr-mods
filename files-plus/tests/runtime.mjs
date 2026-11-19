@@ -26,6 +26,7 @@ export async function runtime(t) {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
     spaces: () => state.spaces, agents: () => state.agents || [], panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), focused: () => state.focus,
     machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, theme: () => state.theme, layout: () => state.layout,
+    home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
       await state.hooks.beforeRead?.(file);
@@ -88,21 +89,23 @@ export async function runtime(t) {
     Scrollbar: { vertical: id => builder("scrollbar", id) },
     v_virtual_list: (id, count, height, key, render) => builder("virtual-list", { count, height, key }).id(id).children(render({ start: 0, end: count })),
     EditorState: { new: options => ({ ...options, release() { this.released = true; } }) }, Editor: { new: value => builder("editor", value) } };
-  const context = vm.createContext({ console, window: { viewport_size: () => state.viewport || { width: 1600, height: 1000 } } });
-  const cache = new Map();
-  async function module(file) {
-    if (cache.has(file)) return cache.get(file);
-    const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file });
-    cache.set(file, result);
-    return result;
-  }
-  async function link(specifier, parent) {
+  state.registry = () => {
+    const context = vm.createContext({ console, window: { viewport_size: () => state.viewport || { width: 1600, height: 1000 } } });
+    const cache = new Map();
+    async function module(file) {
+      if (cache.has(file)) return cache.get(file);
+      const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file });
+      cache.set(file, result);
+      return result;
+    }
+    async function link(specifier, parent) {
       const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : null;
       if (!exports) return module(path.resolve(path.dirname(parent.identifier), specifier));
-      const synthetic = new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
-      return synthetic;
-  }
-  state.load = async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status === "unlinked") await mod.link(link); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
+      return new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
+    }
+    return async name => { const mod = await module(path.join(runtimeDir, name)); if (mod.status === "unlinked") await mod.link(link); if (mod.status !== "evaluated") await mod.evaluate(); return mod.namespace; };
+  };
+  state.load = state.registry();
   state.cx = { theme: () => state.semantic, notify(entity) { if (entity) entity.dirty = true; else state.notifications++; }, stop_propagation() {}, sleep: async () => {},
     new(Class, props) {
       const view = new Class(), entity = { view, dirty: true, released: false,

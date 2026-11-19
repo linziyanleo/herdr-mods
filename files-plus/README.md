@@ -26,7 +26,9 @@ Focus an idle agent in a workspace with at least two distinct declared roots. Ri
 
 ## Multi-root agent context
 
-For every agent in a multi-root workspace, Files Plus sends the current root list when the workspace is first observed and when an agent starts. Each root addition or removal sends the revised list to every agent in that workspace. The message tells agents to inspect every root for harness or instruction files rather than treating the terminal directory as the sole project root.
+While Files Plus is loaded, it sends existing and newly observed workspace agents the current root list and broadcasts later root additions or removals. Messages ask agents to inspect every root for applicable harness or instruction files rather than treating the terminal directory as the sole project root.
+
+Delivery uses `hc send`: it submits a normal agent message, not a system-prompt injection or a permission change. Blocked agents are not forced through dialogs. Unsent context remains pending; failed delivery reports the reason and can recover when the agent becomes eligible again. Multiple panel copies coordinate delivery rather than submitting duplicate messages. An agent already working may receive the context after work has started.
 
 ## Keyboard workflow
 

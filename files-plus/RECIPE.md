@@ -111,7 +111,11 @@ The paste uses the same focus and clipboard flow as **Add to agent (@)**. It ins
 
 The multi-root agent context proposal comes from [@teomurgi's PR #9](https://github.com/linziyanleo/herdr-mods/pull/9).
 
-Files Plus sends every existing and newly observed agent in a workspace its current root list. Each root addition, removal or workspace-file reload that changes the list broadcasts the revised composition to that workspace's agents. The agent message identifies the workspace as multi-root and requires checking every root for applicable harness or instruction files before work begins. It uses `hc send`, so a failed delivery remains visible rather than silently claiming that an agent received the context.
+While the Files Plus panel is loaded, it sends existing and newly observed agents in a declared workspace the current root list. Root additions, removals and workspace-file reloads that change the list broadcast the revised composition to that workspace's agents. The message identifies the workspace as multi-root and asks agents to check every root for applicable harness or instruction files. It uses `hc send`, which submits a normal message rather than modifying an agent's system prompt or filesystem permissions; context cannot be guaranteed to arrive before an already-running agent begins work. Blocked dialogs are never forced.
+
+Delivery receipts and expiring ownership claims are shared between panel copies and survive mod reloads. Unchanged successful compositions are not resubmitted for the same observed terminal session. Failed sends include the transport error in a notification and remain pending until the agent's status changes or its roots change; unchanged failures do not retry on every redraw. Blocked agents wait for an eligible status. Queued sends revalidate the live agent, session, workspace composition and owner before dispatch. Root changes during a send are serialized, with the latest observed composition sent afterward.
+
+Closing a panel cancels its queued deliveries but cannot revoke an already-dispatched `hc send`. An in-flight claim stays reserved until completion or its 30-second lease expires; active senders renew every 10 seconds. After a crash or a lost completion, a takeover may resend an update whose receipt is unknown. This is not an exactly-once transport guarantee. Receipts identify sessions by address, space, reported app, and terminal creation time/PID when available; Herdr does not provide a universal agent conversation ID.
 
 ### Adaptive panel fitting
 
@@ -193,6 +197,13 @@ Use these persisted shared contracts. Compare values before writing, because a s
 "files-plus.revision": number
 "files-plus.open-location": "tab" | "pane" | "internal" // missing/invalid defaults to tab
 "preview-plus.target": Record<SpaceId, { file: string; root: string; on: string | null }>
+"files-plus.agent-context": Record<AgentAddress, {
+  session: string;
+  space: SpaceId;
+  delivered?: string; // JSON root-path signature
+  failed?: { roots: string; status: string | null };
+  claim?: { owner: string; id: string; expires: number; dispatched: boolean };
+}>
 ```
 
 `path` is resolved and absolute; `source` retains the declared spelling. `file: null` denotes an unsaved workspace. Retain the ten most recent saved config paths. Prune closed workspace mappings only when `machines()` reports the local layout as ready.
@@ -307,3 +318,9 @@ Final-code validation: all 216 Node tests passed with `node --experimental-vm-mo
 `node --experimental-vm-modules --test files-plus/tests/workspace-context.test.mjs` exercises menu capture, distinct roots, eligible agents, stale destinations, cancellation and the exact pasted text. The serial repository suite passed 242 tests, and `herdr-app check files-plus/mods/files-plus` passed on macOS with Herdr 0.1.16.
 
 `native-session.mjs --background` ran the native menu in a disposable app home. Raw terminal recorders used [Herdr's OSC 7501 status protocol](https://herdr.dev/core/#status-from-the-source) to report idle or working. The idle recorder received both root paths on one line without Enter. Opening and closing a menu produced no input. A switched tab or space and a closed terminal rejected the captured target. `herdr-app shot` showed the action with two roots and an idle recorder, and its absence with one root or a working recorder. Physical pointer input, real coding agents and remote hosts were outside this run.
+
+### Agent workspace delivery verification (2026-11-19)
+
+`node --experimental-vm-modules --test files-plus/tests/agent-context.test.mjs files-plus/tests/panel.test.mjs files-plus/tests/workspace.test.mjs files-plus/tests/browsing.test.mjs files-plus/tests/location.test.mjs` passed all 47 tests. Seven agent-context groups cover initial/new agents, additions/removals, failure reasons and status-transition recovery, independent panel module copies sharing delivery ownership, reload deduplication, queued cancellation, in-flight root changes, and focus/browsing isolation. The restored `home` and `appHome` host exports are exercised through production FilesPanel imports and behavior.
+
+These checks use a simulated Herdr host and mocked `hc`; no messages were sent to real agents. After updating the local Linux app from Herdr 0.1.7 to the official 0.1.16 release, `herdr-app check files-plus/mods/files-plus` passed. The existing core remained at 0.1.13. No Files Plus runtime installation, live-window interaction acceptance, screenshot or exactly-once transport verification is claimed.
