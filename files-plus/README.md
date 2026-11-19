@@ -24,6 +24,10 @@ Up/down selects a result. A click uses the chosen opening location. Enter uses t
 
 Focus an idle agent in a workspace with at least two distinct declared roots. Right-click a workspace root in Files Plus and choose **Paste workspace roots to agent**. The list goes into that agent's input as one editable line. Review it and submit it when ready.
 
+## Multi-root agent context
+
+For every agent in a multi-root workspace, Files Plus sends the current root list when the workspace is first observed and when an agent starts. Each root addition or removal sends the revised list to every agent in that workspace. The message tells agents to inspect every root for harness or instruction files rather than treating the terminal directory as the sole project root.
+
 ## Keyboard workflow
 
 Use the [Files / Preview / terminal example](../preview-plus/examples/files-preview-agent.json) with both packages. It contains no personal paths or shortcuts; copying or selecting it is an explicit setup action. The entry command `files-plus.search` focuses search. Bind it only to a free key in your own cloned layout/setup if desired.

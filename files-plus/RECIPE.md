@@ -111,6 +111,8 @@ The paste uses the same focus and clipboard flow as **Add to agent (@)**. It ins
 
 The multi-root agent context proposal comes from [@teomurgi's PR #9](https://github.com/linziyanleo/herdr-mods/pull/9).
 
+Files Plus sends every existing and newly observed agent in a workspace its current root list. Each root addition, removal or workspace-file reload that changes the list broadcasts the revised composition to that workspace's agents. The agent message identifies the workspace as multi-root and requires checking every root for applicable harness or instruction files before work begins. It uses `hc send`, so a failed delivery remains visible rather than silently claiming that an agent received the context.
+
 ### Adaptive panel fitting
 
 Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
@@ -129,7 +131,7 @@ files-plus/
   licenses/
   mods/files-plus/
     LICENSE, THIRD_PARTY.md, licenses/
-    main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
+    main.js, workspace.js, agent-context.js, tree.js, metrics.js, fit.js, drag.js
     roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js, search.js
     mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
   tests/
@@ -137,7 +139,7 @@ files-plus/
 
 Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name, confirmation or root action, `settings` for the open-location dialog, `preview` for a fixed file viewer, and `drag` for the transparent full-window drag surface. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
 
-Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and direct Herdr appearance reads in `appearance.js`. Do not call `set_theme` or change the shared theme from this mod. There are no cross-mod code imports. The package manifest is:
+Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `agent-context.js` sends workspace root context to every agent in a declared workspace when an agent appears or its root list changes. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and direct Herdr appearance reads in `appearance.js`. Do not call `set_theme` or change the shared theme from this mod. There are no cross-mod code imports. The package manifest is:
 
 ```json
 {
@@ -150,7 +152,7 @@ Keep tree state, incremental local watchers, Git marks and read-only previews in
 
 No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It passes its remaining entry budget to the existing listing in `workspace.js` and leaves tree state to the tree view.
 
-The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
+The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/agents/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `hc`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
 
 ### Optional panel fitting
 

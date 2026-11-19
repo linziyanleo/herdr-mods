@@ -13,7 +13,7 @@ export async function runtime(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "files-plus-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   await fs.mkdir(path.join(dir, "home"));
-  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true, ui_font_family: "Geist", ui_font_size: 13, font_family: "JetBrains Mono", font_size: 14 }, layout: {}, rebuiltRows: 0, notifications: 0 };
+  const state = { dir, platform: "macos", props: {}, shared: {}, calls: [], hcCalls: [], clipboard: "original clipboard", focus: null, panes: [], spaces: [], hooks: {}, tasks: [], timers: [], settings: { dark: true, ui_font_family: "Geist", ui_font_size: 13, font_family: "JetBrains Mono", font_size: 14 }, layout: {}, rebuiltRows: 0, notifications: 0 };
   let activeTask;
   state.theme = { background: "#111113", popover: "#18191b", raised: "#212225", hover: "#272a2d", selected: "#2e3135", border: "#363a3f", input: "#43484e", foreground: "#edeef0", muted: "#b0b4ba", dim: "#777b84", accent: "#b0b4ba", solid: "#edeef0", solid_foreground: "#111113", ansi1: "#ff9592", ansi2: "#3dd68c", ansi3: "#ffca16", ansi4: "#70b8ff", ansi5: "#d19dff", ansi6: "#53b9ab" };
   state.semantic = { colors: { border: "#ffffff" }, appearance: "dark", is_dark: true,
@@ -24,7 +24,7 @@ export async function runtime(t) {
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
   const host = {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
-    spaces: () => state.spaces, panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), agents: () => state.agents || [], focused: () => state.focus,
+    spaces: () => state.spaces, agents: () => state.agents || [], panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), focused: () => state.focus,
     machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, theme: () => state.theme, layout: () => state.layout,
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
@@ -50,6 +50,11 @@ export async function runtime(t) {
       if (state.hooks.watch) { if (activeTask) activeTask.persistent = true; return state.hooks.watch(dir); }
       const pending = Promise.reject(new Error("Native watchers are exercised in Herdr")); pending.cancel = () => {};
       return pending;
+    },
+    hc: async args => {
+      state.hcCalls.push([...args]);
+      if (state.hooks.hc) return state.hooks.hc(args);
+      return { code: 0, stdout: "", stderr: "" };
     },
     run: (command, args) => {
       state.calls.push({ command, args });
