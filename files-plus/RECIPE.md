@@ -4,7 +4,7 @@ Browse and search one folder or a workspace with several roots in Herdr's Files 
 
 ![Files Plus](preview.png)
 
-The preview is an unedited `herdr-app shot` from a disposable Herdr 0.1.13 window showing the Files Plus tree beside an ordinary TypeScript file in Preview Plus's editor. This package ships only Files Plus. All shown folders and documents are test fixtures. Preserve the capture's sRGB metadata.
+The preview is an unedited `herdr-app shot` from a disposable Herdr 0.1.16 window showing ranked Files Plus results beside an open file in Preview Plus. The two `Guide.txt` results have different owning roots. All shown folders and documents are test fixtures. Preserve the capture's sRGB metadata.
 
 ## What you see
 
@@ -32,11 +32,13 @@ Local safety polls run every 60 seconds while visible; remote folders poll every
 
 ### Filename and path search
 
-A 30px native input below the header searches files under the current single-folder root or every declared workspace root, including closed roots and unopened descendants. It uses 13px text, a 0.5px input border and existing Herdr theme colors. Results use 48px rows with a 13px basename and 12px relative path; multi-root results prefix that path with the root's display name. Duplicate display names use the logical root path instead. A tooltip preserves the full root, path and remote machine.
+A 30px native input below the header searches files under the current single-folder root or every declared workspace root, including closed roots and unopened descendants. It uses 13px text, a 0.5px input border and existing Herdr theme colors. Results use 48px rows with a 13px basename and 12px relative path. Duplicate filenames and multi-root results show the root beside the relative path, with separate space for both labels. Duplicate root names use the logical root path. A tooltip preserves the full root, path and remote machine.
 
-Whitespace-separated terms must all occur in the root-relative path, case-insensitively and in any order. Use `/` for path separators. Punctuation, glob characters and regex characters are literal; `src/ report .ts` is a path query, not a content query. Directories are traversed but are not results. Hidden and Git-ignored files, including dependencies, stay searchable, matching the tree policy. Entries named `.git` are excluded at every depth. Symlinks are listed as files and are not followed recursively; a declared root may itself be a logical alias.
+Search ranks exact full filenames, exact names without the extension, filename prefixes and other literal filename matches ahead of path-only matches. A single word made of letters or digits can also match initials or an ordered subsequence of the name without its extension. Initials recognize word separators and camel case. Fuzzy matches favor compact groups of letters. Comparisons ignore case and normalize Unicode for matching. Result paths keep their original spelling.
 
-The search scans complete directory listings, independently of the tree's 500-per-folder, 5,000-total and depth limits. It batches at most four directory reads per request and shows at most 200 matching files. Only a confirmed additional match produces "200+ results. Refine search." Missing or unreadable directories show "Search incomplete" with details, while readable roots still contribute results. Large roots can take time, especially over a remote connection; results appear after the scan completes or reaches the result limit. There is no persistent index, content reading or new runtime dependency.
+For literal path matching, all whitespace-separated terms must occur in the root-relative path in any order. Use `/` for path separators. Punctuation, glob characters and regex characters are literal, as in `src/ report .ts`. Only files are shown as results. Hidden and Git-ignored entries stay searchable. Entries named `.git` are excluded at every depth. Symlinks appear as files and are not followed recursively. A declared root may itself be a logical alias.
+
+Search reads directories breadth-first with up to four listings per batch. Each query checks at most 10,000 entries, including directory entries, and attempts at most 256 directory reads across all roots. It ranks that set before taking the first 200 matches. Only a confirmed extra match produces "200+ results. Refine search." A reached scan limit with work left, or a missing or unreadable folder, produces "Search incomplete" with details and retains the matches found so far. Every query reuses the current POSIX or Windows listing helper. An empty query shows the tree.
 
 Typing is debounced by 180ms. New queries, changed roots/spaces/machines and closing the view invalidate pending replies. The query is re-run against changed roots; focus movement within an unchanged workspace retains it. Filesystem events and existing safety polls refresh an active search, including changes below unopened folders. A running scan finishes before a later poll can restart it; files changing during a scan are not an atomic snapshot and are picked up by subsequent refreshes.
 
@@ -136,7 +138,7 @@ Keep tree state, incremental local watchers, Git marks and read-only previews in
 }
 ```
 
-No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It reuses `workspace.js` directory listing with the tree-only entry cap disabled; it never populates or expands the tree as a side effect.
+No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It passes its remaining entry budget to the existing listing in `workspace.js` and leaves tree state to the tree view.
 
 The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
 
@@ -245,6 +247,13 @@ Workspace management supports local POSIX spaces; Windows and remote spaces reta
 ## Done when
 
 The [0.1.16 implementation/verification record](../docs/plans/interaction-performance-implementation.md) covers current lifecycle and keyboard changes, with physical gaps kept open. Historical paragraphs below retain their original acceptance scope.
+
+Search ranking verification (2026-11-23): all 113 Files Plus Node tests and both the main and populated-search `herdr-app check` passed. On macOS 27.2 with Herdr 0.1.16 and core 0.1.21, the background native driver exercised result ranking, duplicate roots, rapid query replacement, Unicode paths, partial scans, selection and Escape. With Preview Plus installed in the disposable home, native commands exercised Enter, F6, pin and unpin, return to Files, and reuse of an existing fixed tab. A separate loopback core verified same-path remote identity and opening. F7 reference and clipboard behavior were exercised by Node tests. Physical input, Windows and Linux windows, and another physical host remain open for verification.
+
+The same 2,402-file, 21-directory fixture was measured on `9d8e017` and P1 with seven alternating pairs after warm-up. The native timer covered directory reads and ranking from the search call to its response. The loopback used a second core on the same Mac.
+
+- The first query, `needle.txt`, placed the previously missed exact filename first. Local median went from 94 to 235 ms and loopback median from 130 to 418 ms. Both ran 5 directory reads at baseline and 21 in P1.
+- The next query, `z-source target`, used 21 directory reads on both versions. Local median went from 167 to 168 ms and loopback median from 369 to 338 ms. The ranges overlapped for this query.
 
 All-file routing verification (2026-11-06): the combined automated checks, affected-test rerun, both native mod checks, eight paired handoff groups and four native editor groups pass as detailed in the [delivery record](../docs/plans/preview-plus.md#all-file-editor-routing-2026-11-06). The paired groups include TypeScript, YAML, hidden, extensionless and unknown-extension text with exact save readback, wrap, confirmed discard and retained tree state. Rich-preview formats are unchanged.
 

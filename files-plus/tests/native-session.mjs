@@ -76,17 +76,19 @@ await fs.writeFile(workspace, JSON.stringify({ name: "Product", folders: [{ path
 // LaunchServices preserves the installed bundle's signature. A copied binary
 // with a different Info.plist is rejected by macOS before it can draw a window.
 const overrides = ["HERDR_APP_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "HC_SESSION", "HERDR_TELEMETRY"];
-await execute("/usr/bin/open", ["-n", "-a", bundle, ...overrides.flatMap(key => ["--env", `${key}=${env[key]}`]), "--stdout", path.join(base, "app.log"), "--stderr", path.join(base, "app.log")]);
+const background = process.argv.includes("--background");
+await execute("/usr/bin/open", ["-n", ...(background ? ["-g"] : []), "-a", bundle, ...overrides.flatMap(key => ["--env", `${key}=${env[key]}`]), "--stdout", path.join(base, "app.log"), "--stderr", path.join(base, "app.log")]);
 let available = false;
 for (let attempt = 0; attempt < 100; attempt++) {
   try { await execute(cli, ["status"], { env }); available = true; break; }
   catch { await new Promise(resolve => setTimeout(resolve, 100)); }
 }
 if (!available) throw new Error(`Isolated Herdr did not start. See ${base}/app.log`);
-const first = JSON.parse((await execute(cli, ["do", "space.new", JSON.stringify({ name: "Product", folder: path.join(project, "web"), argv: ["/bin/zsh", "-f"] })], { env })).stdout);
-const second = JSON.parse((await execute(cli, ["do", "tab.new", JSON.stringify({ name: "API", space: first.space, folder: path.join(project, "api"), argv: ["/bin/zsh", "-f"] })], { env })).stdout);
+const argv = ["/usr/bin/env", "PS1=fixture> ", "/bin/zsh", "-f"];
+const first = JSON.parse((await execute(cli, ["do", "space.new", JSON.stringify({ name: "Product", folder: path.join(project, "web"), argv })], { env })).stdout);
+const second = JSON.parse((await execute(cli, ["do", "tab.new", JSON.stringify({ name: "API", space: first.space, folder: path.join(project, "api"), argv })], { env })).stdout);
 await execute(cli, ["do", "layout.switch", JSON.stringify({ name: "files-plus-test" })], { env });
 await execute(cli, ["do", "overlay.close", JSON.stringify({ id: "frame-welcome" })], { env });
-const info = { base, app, bundle, env: Object.fromEntries(overrides.map(key => [key, env[key]])), workspace, first, second };
+const info = { base, app, bundle, background, env: Object.fromEntries(overrides.map(key => [key, env[key]])), workspace, first, second };
 await fs.writeFile(path.join(base, "session.json"), JSON.stringify(info, null, 2));
 console.log(JSON.stringify(info, null, 2));

@@ -156,7 +156,7 @@ export class FilesPanel extends View {
     return true;
   }
   selectedTarget() {
-    const result = this.search.active ? this.search.results[this.search.at] : this.rowModel?.find(row => row.path === this.selectedFile);
+    const result = this.search.active ? this.search.currentResult(this.search.results[this.search.at]) : this.rowModel?.find(row => row.path === this.selectedFile);
     if (!result) return null;
     const target = this.target(result.path, result.kind || "file", result.root);
     if (this.agentTarget?.space === target.space && this.agentTarget.on === target.on) target.active = this.agentTarget.active;

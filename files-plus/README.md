@@ -14,9 +14,9 @@ Inside right panel uses Preview Plus when both mods share a [layout stack](RECIP
 
 ## Search
 
-Type in the field below the header to find files in unopened directories. All whitespace-separated terms must occur in the root-relative path, in any order and without regard to case. Terms are literal; this does not search file contents.
+Type in the field below the header to find files in unopened directories. Search ignores case. Exact names come first, followed by name prefixes and substrings. Use initials such as `fpc` for `FilePanelController.ts`, or type letters in order from the filename. For path searches such as `src/ report .ts`, all terms match literally and can appear in any order.
 
-Search includes hidden and Git-ignored files, skips `.git` and does not follow directory symlinks. It shows up to 200 matches and reports when more exist. Multiple roots show their names beside results. Unreadable folders produce a partial-search message; large or remote roots can take longer to scan.
+Search includes hidden and Git-ignored files, skips `.git` and does not follow directory symlinks. It ranks the scanned entries before showing up to 200 matches. Duplicate filenames and multi-root results show the root beside the relative path. A scan covers up to 10,000 entries or 256 folders and reports an incomplete search if it reaches a limit or a folder is unavailable.
 
 Up/down selects a result. A click uses the chosen opening location. Enter uses the temporary Preview slot when paired; otherwise it uses the chosen location. Clear or Escape restores the tree with its expanded folders intact.
 
@@ -61,7 +61,7 @@ herdr-app check files-plus/mods/files-plus
 node files-plus/tests/check-search.mjs
 ```
 
-For native checks on macOS, run `node files-plus/tests/native-session.mjs`. Pass its printed `session.json` path to the relevant driver:
+For native checks on macOS, run `node files-plus/tests/native-session.mjs`. Add `--background` to launch and run `native-search.mjs` without activating the test window. Pass the printed `session.json` path to the relevant driver:
 
 | Driver | Checks |
 | --- | --- |

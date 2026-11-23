@@ -58,6 +58,11 @@ test("multi-root duplicate paths retain root identity and focus movement does no
   assert.deepEqual(Array.from(found, result => result.root), roots); assert.equal(new Set(found.map(result => result.key)).size, 2);
   const { rootContexts } = await r.load("search.js"), labels = rootContexts(panel.search.roots);
   assert.equal(labels.get(roots[0]), roots[0]); assert.equal(labels.get(roots[1]), roots[1]);
+  const searchView = panel.render(r.cx);
+  for (const hit of found) {
+    const row = find(searchView, `search-${hit.key}`), secondary = row.nodes[1].nodes[1];
+    assert.deepEqual(secondary.nodes.map(label => label.nodes[0]), [hit.root, "/", "src/same.txt"]);
+  }
   const request = panel.search.request;
   r.focus.cwd = roots[1]; r.panes[0].cwd = roots[1]; panel.render(r.cx); await r.drain();
   assert.equal(panel.search.request, request); assert.equal(panel.search.results, found);
@@ -75,6 +80,65 @@ test("only an extra match marks results as truncated and directory errors keep s
     if (root === "/bad") throw new Error("Access denied"); return listing(1);
   });
   assert.equal(failed.results.length, 1); assert.equal(failed.failures, 1); assert.match(failed.errors[0], /Access denied/);
+});
+
+test("filename ranks beat earlier path matches even when the display cap is full", async t => {
+  const r = await runtime(t), { searchFiles, SEARCH_LIMIT } = await r.load("search.js");
+  const files = names => names.map(name => ({ name, dir: false }));
+  const listings = new Map([
+    ["/early", [{ name: "report", dir: true }]],
+    ["/early/report", files(Array.from({ length: SEARCH_LIMIT + 5 }, (_, i) => `archive-${i}.txt`))],
+    ["/late", [{ name: "src", dir: true }]],
+    ["/late/src", files(["monthly-report.txt", "report-notes.md", "Report.md", "REPORT"])]
+  ]);
+  const found = await searchFiles([{ path: "/early" }, { path: "/late" }], null, "report", async dir => listings.get(dir));
+  assert.equal(found.results.length, SEARCH_LIMIT);
+  assert.deepEqual(Array.from(found.results.slice(0, 5), hit => hit.relative),
+    ["src/REPORT", "src/Report.md", "src/report-notes.md", "src/monthly-report.txt", "report/archive-0.txt"]);
+  assert.equal(found.truncated, true);
+  assert.equal(found.scanLimited, false);
+});
+
+test("initials and compact fuzzy matches rank naturally while Unicode and multi-word paths stay literal", async t => {
+  const r = await runtime(t), { searchFiles } = await r.load("search.js");
+  const accented = "Su\u0301per File.ts";
+  const files = ["FilePanelController.ts", "file_panel_controller-extra.ts", "alpha-fXpc.ts", "flab-paaab-aCoo.ts", "FilePanel.css", accented];
+  const list = async dir => dir === "/root" ? [{ name: "Sources", dir: true }] : files.map(name => ({ name, dir: false }));
+  const search = text => searchFiles([{ path: "/root" }], null, text, list);
+  assert.deepEqual(Array.from((await search("fpc")).results, hit => hit.relative),
+    ["Sources/FilePanelController.ts", "Sources/file_panel_controller-extra.ts", "Sources/alpha-fXpc.ts", "Sources/flab-paaab-aCoo.ts"]);
+  assert.equal((await search("SÚPER FILE.TS")).results[0].relative, `Sources/${accented}`);
+  assert.equal((await search(".ts SOURCES/SÚPER file")).results[0].relative, `Sources/${accented}`);
+  assert.equal((await search("sources/fpc")).results.length, 0);
+});
+
+test("entry and folder budgets disclose partial scans, independently of the display cap", async t => {
+  const r = await runtime(t), panel = await panelFor(r);
+  const { searchFiles, SEARCH_SCAN_LIMIT, SEARCH_FOLDER_LIMIT } = await r.load("search.js");
+  const entries = Array.from({ length: SEARCH_SCAN_LIMIT }, (_, i) => ({ name: `filler-${i}.txt`, dir: false }));
+  const roots = [{ path: "/root" }];
+  const exact = await searchFiles(roots, null, "needle.txt", async () => entries);
+  assert.equal(exact.scanLimited, false);
+  panel.search.list = async (_folder, _on, limit) => {
+    assert.equal(limit, SEARCH_SCAN_LIMIT);
+    return [...entries, { name: "needle.txt", dir: false }];
+  };
+  assert.equal((await query(r, panel, "needle.txt")).length, 0);
+  assert.equal(panel.search.truncated, false);
+  assert.equal(panel.search.scanLimited, true);
+  const view = panel.render(r.cx);
+  assert.match(find(view, "files-search-error").nodes[0], /scan limit reached/);
+  assert.equal(find(view, "files-search-empty"), null);
+
+  let calls = 0;
+  const directories = Array.from({ length: SEARCH_FOLDER_LIMIT }, (_, i) => ({ name: `child-${i}`, dir: true }));
+  const folders = await searchFiles(roots, null, "needle.txt", async dir => {
+    calls++;
+    return dir === "/root" ? directories : [];
+  });
+  assert.equal(calls, SEARCH_FOLDER_LIMIT);
+  assert.equal(folders.scanLimited, true);
+  assert.equal(folders.truncated, false);
 });
 
 test("new queries supersede delayed results, and clearing cannot resurrect an in-flight query", async t => {
@@ -157,12 +221,54 @@ test("same paths on different machines are separate targets and remote listings/
   const remote = await searchFiles([{ path: "/root" }], "server", "same", list);
   assert.notEqual(local.results[0].key, remote.results[0].key);
   await file(r.dir, "same.txt");
-  r.spaces[0].machine = "server";
-  const panel = await panelFor(r); r.calls = []; await query(r, panel, "same");
+  const panel = await panelFor(r); await query(r, panel, "same");
+  const old = panel.search.results[0], started = Promise.withResolvers(), release = Promise.withResolvers();
+  panel.search.list = async (...args) => {
+    if (args[1] === null) { started.resolve(); await release.promise; }
+    return (await r.load("workspace.js")).directory(...args);
+  };
+  r.spaces[0].machine = "server"; r.calls = [];
+  panel.search.open(old.key, r.cx);
+  panel.treeKey({ key: "f6" }, r.cx);
+  panel.treeKey({ key: "f7" }, r.cx);
+  assert.deepEqual(r.calls, []);
+
+  r.spaces[0].machine = null;
+  panel.search.refresh(r.cx);
+  const pending = r.advance(180); await started.promise;
+  r.spaces[0].machine = "server"; panel.refresh(r.cx);
+  await r.advance(180);
   assert.equal(panel.search.results[0].on, "server");
+  assert.notEqual(panel.search.results[0].key, old.key);
   assert.ok(r.calls.filter(call => call.command === "sh").every(call => call.on === "server"));
+  release.resolve(); await pending;
+  assert.equal(panel.search.results[0].on, "server", "a late same-path local reply cannot replace remote results");
   panel.search.open(panel.search.results[0].key, r.cx); await r.drain();
   assert.equal(r.calls.findLast(call => call.command === "tab.new").args.props.on, "server");
+});
+
+test("Enter and F6 preview the ranked selection, with pins protected and F7 inserting the selected reference", async t => {
+  const r = await runtime(t), exact = await file(r.dir, "src/Report.txt"), other = await file(r.dir, "other/Report notes.txt");
+  await fs.mkdir(path.join(r.dir, "app/mods/preview-plus"), { recursive: true });
+  await fs.writeFile(path.join(r.dir, "app/mods/preview-plus/mod.json"), "{}");
+  r.props = { previewStack: "files" };
+  const panel = await panelFor(r);
+  await query(r, panel, "report");
+  assert.equal(panel.search.results[0].path, exact);
+  panel.search.input.handlers.submit({}, r.cx); await r.drain();
+  const paired = r.shared["preview-plus.target"].s1;
+  assert.equal(paired.file, exact);
+  r.shared["preview-plus.pinned"] = { s1: paired };
+  panel.search.key({ key: "down" }, r.cx);
+  panel.treeKey({ key: "f6" }, r.cx); await r.drain();
+  assert.equal(r.shared["preview-plus.target"].s1, paired);
+  assert.match(r.calls.findLast(call => call.command === "notify").spec.title, /Preview is pinned/);
+  panel.treeKey({ key: "f7" }, r.cx); await r.drain();
+  assert.equal(r.pasted, '@"other/Report notes.txt" ');
+  assert.equal(r.clipboard, "original clipboard");
+  delete r.shared["preview-plus.pinned"];
+  panel.treeKey({ key: "f6" }, r.cx); await r.drain();
+  assert.equal(r.shared["preview-plus.target"].s1.file, other);
 });
 
 test("watch changes under unopened directories refresh search and .git lock churn does not", async t => {
@@ -184,11 +290,11 @@ test("closing releases search resources and cancels delayed replies", async t =>
   assert.equal(panel.search.results.length, 0); assert.equal(panel.search.input.released, true); assert.equal(panel.search.scroll.released, true);
 });
 
-test("Windows search lists complete directories with literal paths and preserves machine-independent path spelling", async t => {
+test("Windows search bounds literal directory reads and preserves path spelling", async t => {
   const r = await runtime(t), { directory } = await r.load("workspace.js"), { searchFiles } = await r.load("search.js");
   r.platform = "windows";
   r.hooks.exec = async (cmd, args) => {
-    assert.equal(cmd, "powershell"); assert.ok(!args[3].includes("Select-Object -First"));
+    assert.equal(cmd, "powershell"); assert.match(args[3], /Select-Object -First \d+/);
     assert.ok(args[3].includes("-LiteralPath")); assert.ok(args[3].includes("ReparsePoint"));
     return { code: 0, stdout: JSON.stringify(args.at(-1) === "C:/Project" ? [{ name: "src", dir: true }] : [{ name: "中文 [file].txt", dir: false }]), stderr: "" };
   };

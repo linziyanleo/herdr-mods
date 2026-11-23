@@ -37,6 +37,10 @@ async function file(root, relative) {
 }
 
 const checks = [], shots = [];
+async function capture(name) {
+  await request({ type: info.background ? "frame" : "activate" });
+  const shot = path.join(base, name); await execute("herdr-app", ["shot", shot], { env }); shots.push(shot);
+}
 await request({ type: "back" });
 await request({ type: "workspace", file: null });
 const initial = await until(state, value => value.location?.cwd && !value.location.entry, "single-folder context");
@@ -53,7 +57,7 @@ checks.push("single-folder search reaches unopened paths without expansion");
 const roots = [path.join(base, "search-web"), path.join(base, "search-api")];
 for (const root of roots) await file(root, "src/deep/Same.txt");
 const workspace = path.join(base, "search.herdr-workspace.json");
-await fs.writeFile(workspace, JSON.stringify({ folders: roots.map(root => ({ path: root, name: path.basename(root) })) }));
+await fs.writeFile(workspace, JSON.stringify({ name: "Search fixture", folders: roots.map(root => ({ path: root, name: "Source" })) }));
 await request({ type: "workspace", file: workspace });
 current = await search("src/deep SAME");
 assert.equal(current.search.results.length, 2);
@@ -61,8 +65,7 @@ assert.deepEqual(current.search.results.map(result => result.root), roots);
 assert.equal(new Set(current.search.results.map(result => result.key)).size, 2);
 checks.push("multi-root search preserves identical-path identities");
 
-await request({ type: "activate" });
-const shot = path.join(base, "search-results.png"); await execute("herdr-app", ["shot", shot], { env }); shots.push(shot);
+await capture("search-results.png");
 await request({ type: "search-key", key: "down" });
 await until(state, value => value.search?.at === 1, "second result selected");
 await request({ type: "open-location", value: "internal" });
@@ -73,13 +76,35 @@ await request({ type: "search-key", key: "escape" });
 await until(state, value => value.search?.query === "" && !value.file, "Escape restores tree");
 checks.push("driver selection, Enter and Escape use the search control actions");
 
+await Promise.all(Array.from({ length: 205 }, (_, i) => file(roots[0], `many/needle.txt-${i}`)));
+const needle = await file(roots[1], "src/deep/Needle.txt");
+current = await search("needle.txt");
+assert.equal(current.search.results[0].path, needle);
+assert.equal(current.search.results.length, 200); assert.equal(current.search.truncated, true); assert.equal(current.search.scanLimited, false);
+await request({ type: "search-key", key: "f6" });
+await until(state, value => value.file === needle && value.preview, "F6 previews the ranked result");
+await request({ type: "back" });
+checks.push("late exact basename outranks more than 200 earlier prefix matches and F6 previews the selected file");
+
+const fuzzy = await file(roots[0], "src/FilePanelController.ts");
+await file(roots[1], "src/Súper File.ts");
+await request({ type: "search-sequence", queries: ["needle", "Súper File.ts", "fpc"] });
+current = await until(state, value => value.search?.query === "fpc" && !value.search.busy, "rapid search settles");
+assert.equal(current.search.results[0].path, fuzzy);
+current = await search("src/su\u0301per .ts");
+assert.equal(current.search.results[0].relative.normalize("NFC"), "src/Súper File.ts");
+checks.push("rapid replacement finds camel-case initials and decomposed Unicode path terms");
+
 current = await search("no-matching-file"); assert.equal(current.search.results.length, 0); assert.equal(current.search.failures, 0);
 await fs.rm(roots[1], { recursive: true });
 current = await search("Same.txt"); assert.equal(current.search.results.length, 1); assert.ok(current.search.failures > 0);
 checks.push("empty and partial-error search states");
-await Promise.all(Array.from({ length: 205 }, (_, i) => file(roots[0], `many/match-${i}.txt`)));
-current = await search("many/match"); assert.equal(current.search.results.length, 200); assert.equal(current.search.truncated, true);
-checks.push("result cap reports truncation");
+await Promise.all(Array.from({ length: 260 }, (_, i) => fs.mkdir(path.join(roots[0], `empty-${i}`))));
+await file(roots[0], "Known.txt");
+current = await search("Known.txt");
+assert.equal(current.search.results.length, 1); assert.equal(current.search.scanLimited, true); assert.equal(current.search.truncated, false);
+await capture("search-partial.png");
+checks.push("folder budget and unavailable root are disclosed alongside a usable result");
 
 await request({ type: "search", query: "" });
 const status = JSON.parse((await execute("herdr-app", ["status"], { env })).stdout);
