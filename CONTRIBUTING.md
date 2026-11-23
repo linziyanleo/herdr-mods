@@ -45,6 +45,7 @@ If `HERDR_APP_HOME` is set, read the corresponding files there. Herdr updates th
 - Herdr's live data changes trigger rendering. Do not poll spaces, tabs or agents. Prefer colors from `theme()`.
 - Document the external programs, network services, credentials and file paths the mod uses.
 - Make setup reproducible outside the maintainer's machine. Make paths and service endpoints configurable, document required versions, and use placeholders in examples.
+- Record each user-facing update in [CHANGELOG.md](CHANGELOG.md) under its `YYYY-MM-DD` date, with the newest dates first. Describe what changed for users.
 
 ## Installation and verification
 

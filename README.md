@@ -18,6 +18,7 @@ Original project code, documentation and assets are available under [MIT](LICENS
 
 ## Development
 
+- [Changelog](CHANGELOG.md) lists features, improvements, and fixes by date.
 - [Development guide](CONTRIBUTING.md) covers directory structure, local API references and verification.
 - [Interaction and performance roadmap](docs/plans/interaction-and-performance-roadmap.md) records proposed lifecycle, Files → Preview → agent, and Plugins improvements for discussion.
 - [Credential management](docs/credentials.md) covers GitHub authentication and local configuration storage.
