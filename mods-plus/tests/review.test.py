@@ -227,7 +227,9 @@ class ReviewTest(unittest.TestCase):
         for name in ("main.js", "mod.json", "note.txt"):
             (active / name).write_bytes(self.content[f"one/mods/one/{name}"])
         package = self.mgr.discover(pkg_id)["packages"][0]
-        self.assertTrue(helper.gallery.local_state(self.mgr, package)["installed"])
+        with patch.object(helper.gallery, "official_packages", return_value=[package]):
+            catalog = self.mgr.build_catalog()
+        self.assertTrue(catalog[0]["installed"])
         self.assertTrue(self.mgr.records[pkg_id]["associated"])
         store = Path(self.mgr.packages_dir) / "owner-suite-one"
         self.assertFalse(store.exists())
