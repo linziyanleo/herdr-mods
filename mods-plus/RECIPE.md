@@ -38,7 +38,7 @@ The [implementation report](../docs/plans/interaction-performance-implementation
 
 ### Background tasks and loading
 
-- Cached catalog entries appear before network refresh. The two official indexes and the shared examples page refresh concurrently. Media reads cached metadata.
+- Cached catalog entries appear before network refresh. The two official indexes and the shared examples page refresh concurrently. Media and details for known packages reuse cached metadata. After a failed feed refresh, ownership checks use cached file evidence so GitHub lookups do not delay the stale result.
 - Long helper operations run as one-shot tasks. Herdr's 30-second `exec` calls only start tasks and read their results; the view polls every 500ms while waiting. Matching in-flight requests share a task, including manual and scheduled update checks.
 - Official metadata requests accept compressed responses, allow five seconds to connect and stop after eight seconds without body progress. A progressing request can run for up to 180 seconds. Each task has a five-minute deadline, native validation has a 45-second deadline, and each image request has a six-second deadline. Task timeout stops the helper process group. Failures include the operation name.
 - Closing a view stops its polling. An already-started task can finish within its deadline; no daemon schedules new work. Completed task receipts are retained for one day and cleaned on subsequent starts.
@@ -137,6 +137,10 @@ Original Mods Plus code and assets are licensed under [MIT](LICENSE). Herdr/GPUI
 15. The isolated `native-attention.mjs` driver opens Plugins, checks a mixed set, verifies an active mod with drift and a stored layout with a candidate, shows ambiguous and unknown sources and built-ins, and confirms inventory navigation leaves the checked files unchanged. It reviews and applies the stored update through the existing actions and verifies the layout remains inactive. Catalog screenshots cover the return path. Physical input is verified separately.
 
 ## Verification record
+
+On 2026-11-23, the previous helper reached its 20-second catalog timeout on this Mac with 40,977 of 927,015 mod index bytes. It returned seven layout examples from the only successful feed. The revised helper fetched 1,681 entries in an isolated cold run. Replaying the same official responses through both versions produced identical package fields and reduced metadata requests from four to three. At 6 KiB/s per request, a catalog job finished in 48.51 seconds and remained queryable after 30 seconds. A test with an unreachable local proxy returned three feed errors in about six seconds. A warm run under the same failure kept all 1,681 packages and preserved cache hashes and timestamps.
+
+The catalog recovery passed the source native check with Herdr 0.1.16, the Python and UI event suites, and the progressive media fixture. Live window verification is separate from these checks.
 
 Installed packages passed all 61 Python and 23 UI event cases, the progressive media fixture, and the source native check. On macOS with Herdr 0.1.16, the isolated overlay driver exercised the mixed check, stale and missing cache states, and read-only inventory and details. The catalog returned to the same scroll position and search, with the prepared-candidate badge preserved. A reviewed stored layout update stayed inactive. Light and dark frames were inspected. Physical mouse and keyboard input and narrower window sizes remain unverified. [Installed packages preview](installed-packages-preview.png).
 

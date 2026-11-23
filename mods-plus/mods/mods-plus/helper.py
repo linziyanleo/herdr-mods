@@ -740,7 +740,7 @@ class PackageManager:
 
         current_layout = self.active_layout_name()
         mods = record.get("mods") or source.get("mods")
-        if not mods:
+        if mods is None:
             try:
                 pkg = next(p for p in gallery.official_packages(self) if p["id"] == pkg_id)
                 mods = pkg["mods"]
@@ -1388,8 +1388,9 @@ def main():
         if args.interval is not None and args.interval_value is not None:
             parser.error("Use either --interval or --interval-value with --interval-unit")
     installed_read = args.command == "installed" or (args.command == "details" and args.installed)
-    mgr = PackageManager(args.app_home, read_only=True) if installed_read else PackageManager(args.app_home)
-    mgr.cache_only = installed_read or (args.command == "catalog" and args.cached)
+    cache_only = installed_read or (args.command == "catalog" and args.cached)
+    mgr = PackageManager(args.app_home, read_only=cache_only)
+    mgr.cache_only = cache_only
 
     readonly = args.command in ("installed", "catalog", "details", "media", "prompt", "copy-prompt") or (args.command == "settings" and
                args.auto_update is None and args.interval is None and args.interval_value is None and args.agent is None)

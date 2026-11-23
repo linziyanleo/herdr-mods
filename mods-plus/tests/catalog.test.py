@@ -39,6 +39,9 @@ class CatalogTransportTests(unittest.TestCase):
                 pass
 
             def do_GET(self):
+                if self.path == "/no-body":
+                    release.wait(7)
+                    return
                 self.send_response(200)
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Content-Length", str(len(payload)))
@@ -79,6 +82,11 @@ class CatalogTransportTests(unittest.TestCase):
         with patch.object(gallery, "CATALOG_TRANSFER_TIMEOUT", 1):
             with self.assertRaisesRegex(LookupError, "timed out"):
                 gallery.download(self.url + "/slow")
+
+    def test_connected_endpoint_without_a_response_fails_quickly(self):
+        with patch.object(gallery, "CATALOG_STALL_SECONDS", 1):
+            with self.assertRaisesRegex(LookupError, "no download progress.*0 bytes received"):
+                gallery.download(self.url + "/no-body")
 
 
 class CatalogTests(unittest.TestCase):
@@ -314,6 +322,16 @@ class CatalogTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=3, check=True)
         self.assertEqual(json.loads(result.stdout)["count"], 1)
 
+    def test_empty_cache_cli_does_not_create_app_data(self):
+        root = Path(self.temp.name) / "empty-home"
+        result = subprocess.run([sys.executable, "-B", str(Path(helper.__file__)),
+                                 "--app-home", str(root), "--json", "catalog", "--cached"],
+                                capture_output=True, text=True, timeout=3, check=True)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["packages"], [])
+        self.assertTrue(data["stale"])
+        self.assertFalse(root.exists())
+
     def test_association_preserves_a_concurrent_record_change(self):
         changed = {"installed": True, "files": {"local": "new"}}
         Path(self.manager.records_file).write_text(json.dumps({self.pkg["id"]: changed}))
@@ -339,6 +357,36 @@ class CatalogTests(unittest.TestCase):
         self.manager.catalog_errors = ["offline"]
         self.assertIsNone(self.manager.build_catalog()[0]["installed"])
         self.assertEqual(self.manager.records, {})
+
+    def test_failed_catalog_refresh_does_not_start_uncached_ownership_lookups(self):
+        self.catalog.stop()
+        self.write("mods/panel/main.js", "original")
+        cache = Path(self.manager.cache_dir) / "official-mods-index.json"
+        cache.write_text(json.dumps([self.pkg]))
+        os.utime(cache, (1, 1))
+        del self.manager.branch_tree
+        with patch.object(gallery, "download", side_effect=self.offline), \
+                patch.object(self.manager, "_gh_api") as github:
+            pkg, = self.manager.build_catalog()
+        self.assertIsNone(pkg["installed"])
+        self.assertEqual(self.manager.records, {})
+        github.assert_not_called()
+        self.assertFalse(self.manager.cache_only)
+
+    def test_details_for_a_cached_layout_do_not_restart_metadata_refresh(self):
+        self.catalog.stop()
+        pkg = dict(self.pkg, kind="layout", mods=[], layouts=["panel"])
+        cache = Path(self.manager.cache_dir) / "official-layouts-index.json"
+        cache.write_text(json.dumps([pkg]))
+        os.utime(cache, (1, 1))
+        with patch.object(gallery, "download", side_effect=AssertionError("Unexpected metadata request")) as fetch, \
+                patch.object(gallery, "media", return_value=[]), \
+                patch.object(self.manager, "active_layout_name", return_value="main"), \
+                patch.object(self.manager, "raw_content", return_value=b"# Layout recipe"):
+            details = self.manager.get_details(pkg["id"])
+        self.assertEqual(details["recipe"], "# Layout recipe")
+        self.assertEqual(details["layouts"], ["panel"])
+        fetch.assert_not_called()
 
     def test_installed_snapshot_distinguishes_builtin_unknown_and_cached_matches(self):
         self.catalog.stop()

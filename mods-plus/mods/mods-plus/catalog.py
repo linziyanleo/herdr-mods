@@ -287,7 +287,15 @@ def local_state(manager, pkg, local_files=None):
 
 def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
     local_files = lru_cache(maxsize=None)(manager.local_files)
-    inspected = [(pkg, local_state(manager, pkg, local_files)) for pkg in available_packages(manager)]
+    packages = available_packages(manager)
+    cache_only = manager.cache_only
+    # Incomplete feeds cannot establish new ownership. Avoid serial GitHub
+    # lookups after a gallery failure and use whatever file evidence is cached.
+    manager.cache_only = cache_only or bool(getattr(manager, "catalog_errors", []))
+    try:
+        inspected = [(pkg, local_state(manager, pkg, local_files)) for pkg in packages]
+    finally:
+        manager.cache_only = cache_only
     matches = {}
     claimed = set().union(*(units_of(rec) for rec in manager.records.values() if recorded(rec)))
     incomplete = any(state["installed"] is None and "match" not in state for _pkg, state in inspected)
@@ -530,7 +538,14 @@ def media(manager, ids, progress=None):
 
 def details(manager, pkg_id):
     record = manager.records.get(pkg_id, {})
-    pkg = next((p for p in available_packages(manager) if p["id"] == pkg_id), None)
+    cache_only = manager.cache_only
+    manager.cache_only = True
+    try:
+        pkg = next((p for p in available_packages(manager) if p["id"] == pkg_id), None)
+    finally:
+        manager.cache_only = cache_only
+    if not pkg and not cache_only:
+        pkg = next((p for p in available_packages(manager) if p["id"] == pkg_id), None)
     if not pkg:
         pkg = next((p for p in manager.discover(pkg_id)["packages"] if p["id"] == pkg_id), None)
     if not pkg:

@@ -55,6 +55,7 @@ export default class ModsPlus extends View {
     this.media = {};
     this.loadingMedia = false;
     this.packages = [];
+    this.catalogWarning = null;
     this.selected = null;
     this.settings = null;
     this.confirmRemove = null;
@@ -167,7 +168,10 @@ export default class ModsPlus extends View {
           this.syncCards(cx);
         }
       } catch (error) {
-        if (current()) { this.catalogState = "stale"; throw error; }
+        if (current()) {
+          this.catalogState = "stale";
+          this.catalogWarning = String(error?.message ?? error);
+        }
       }
     });
     if (current()) this.loadMedia(cx);
@@ -207,8 +211,8 @@ export default class ModsPlus extends View {
       if (!old || old.preview_url !== pkg.preview_url || old.avatar_url !== pkg.avatar_url) delete this.media[pkg.id];
     }
     this.packages = result.packages;
-    this.message = (result.warnings || []).join("\n") || null;
-    this.catalogState = result.stale || this.message ? "stale" : "fresh";
+    this.catalogWarning = (result.warnings || []).join("\n") || null;
+    this.catalogState = result.stale || this.catalogWarning ? "stale" : "fresh";
   }
 
   visiblePackages() {
@@ -1157,6 +1161,15 @@ export default class ModsPlus extends View {
       this.cardSyncPending = true;
       _cx.timer.after(0, cx => { this.cardSyncPending = false; if (!this.closed) this.syncCards(cx); });
     }
+    let catalogStatus;
+    if (this.view === "catalog") {
+      if (this.catalogState === "stale") {
+        catalogStatus = this.packages.some(pkg => pkg.collection !== "direct")
+          ? "Official catalog · refresh incomplete" : "Official catalog unavailable";
+      } else if (this.catalogState === "refreshing" && this.packages.some(pkg => pkg.collection !== "direct")) {
+        catalogStatus = "Cached catalog · refreshing…";
+      }
+    }
 
     const content =
       this.view === "details"
@@ -1210,8 +1223,9 @@ export default class ModsPlus extends View {
           )
       )
       .children(content)
-      .when(this.view === "catalog" && (this.catalogState === "refreshing" || this.catalogState === "stale"), el => el.child(div().text_size(12).text_color(t.muted)
-        .child(this.catalogState === "refreshing" ? "Cached catalog · refreshing…" : "Cached catalog · refresh incomplete")))
+      .when(Boolean(catalogStatus), el => el.child(div().text_size(12).text_color(t.muted).child(catalogStatus)))
+      .when(this.view === "catalog" && this.catalogState === "stale" && Boolean(this.catalogWarning), el =>
+        el.child(div().text_size(12).text_color(t.muted).child(this.catalogWarning)))
       // Busy & Status message banner
       .when(Boolean(this.busy), (el) =>
         el.child(

@@ -165,7 +165,7 @@ test('failed refresh retains cached data and superseded or closed requests canno
   const { view, context } = setup(); view.loadMedia = () => {};
   view.helper = async args => args.includes('--cached') ? { packages: [importedPackage], stale: true } : Promise.reject(new Error('offline'));
   await view.loadCatalog(context(true));
-  assert.equal(view.packages[0].id, importedPackage.id); assert.equal(view.catalogState, 'stale'); assert.match(view.message, /offline/);
+  assert.equal(view.packages[0].id, importedPackage.id); assert.equal(view.catalogState, 'stale'); assert.match(view.catalogWarning, /offline/);
   const pending = [];
   view.helper = () => new Promise(resolve => pending.push(resolve));
   const old = view.loadCatalog(context(true)), recent = view.loadCatalog(context(true));
@@ -179,6 +179,22 @@ test('failed refresh retains cached data and superseded or closed requests canno
   let finish; settings.view.helper = () => new Promise(resolve => { finish = resolve; });
   const loading = settings.view.loadSettings(settings.context(true)); settings.view.close();
   finish({ auto_update: true }); await loading; assert.equal(settings.view.settings, before);
+});
+
+test('cold catalog failure reports unavailable and refresh warnings survive other actions', async () => {
+  const { view, context } = setup();
+  view.view = 'catalog';
+  view.loadMedia = () => {};
+  view.helper = async args => ({ packages: [], stale: true,
+    warnings: [args.includes('--cached') ? 'Pending refresh' : 'Mods index: no download progress'] });
+  const cx = context(true);
+  await view.loadCatalog(cx);
+  await view.work(cx, 'Checking…', async () => { view.message = 'No updates'; });
+  const text = textOf(view.render(cx));
+  assert.match(text, /Official catalog unavailable/);
+  assert.match(text, /Mods index: no download progress/);
+  assert.match(text, /No updates/);
+  assert.doesNotMatch(text, /Cached catalog|Pending refresh/);
 });
 
 test('an old image batch cannot overwrite a refreshed URL and filtering stays bounded', async () => {
