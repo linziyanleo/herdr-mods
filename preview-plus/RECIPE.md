@@ -4,11 +4,13 @@ Edit local text and preview Markdown, JSON, CSV, TSV, images and PDFs in Herdr. 
 
 ![Preview Plus](preview.png)
 
-The unedited `herdr-app shot` shows Markdown contents, flowchart and sequence diagrams, unsupported-diagram feedback, a JSON tree and a CSV table in a disposable Herdr 0.1.13 window. All documents are test fixtures. Preserve the capture's sRGB metadata.
+The unedited `herdr-app shot` shows Source and its find controls in a disposable Herdr 0.1.16 window. Preserve the capture's sRGB metadata.
 
 ## What you see
 
-In Files panel modes, the 42px header holds Back, the file name or "Files" (13px semibold, truncated), a Preview/Source toggle for Markdown, JSON, CSV and TSV, Wrap lines, Save, and Open. The mode toggle shows the next action: code for Source, eye for Preview. Wrap lines keeps its position in both modes, disabled in Preview and enabled in Source. Refresh replaces file actions in the tree. All these controls are icon buttons with tooltips and accessible names. Follow Herdr's Workspace Chrome: 26px targets, 14px tintable native SVGs, 6px corners, theme muted/foreground/hover/selected colors, and the default arrow pointer. The top separator is 0.5px. There is no extra editor toolbar. Pane and tab mode omit Back and the mod's rounded outer border, using the host pane frame instead. A 6px muted dot beside the filename indicates unsaved/saving state; its tooltip explains which. Read-only text has a lock icon. The discard action appears only for dirty files and becomes a confirmation check with an adjacent cancel cross. A 28px path row below the header displays the containing directory or workspace cwd in 12px muted text.
+In Files panel modes, the 42px header holds Back, the file name or "Files" (13px semibold, truncated), a Preview/Source toggle for Markdown, JSON, CSV and TSV, Wrap lines, Save, and Open. The mode toggle shows the next action: code for Source, eye for Preview. Wrap lines keeps its position in both modes, disabled in Preview and enabled in Source. Refresh replaces file actions in the tree. All these controls are icon buttons with tooltips and accessible names. Follow Herdr's Workspace Chrome: 26px targets, 14px tintable native SVGs, 6px corners, theme muted/foreground/hover/selected colors, and the default arrow pointer. The top separator is 0.5px. Pane and tab mode omit Back and the mod's rounded outer border, using the host pane frame instead. A 6px muted dot beside the filename indicates unsaved/saving state; its tooltip explains which. Read-only text has a lock icon. The discard action appears only for dirty files and becomes a confirmation check with an adjacent cancel cross. A 28px path row below the header displays the containing directory or workspace cwd in 12px muted text.
+
+Source adds Go to line and Find in Source below the path. Each opens one native input row. Find shows previous and next controls and the current match count. Truncated text displays Partial source beside the controls.
 
 An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, an editable percentage and + zoom controls. The percentage frame is 76px wide and 28px high, with a 0.5px border and centered 12px Geist Mono text. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. Drag enlarged media with the left mouse button to pan in both directions; the pointer changes from grab to grabbing. Releasing or leaving the canvas stops the drag. Fit resets panning, centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
@@ -43,6 +45,12 @@ Render `.md` and `.markdown` through native `TextView.markdown()`; Source uses a
 Keep unsaved drafts across navigation and persist only dirty/in-flight documents in this mod's `localStorage`. Restore them when reopening the file, including after the file is removed or externally changed. A completed save or confirmed discard removes its recovery entry. Flush pending storage writes on normal close. Show storage and save failures without dropping the in-memory text. Conflict recovery is explicit: keep/copy the draft, or confirm discard to reload disk; never silently force-overwrite an external edit.
 
 Preview renders the current draft, including local image references, without saving. Wrap lines toggles `soft_wrap` and remembers the setting; it never inserts newline characters. This host exposes no dynamic Editor wrap/style setter, so rebuild from the draft when wrap or code appearance changes. Selection, scroll and undo history can reset on those rebuilds. Truncate text after 400,000 characters with a visible notice and no Save action. Show explicit missing, unreadable and binary-file states when no recoverable draft exists.
+
+### Go to line and find in Source
+
+Go to line sets a caret. Find selects one case-sensitive, non-overlapping literal match in the retained native editor and wraps through the first 1,000 matches. The synthetic truncation notice is excluded. Location changes use the current editor without writing the file or replacing its state.
+
+The [caller contract](README.md#source-locations-for-callers) covers opening props, fixed-viewer reuse and paired selection identities. A position is applied only to its current document request once the Source editor is ready. Code-point columns are converted to UTF-16 selection offsets. An expected source line protects precise match selection when the displayed text has changed.
 
 ### Interleaved inline Markdown images
 
@@ -102,7 +110,7 @@ preview-plus/
   mods/preview-plus/
     main.js, tree.js, paths.js, markdown.js, markdown-structure.js, markdown-view.js,
     structured.js, structured-view.js, mermaid.js, mermaid.bundle.js,
-    media.js, appearance.js, mod.json, icons/, LICENSE, licenses/, THIRD_PARTY.md
+    media.js, appearance.js, source-location.js, mod.json, icons/, LICENSE, licenses/, THIRD_PARTY.md
   build/, package.json, package-lock.json
   tests/
 ```
@@ -176,6 +184,8 @@ Media is local-only, and PDF rendering is macOS-only. Remote text uses `readText
 ## Done when
 
 Current 0.1.16 lifecycle, temporary/pinned workflow and independent reproduction are recorded in the [interaction/performance implementation report](../docs/plans/interaction-performance-implementation.md). The paragraphs below retain their original 0.1.13 verification boundary; they do not assert that every physical check has since passed.
+
+Source navigation was checked on macOS with Herdr 0.1.16 in a background instance with a separate app home and core. The native driver read back UTF-16 ranges, replaced a verified draft match using the native editor, and exercised fixed-pane reuse, paired A→B→A, pinning and simulated remote read-only text. Screenshots showed the requested off-screen rows after open and find. The native editor and lifecycle regression drivers also passed. Physical mouse and keyboard interaction, including focus return, IME, Save, undo and F6/F7/F8, still needs interactive verification. The remote fixture used local bytes.
 
 The latest checks on macOS with Herdr 0.1.13 cover file routing, editing, drafts, conflict handling, Markdown navigation, Mermaid rendering and structured previews. Eight paired handoff groups passed for JSON, CSV, TSV and ordinary text. Four native editor groups passed for save, wrapping, navigation, conflicts and draft recovery. Inspected screenshots show rendered diagrams and structured rows. Physical input, scrolling and additional platform/theme combinations remain unverified for these changes.
 

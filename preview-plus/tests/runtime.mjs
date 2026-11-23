@@ -53,7 +53,7 @@ export async function runtime(t) {
       pending.cancel = () => finish([]);
       return pending;
     },
-    nextCommand: () => new Promise(() => {}),
+    nextCommand: () => new Promise(resolve => { state.dispatch = resolve; }),
     run: (command, args) => state.calls.push({ command, args })
   };
   const builder = (kind, value) => {
@@ -74,10 +74,12 @@ export async function runtime(t) {
     uniform_list: (id, count, key, render) => { const el = builder("uniform-list", { count, key, render }).id(id); return el; } };
   const base = { h_flex: () => builder("row"), v_flex: () => builder("column"),
     Scrollbar: { vertical: id => builder("scrollbar", id) },
-    InputState: { new: options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) },
+    InputState: { new: options => ({ text: options?.value || "", handlers: {}, value() { return this.text; }, set_value(text) { this.text = text; },
+      focus() { state.keyboard = this; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) },
     Input: { new: state => builder("input", state) },
     TextView: { markdown: (id, text) => builder("markdown", text).id(id) },
-    EditorState: { new: options => ({ ...options, text: options.value, handlers: {}, value() { return this.text; },
+    EditorState: { new: options => ({ ...options, text: options.value, handlers: {}, selection: { start: 0, end: 0 }, value() { return this.text; },
+      selected_range() { return this.selection; }, set_selected_range(range) { this.selection = range; },
       set_value(text) { this.text = text; }, focus() { state.keyboard = this; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
   const context = vm.createContext({ console, localStorage, atob }), cache = new Map();
   async function module(file) {

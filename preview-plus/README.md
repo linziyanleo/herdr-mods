@@ -74,17 +74,43 @@ herdr-app do tab.new '{"name":"Document","mod":"preview-plus","props":{"file":"/
 
 Pass `on` with the machine name for remote Markdown and text. Images and PDFs are local-only. PDF rendering is macOS-only; the Open control can launch a local PDF in its system application on other platforms.
 
+### Source locations for callers
+
+For a new viewer, pass an optional `location: { line, column? }` inside the existing `pane.split` or `tab.new` props. Preview opens in Source and applies the position once when the editor is ready. This command opens line 42, column 3.
+
+```sh
+herdr-app do pane.split '{"direction":"right","mod":"preview-plus","props":{"file":"/absolute/path/README.md","location":{"line":42,"column":3}}}'
+```
+
+Use one-based physical lines and Unicode code-point columns. A tab, a supplementary character such as 😀, and a combining mark each count as one column. Columns start at 1 and include the position after the last character. LF and CRLF each end one line. Preview converts these coordinates to the native editor's zero-based UTF-16 offsets. Invalid coordinates leave the caret where it is and show an error. Callers with UTF-8 byte offsets or UTF-16 columns must convert them.
+
+To select a literal hit, include `expectedLine` with the full original line, excluding its line ending, and `match` with the exact text at the requested column. Both must agree with the displayed buffer, including any unsaved draft. Preview reports a mismatch and leaves the selection alone. A partial final line from a truncated preview cannot verify a hit.
+
+To reuse a fixed pane or tab, give it `space` and a caller-generated unique `viewer` string at creation. After selecting its workspace and tab, send this mod command. The caller resolves or creates the viewer using its usual placement rules.
+
+```js
+const request = {
+  space, tab, viewer, file, on: null,
+  location: { line: 42, column: 3 }
+};
+run("preview-plus.locate:" + encodeURIComponent(JSON.stringify(request)));
+```
+
+`space` and `tab` are the visible Herdr IDs, `file` is absolute, and `on` is the file's machine name or explicit `null` for local. `viewer` identifies a single fixed copy even when two panes show the same file. For a paired slot, use `stack` and `selection` in place of `viewer`. Publish the file using the existing `preview-plus.target[space]` handoff with a fresh `selection` for each open, show the paired slot, and send the command with that selection. A different pinned file stays in place. When using the CLI, pass the full encoded command as the name after `herdr-app do`.
+
 ## Edit and save
 
 Ordinary local text opens in the native editor regardless of its extension. This includes code, configuration, hidden files and extensionless files. Markdown, JSON, CSV and TSV open in Preview; the code icon switches to Source, and the eye icon returns to Preview. Files Plus uses the same editor in Tab, Pane and paired panel mode.
 
 The toolbar has Wrap lines, Save and Open controls with tooltips. Wrap lines is enabled in Source and disabled in Preview. A dot beside the filename marks unsaved changes. Save with the disk icon or, while the editor has focus, `Cmd+S` on macOS and `Ctrl+S` elsewhere. The mod adds no global shortcuts.
 
+In Source, use Go to line for a line number or `line:column`. Find in Source searches the displayed buffer, including unsaved edits, for case-sensitive literal text. Use the arrows or Enter and Shift+Enter to move between matches. Navigation wraps. The count shows the current match and total, with `1000+` when more than 1,000 matches exist. Next and Previous cycle through the first 1,000. Read-only files support navigation, and a truncated file shows Partial source.
+
 Wrap lines changes only the display. The preference is remembered. Herdr currently exposes wrapping and code appearance at editor creation only, so toggling wrap or changing the code theme or font rebuilds the editor. It preserves text, but selection, scroll position and undo history may reset. Native selection, copy/paste and undo/redo are otherwise provided by Herdr.
 
 Unsaved drafts are retained when navigating and stored locally in Herdr's mod storage for recovery after remount/restart. They are removed after saving or confirmed discard; they are not uploaded. Discard appears only while a file has unsaved changes. Click its undo-arrow icon, then the check icon to confirm or the cross to cancel. File watching never overwrites a draft. If the disk contents have changed since loading, Save shows an error and keeps the draft. Copy any text you want to keep before confirming discard and reloading the disk version.
 
-Editing is limited to complete local UTF-8 text. Remote files and previews truncated at 400,000 characters remain read-only; reads also have Herdr's 1 MiB limit. Images, PDFs and binary files are not editable. Draft recovery is best effort on a crash or forced termination, and a failed recovery-storage write is shown explicitly.
+Editing is limited to complete local UTF-8 text. Remote files and truncated previews remain read-only. Source truncates at up to 400,000 UTF-16 code units and keeps supplementary characters intact at the cutoff. Reads also have Herdr's 1 MiB limit. Images, PDFs and binary files are not editable. Draft recovery is best effort on a crash or forced termination, and a failed recovery-storage write is shown explicitly.
 
 ## Rich previews
 
@@ -116,6 +142,8 @@ Earlier rich-preview/editor checks used Herdr 0.1.13. The [interaction/performan
 The native session command prints the exact receipt path. It starts a disposable app home and core, creates synthetic files and copies the runtime plus test drivers into that home. The verifier exercises production handlers and actual rendering; screenshots still require visual inspection. It does not change the user's app home, layout or key bindings. Close the disposable instance with `HERDR_APP_HOME=<receipt-app-home> herdr-app do app.quit`; its temporary core and files are scoped by the environment recorded in the receipt.
 
 For lifecycle acceptance, run `node preview-plus/tests/native-session.mjs --distinct-bundle --lifecycle`, then `node preview-plus/tests/native-lifecycle.mjs <session.json>`. This instruments pending native watch calls in the disposable copy and adds a one-second slow read. Its report covers 100 directories, independent same-directory callers and fixed-file A→B→A. Physical keyboard input remains a separate check.
+
+For Source navigation, run `node preview-plus/tests/native-session.mjs --distinct-bundle --background --location`, then `node preview-plus/tests/native-location.mjs <session.json>`. The fixture delays a specific read and maps one simulated remote target to local fixture bytes. The driver reads back the native ranges. Inspect the open, first-match, and last-match screenshots to check which rows entered the viewport.
 
 To reproduce the checked-in renderer from the public npm lock, use Node 22+:
 

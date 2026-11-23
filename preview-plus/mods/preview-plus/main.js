@@ -8,9 +8,11 @@ import { stageMarkdown } from "./markdown.js";
 import { markdownView } from "./markdown-view.js";
 import { structuredPreview } from "./structured.js";
 import { structuredView } from "./structured-view.js";
+import { literalMatches, sourceRange, typedLocation } from "./source-location.js";
 import { Tree } from "./tree.js";
 
 const TEXT_LIMIT = 400000;
+const TRUNCATION_NOTICE = "\n\n… (file truncated)";
 const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 
 function context() {
@@ -30,11 +32,12 @@ const contextKey = () => JSON.stringify(context());
 const ICONS = {
   "preview-back": "back", "preview-open": "open",
   "preview-contents": "contents",
+  "preview-go-to": "go-to", "preview-find": "find",
   "preview-wrap": "wrap", "preview-save": "save", "preview-discard": "undo", "preview-cancel-discard": "close", "preview-refresh": "refresh",
 };
 
 function button(id, label, colors, action, enabled = true, selected = false, icon = ICONS[id]) {
-  const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size" }[label] || label;
+  const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size", "↑": "Previous match", "↓": "Next match" }[label] || label;
   return div().id(id).h(icon ? 26 : 28).when(Boolean(icon), el => el.w(26)).when(!icon, el => el.px(8))
     .flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
     .role("button").accessibility_label(title).disabled(!enabled).cursor_default()
@@ -69,6 +72,13 @@ export default class PreviewPlus extends View {
     this.zoomInput.on("change", (_event, cx) => { if (this.zoomEditing) { this.zoomDirty = true; cx.notify(); } });
     this.zoomInput.on("submit", (_event, cx) => this.applyZoomInput(cx));
     this.zoomInput.on("blur", (_event, cx) => { this.zoomEditing = false; this.applyZoomInput(cx); });
+    this.goInput = InputState.new({ placeholder: "Line or line:column" });
+    this.goInput.on("submit", (_event, cx) => this.goTo(cx));
+    this.findInput = InputState.new({ placeholder: "Find literal text" });
+    this.findInput.on("change", (_event, cx) => {
+      if (this.navigation === "find" && this.sourceReady()) { this.updateFind(true); cx.notify(); }
+    });
+    this.findInput.on("submit", (event, cx) => this.stepFind(event.shift ? -1 : 1, cx));
     this.sync(cx);
     cx.spawn(async cx => {
       for (;;) {
@@ -79,6 +89,7 @@ export default class PreviewPlus extends View {
         else if (command === "back") this.back(cx);
         else if (command === "source") this.setSource(true, cx);
         else if (command === "preview") this.setSource(false, cx);
+        else if (command.startsWith("locate:")) this.locate(command.slice("locate:".length), cx);
         else if (command === "save") this.save(cx);
         else if (command === "wrap") this.toggleWrap(cx);
         else if (command === "refresh") this.reload(cx);
@@ -99,23 +110,40 @@ export default class PreviewPlus extends View {
     if (this.owner?.key === key) return;
     if (next.mode === "paired" && this.owner?.mode === "paired" && next.spaceId === this.owner.spaceId
       && next.target?.file === this.selected?.file && next.target?.on === this.selected?.on) {
+      if (this.owner.selection !== next.selection) this.locationError = null;
       this.owner = { ...next, key };
-      if (this.request) this.request.owner = this.owner;
+      if (this.request) {
+        this.request.owner = this.owner;
+        if (this.request.position?.selection !== next.selection) this.request.position = null;
+      }
       return;
     }
     this.owner = { ...next, key }; this.request = null; this.releaseEditor(); this.document = null;
     this.history = []; this.selected = null; this.media = null; this.text = null; this.error = null; this.actionError = null;
+    this.navigation = null; this.locationError = null;
     this.watchTargets([], cx); this.tree?.close(); this.tree = null;
     if (checking()) return;
     if (next.mode === "files") {
       const owner = this.owner;
       this.tree = new Tree(next, () => !this.closed && this.owner === owner && contextKey() === owner.key);
       this.tree.refresh(cx); this.tree.watch(cx);
-    } else if (next.target) this.show(next.target, cx, false, false);
+    } else if (next.target) {
+      this.show(next.target, cx, false, false);
+      if (next.mode === "pane" && props()?.location !== undefined && !localStorage.getItem("preview-plus.open-location"))
+        this.queuePosition(props().location, { opening: true });
+    }
   }
 
   current(request) {
     return !this.closed && this.request === request && this.owner === request.owner && contextKey() === request.owner.key;
+  }
+
+  syncRequest(request, cx) {
+    if (this.closed || this.request !== request) return false;
+    // A newer selection of the same file can reuse the read, but supersedes
+    // any position queued for the previous selection.
+    this.sync(cx);
+    return this.request === request;
   }
 
   releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; }
@@ -131,11 +159,13 @@ export default class PreviewPlus extends View {
     const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
     code.on("change", (_event, cx) => this.editorChanged(code, cx));
     this.codeStyle = JSON.stringify(style);
+    if (this.navigation === "find") this.updateFind(false);
   }
 
   editorChanged(code, cx) {
     if (this.code !== code || !this.document) return;
     this.text = this.document.text = code.value(); this.confirmDiscard = false;
+    if (this.navigation === "find") this.updateFind(false);
     if (this.dirty()) this.pin();
     this.persistDrafts(); cx.notify();
   }
@@ -188,9 +218,120 @@ export default class PreviewPlus extends View {
 
   setSource(source, cx) {
     this.source = source;
+    if (!source) {
+      this.navigation = null;
+      this.takePosition();
+    }
     if (!source && this.selected && kind(this.selected.file) === "markdown") this.refreshMarkdown(cx);
     else if (!source && this.selected && richText(kind(this.selected.file))) this.refreshData();
     cx.notify();
+  }
+
+  sourceReady() {
+    return this.code && !this.loading && !this.error && (this.source || !richText(kind(this.selected.file)));
+  }
+
+  sourceText() {
+    const text = this.code.value();
+    return this.truncated ? text.slice(0, -TRUNCATION_NOTICE.length) : text;
+  }
+
+  locate(encoded, cx) {
+    let value;
+    try { value = JSON.parse(decodeURIComponent(encoded)); } catch { return; }
+    const focus = focused();
+    if (!value || typeof value.space !== "string" || value.space !== focus?.space || typeof value.tab !== "string"
+      || value.tab !== focus.tab || !(value.on === null || (typeof value.on === "string" && value.on))
+      || value.location === undefined) return;
+    this.sync(cx);
+    const owner = this.owner, file = target(value);
+    if (!file || value.space !== owner.spaceId || file.file !== this.selected?.file || file.on !== this.selected?.on) return;
+    if (owner.mode === "pane") {
+      if (typeof value.viewer !== "string" || !value.viewer || value.viewer !== props()?.viewer) return;
+    } else if (owner.mode === "paired") {
+      const incoming = target(shared("preview-plus.target")?.[owner.spaceId]);
+      if (value.stack !== owner.stack || typeof value.selection !== "string" || !value.selection
+        || value.selection !== owner.selection || incoming?.file !== file.file || incoming?.on !== file.on) return;
+    } else return;
+    this.queuePosition(value.location, { space: value.space, tab: value.tab, selection: value.selection });
+    cx.notify();
+  }
+
+  queuePosition(value, scope) {
+    this.takePosition();
+    this.request.position = { value, ...scope };
+    this.locationError = null;
+    this.source = true;
+  }
+
+  applyPosition(request, position, cx) {
+    if (!this.syncRequest(request, cx) || request.position !== position) return;
+    const focus = focused();
+    if (!position.opening && (focus?.space !== position.space || focus?.tab !== position.tab)) {
+      this.takePosition(); return;
+    }
+    this.locationError = this.sourceReady() ? this.selectLocation(position.value) : "Source is unavailable for this file.";
+    this.takePosition();
+    cx.notify();
+  }
+
+  takePosition() {
+    if (!this.request?.position) return;
+    if (this.request.position.opening) localStorage.setItem("preview-plus.open-location", "true");
+    this.request.position = null;
+  }
+
+  selectLocation(value) {
+    const { range, error } = sourceRange(this.sourceText(), value, this.truncated);
+    if (range) {
+      this.code.set_selected_range(range);
+      if (this.navigation === "find") this.updateFind(false);
+    }
+    return error;
+  }
+
+  toggleNavigation(mode, cx) {
+    if (!this.sourceReady()) return;
+    if (this.navigation === mode) { this.closeNavigation(cx); return; }
+    this.navigation = mode;
+    this.locationError = null;
+    const input = mode === "find" ? this.findInput : this.goInput;
+    input.set_value("");
+    if (mode === "find") this.updateFind(false);
+    cx.notify();
+    cx.spawn(async () => { if (!this.closed && this.navigation === mode && this.sourceReady()) input.focus(); });
+  }
+
+  closeNavigation(cx) {
+    this.navigation = null;
+    this.locationError = null;
+    this.focusContent(); cx.notify();
+  }
+
+  goTo(cx) {
+    if (this.navigation !== "go" || !this.sourceReady()) return;
+    this.locationError = this.selectLocation(typedLocation(this.goInput.value()));
+    if (this.locationError) cx.notify();
+    else this.closeNavigation(cx);
+  }
+
+  updateFind(selectFirst) {
+    const { ranges, limited } = literalMatches(this.sourceText(), this.findInput.value());
+    const selection = this.code.selected_range();
+    const active = selectFirst ? (ranges.length ? 0 : -1)
+      : ranges.findIndex(range => range.start === selection.start && range.end === selection.end);
+    this.findResult = { ranges, limited, active };
+    if (selectFirst && active !== -1) this.code.set_selected_range(ranges[active]);
+  }
+
+  stepFind(delta, cx) {
+    if (this.navigation !== "find" || !this.sourceReady()) return;
+    const result = this.findResult, count = result.ranges.length;
+    if (!count) return;
+    const selection = this.code.selected_range();
+    const active = result.ranges.findIndex(range => range.start === selection.start && range.end === selection.end);
+    result.active = active === -1 ? (delta > 0 ? 0 : count - 1) : (active + delta + count) % count;
+    this.code.set_selected_range(result.ranges[result.active]); cx.notify();
   }
 
   refreshData() { this.dataPreview = structuredPreview(kind(this.selected.file), this.text || "", this.truncated); }
@@ -261,6 +402,7 @@ export default class PreviewPlus extends View {
     const saveKey = window()?.platform === "macos" ? "cmd-s" : "ctrl-s";
     if (event.keystroke === saveKey && this.document) { cx.stop_propagation(); this.save(cx); }
     else if (event.keystroke && event.keystroke !== event.key) return;
+    else if (event.key === "escape" && this.navigation) { cx.stop_propagation(); this.closeNavigation(cx); }
     else if (event.key === "f6") { cx.stop_propagation(); this.back(cx); }
     else if (event.key === "f7") { cx.stop_propagation(); this.togglePin(cx); }
     else if (event.key === "f8") { cx.stop_propagation(); this.focusAgent(cx); }
@@ -277,6 +419,7 @@ export default class PreviewPlus extends View {
     this.tree?.close();
     if (remember && this.selected) this.remember();
     this.selected = next; this.source = false; this.zoom = null; this.page = 1; this.total = 0;
+    this.navigation = null;
     this.anchor = anchor; this.contents = false; this.expanded = new Set([""]);
     this.load(cx, notify);
   }
@@ -284,24 +427,27 @@ export default class PreviewPlus extends View {
   load(cx, notify = true) {
     if (!this.selected) return;
     const selected = this.selected, type = kind(selected.file), request = { owner: this.owner, selected, page: this.page };
+    if (this.request?.selected === selected && this.request.position)
+      request.position = { ...this.request.position, scheduled: false };
     this.request = request; this.releaseEditor(); this.document = null; this.confirmDiscard = false; this.text = null; this.markdownBlocks = null; this.media = null;
     this.markdownRequest = null; this.markdownBusy = false; this.markdownLook = null; this.headings = []; this.dataPreview = null;
     this.zoomDirty = false; this.zoomEditing = false;
     this.pan = { x: 0, y: 0 }; this.drag = null;
-    this.error = null; this.actionError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
+    this.error = null; this.actionError = null; this.locationError = null; this.imageWarning = false; this.loading = true; this.reloadPending = false;
     this.watchTargets(selected.on ? [] : [selected.file], cx);
     cx.spawn(async cx => {
+      const active = () => this.syncRequest(request, cx);
       try {
         if (type === "image" || type === "pdf") {
           const media = await loadMedia(selected, request.page, type);
-          if (!this.current(request)) return;
+          if (!active()) return;
           this.media = media; this.page = media.page; this.total = media.pages;
         } else {
           const draft = !selected.on && this.documents.get(selected.file);
           let value;
           try { value = await readTextFile(selected.file, { on: selected.on }); }
           catch (error) { if (!draft || !this.dirty(draft)) throw error; value = null; }
-          if (!this.current(request)) return;
+          if (!active()) return;
           if (draft && (this.dirty(draft) || draft.saving)) {
             this.document = draft; draft.external = value !== draft.base;
             this.text = draft.text; this.truncated = false;
@@ -310,7 +456,10 @@ export default class PreviewPlus extends View {
             if (value === null) throw new Error("This file is no longer available.");
             if (value.includes("\0")) throw new Error("This binary file has no text preview.");
             this.truncated = value.length > TEXT_LIMIT;
-            this.text = this.truncated ? value.slice(0, TEXT_LIMIT) + "\n\n… (file truncated)" : value;
+            if (this.truncated) {
+              const end = /[\uDC00-\uDFFF]/.test(value[TEXT_LIMIT]) ? TEXT_LIMIT - 1 : TEXT_LIMIT;
+              this.text = value.slice(0, end) + TRUNCATION_NOTICE;
+            } else this.text = value;
             if (!selected.on && !this.truncated) {
               this.document = { file: selected.file, base: value, text: value };
               this.documents.set(selected.file, this.document);
@@ -319,15 +468,15 @@ export default class PreviewPlus extends View {
           if (type === "markdown") {
             const text = this.text, look = appearance();
             const staged = await stageMarkdown(text, selected, look);
-            if (!this.current(request)) return;
+            if (!active()) return;
             if (text === this.text) this.acceptMarkdown(staged, look, cx);
           } else if (richText(type)) this.refreshData();
-          if (!this.current(request)) return;
+          if (!active()) return;
           this.updateEditor();
         }
-      } catch (error) { if (this.current(request)) this.error = String(error.message || error); }
+      } catch (error) { if (active()) this.error = String(error.message || error); }
       finally {
-        if (this.current(request)) {
+        if (active()) {
           this.loading = false;
           if (this.handle.is_focused()) this.focusContent();
           if (this.reloadPending) { this.reloadPending = false; this.reload(cx); }
@@ -442,6 +591,9 @@ export default class PreviewPlus extends View {
   }
 
   back(cx) {
+    this.navigation = null;
+    this.locationError = null;
+    this.takePosition();
     if (this.pinned() && this.history.length && this.history[this.history.length - 1].target.file !== this.selected.file) {
       run("layout.select", { stack: this.owner.stack, child: "files-plus-tree" }); run("files-plus.return"); return;
     }
@@ -538,6 +690,11 @@ export default class PreviewPlus extends View {
 
   render(cx) {
     this.sync(cx);
+    const request = this.request, position = request?.position;
+    if (!this.loading && position && !position.scheduled) {
+      position.scheduled = true;
+      cx.timer.after(0, cx => this.applyPosition(request, position, cx));
+    }
     if (!this.zoomEditing && !this.zoomRefreshPending && this.zoomInput.value() !== this.zoomLabel()) {
       this.zoomRefreshPending = true;
       cx.timer.after(0, cx => {
@@ -584,6 +741,8 @@ export default class PreviewPlus extends View {
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
         .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
       .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+      .when(Boolean(this.sourceReady()), el => el.child(this.sourceNavigation(colors)))
+      .when(Boolean(this.locationError), el => el.child(div().id("preview-location-error").px(16).py(6).text_size(12).text_color(colors.ansi1).child(this.locationError)))
       .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
       .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
@@ -606,6 +765,27 @@ export default class PreviewPlus extends View {
       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
       .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file in Files Plus.")))
       .when(Boolean(file), el => el.child(this.body(type, colors)));
+  }
+
+  sourceNavigation(colors) {
+    const mode = this.navigation, find = mode === "find", result = this.findResult;
+    const count = find ? result.ranges.length : 0, total = count + (find && result.limited ? "+" : "");
+    const status = count ? (result.active < 0 ? `${total} matches` : `${result.active + 1} / ${total}`) : "0 matches";
+    return v_flex().flex_none().px(8).border_b_1().border_color(colors.border)
+      .child(h_flex().gap(2).items_center()
+        .child(button("preview-go-to", "Go to line", colors, cx => this.toggleNavigation("go", cx), true, mode === "go"))
+        .child(button("preview-find", "Find in Source", colors, cx => this.toggleNavigation("find", cx), true, find))
+        .when(this.truncated, el => el.child(div().px(6).text_size(12).text_color(colors.muted).child("Partial source"))))
+      .when(Boolean(mode), el => el.child(h_flex().gap(4).pb(6).items_center().flex_wrap()
+        .child(Input.new(find ? this.findInput : this.goInput).id("preview-navigation-input").flex_1().min_w(130).h(28).px(6)
+          .border(0.5).border_color(colors.input).rounded(6).accessibility_label(find ? "Find literal text" : "Line or line:column"))
+        .when(find, el => el
+          .child(button("preview-find-previous", "↑", colors, cx => this.stepFind(-1, cx), count > 0))
+          .child(button("preview-find-next", "↓", colors, cx => this.stepFind(1, cx), count > 0))
+          .child(div().id("preview-find-count").flex_none().px(4).text_size(12).text_color(colors.muted)
+            .accessibility_label(status).child(status)))
+        .when(!find, el => el.child(button("preview-go-submit", "Go", colors, cx => this.goTo(cx))))
+        .child(button("preview-navigation-close", "Close", colors, cx => this.closeNavigation(cx), true, false, "close"))));
   }
 
   body(type, colors) {
@@ -638,6 +818,7 @@ export default class PreviewPlus extends View {
 
   async close() {
     this.closed = true; this.request = null; this.watchTargets([], null); this.tree?.close(); this.releaseEditor(); this.zoomInput.release();
+    this.goInput.release(); this.findInput.release();
     this.persistDrafts(); await localStorage.flush();
   }
 }

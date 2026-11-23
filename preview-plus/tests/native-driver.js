@@ -34,6 +34,16 @@ export default class NativeDriver extends PreviewPlus {
               else if (request.action === "back") this.back(cx);
               else if (request.action === "pin") this.togglePin(cx);
               else if (request.action === "source") this.setSource(request.value, cx);
+              else if (request.action === "pair-target") {
+                const { space, target } = request;
+                setShared("preview-plus.target", { ...shared("preview-plus.target"), [space]: target });
+              }
+              else if (request.action === "navigation") this.toggleNavigation(request.mode, cx);
+              else if (request.action === "go") { this.goInput.set_value(request.value); this.goTo(cx); }
+              else if (request.action === "find") { this.findInput.set_value(request.value); this.updateFind(true); cx.notify(); }
+              else if (request.action === "find-step") this.stepFind(request.delta, cx);
+              else if (request.action === "navigation-close") this.closeNavigation(cx);
+              else if (request.action === "replace") this.code.replace(request.value);
               // set_value does not emit change; keyboard input is verified separately.
               else if (request.action === "edit") { this.code.set_value(request.value); this.editorChanged(this.code, cx); }
               else if (request.action === "save") this.save(cx);
@@ -59,6 +69,11 @@ export default class NativeDriver extends PreviewPlus {
     const element = super.render(cx);
     this.record(cx);
     return element;
+  }
+
+  updateEditor() {
+    super.updateEditor();
+    this.editorCount = (this.editorCount || 0) + 1;
   }
 
   ownsDriver() { return !this.closed && shared(DRIVER_OWNER)?.[this.base] === this.driverIdentity; }
@@ -90,6 +105,9 @@ export default class NativeDriver extends PreviewPlus {
       dataError: this.dataPreview?.error, expanded: [...this.expanded],
       structuredRows: this.dataPreview ? (this.dataPreview.rows?.length ?? (this.dataPreview.error ? 0 : jsonRows(this.dataPreview.value, this.expanded).rows.length)) : 0,
       dirty: this.dirty(), document: this.document, wrap: this.wrap, codeText: this.code?.value(), draftError: this.draftError,
+      editorCount: this.editorCount, selection: this.code?.selected_range(), locationError: this.locationError,
+      pendingPosition: Boolean(this.request?.position), navigation: this.navigation,
+      find: this.findResult && { count: this.findResult.ranges.length, limited: this.findResult.limited, active: this.findResult.active },
       page: this.page, total: this.total, zoom: this.zoom, history: this.history, viewport: this.viewport,
       uiFont: settings().ui_font_family, codeFontSize: settings().font_size, appZoom: settings().zoom, codeStyle: this.codeStyle, colors: theme(), windowActive: globalThis.window?.is_window_active?.(),
       tree: this.tree ? { folders: [...this.tree.folders], entries: Object.fromEntries(this.tree.entries), error: this.tree.error, loading: this.tree.loading } : null };

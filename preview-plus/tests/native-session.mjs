@@ -19,18 +19,25 @@ await fs.cp(runtime, path.join(app, "mods/preview-plus"), { recursive: true, fil
 const driver = path.join(app, "mods/preview-plus-driver"); await fs.cp(runtime, driver, { recursive: true, filter });
 await fs.rename(path.join(driver, "main.js"), path.join(driver, "panel.js"));
 await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
-if (process.argv.includes("--lifecycle")) {
+const lifecycle = process.argv.includes("--lifecycle"), location = process.argv.includes("--location");
+if (lifecycle) {
   for (const name of ["panel.js", "tree.js"]) {
     const file = path.join(driver, name);
     let source = await fs.readFile(file, "utf8");
     source = source.replace(/\bwatchFolder,/, "watchFolder as rawWatchFolder,");
     source += '\nfunction watchFolder(dir) { const stats = globalThis.__watchStats ||= {active:0,peak:0,started:0,errors:0,events:0}; stats.active++; stats.started++; stats.peak = Math.max(stats.peak,stats.active); const pending = rawWatchFolder(dir); pending.then(paths => {stats.active--;if(paths.length)stats.events++;}, () => {stats.active--;stats.errors++;}); return pending; }\n';
-    if (name === "panel.js") {
-      source = source.replace(/\breadTextFile,/, "readTextFile as rawReadTextFile,");
-      source += '\nasync function readTextFile(file, options) { if (file.endsWith("/slow.txt")) await exec("sleep", ["1"]); return rawReadTextFile(file, options); }\n';
-    }
     await fs.writeFile(file, source);
   }
+}
+if (lifecycle || location) {
+  const file = path.join(driver, "panel.js");
+  const source = (await fs.readFile(file, "utf8")).replace(/\breadTextFile,/, "readTextFile as rawReadTextFile,");
+  await fs.writeFile(file, source + `
+async function readTextFile(file, options) {
+  if ((${lifecycle} && file.endsWith("/slow.txt")) || (${location} && file.endsWith("/slow-location.md"))) await exec("sleep", ["1"]);
+  return rawReadTextFile(file, ${location} && options?.on === "fixture-remote" ? undefined : options);
+}
+`);
 }
 const files = fileURLToPath(new URL("../../files-plus/mods/files-plus", import.meta.url));
 await fs.cp(files, path.join(app, "mods/files-plus"), { recursive: true, filter });
@@ -39,7 +46,7 @@ const filesDriver = path.join(app, "mods/files-plus-driver"); await fs.cp(files,
 await fs.rename(path.join(filesDriver, "main.js"), path.join(filesDriver, "panel.js"));
 await fs.copyFile(fileURLToPath(new URL("../../files-plus/tests/native-driver.js", import.meta.url)), path.join(filesDriver, "main.js"));
 await fs.writeFile(path.join(filesDriver, "mod.json"), '{"place":"none","focusable":true}');
-if (process.argv.includes("--lifecycle")) {
+if (lifecycle) {
   const file = path.join(filesDriver, "workspace.js");
   let source = (await fs.readFile(file, "utf8")).replace(/\bwatchFolder,/, "watchFolder as rawWatchFolder,");
   source += '\nfunction watchFolder(dir) { const stats = globalThis.__filesWatchStats ||= {active:0,peak:0,started:0,errors:0,events:0}; stats.active++;stats.started++;stats.peak=Math.max(stats.peak,stats.active); const pending = rawWatchFolder(dir); pending.then(paths => {stats.active--;if(paths.length)stats.events++;}, () => {stats.active--;stats.errors++;}); return pending; }\n';

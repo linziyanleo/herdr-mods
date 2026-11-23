@@ -27,8 +27,8 @@ async function request(value) {
 const ready = (accept, label) => until(state, value => !value.loading && !value.error && accept(value), label);
 const passed = label => { reports.push(label); console.log("passed: " + label); };
 const command = async (name, args = {}) => execute("herdr-app", ["do", name, JSON.stringify(args)], { env });
-const shot = async name => { await request({ action: "activate" }); await execute("herdr-app", ["shot", path.join(info.base, name + ".png")], { env }); };
-await request({ action: "activate" });
+const shot = async name => { if (!info.background) await request({ action: "activate" }); await execute("herdr-app", ["shot", path.join(info.base, name + ".png")], { env }); };
+if (!info.background) await request({ action: "activate" });
 await fs.rm(path.join(control, "request.json"), { force: true });
 await command("layout.set", { layout: { id: "root", type: "block", content: { mod: "preview-plus-driver", props: { base: control } } } });
 await ready(value => value.owner?.mode === "files", "standalone mode");
