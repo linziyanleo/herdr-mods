@@ -1145,6 +1145,19 @@ Full candidate RECIPE.md:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copyfile(os.path.join(source, rel), dest)
 
+    @staticmethod
+    def _unlink_if_present(path):
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+
+    def _backup_update_file(self, path, backup, rollback):
+        if os.path.lexists(path):
+            os.makedirs(os.path.dirname(backup), exist_ok=True)
+            shutil.copy2(path, backup, follow_symlinks=False)
+            rollback.callback(os.replace, backup, path)
+        else:
+            rollback.callback(self._unlink_if_present, path)
+
     def review_update(self, pkg_id):
         record = self.records.get(pkg_id)
         if not record or not record.get("installed"):
@@ -1214,49 +1227,60 @@ Full candidate RECIPE.md:
         if self.review_update(pkg_id)["token"] != reviewed:
             return {"ok": False, "error": "Local files changed during validation. Review the update again."}
 
-        # Apply to package store
-        target_store = os.path.join(self.packages_dir, slug)
-        backup_dir = tempfile.mkdtemp(prefix=slug + "-", dir=self.backups_dir)
-        if os.path.isdir(target_store):
-            shutil.copytree(target_store, os.path.join(backup_dir, "package"))
-        for rel in writes:
-            path = os.path.join(self.root, rel)
-            if os.path.isfile(path):
-                dest = os.path.join(backup_dir, "active", rel)
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                shutil.copyfile(path, dest)
-        if os.path.isfile(os.path.join(self.root, "keys.json")):
-            shutil.copyfile(os.path.join(self.root, "keys.json"), os.path.join(backup_dir, "keys.json"))
-        rmtree(target_store)
-        self._copy_files(cand_dir, target_store, meta["cand_hashes"])
-        for rel, data in writes.items():
-            path = os.path.join(self.root, rel)
-            if data is None:
-                if os.path.isfile(path):
-                    os.remove(path)
-            else:
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "wb") as f:
-                    f.write(data)
-        if record.get("enabled"):
-            self._merge_keys(record, proposal["keys"])
-
-        # Update record
-        record["commit"] = meta["latest_commit"]
-        record["files"] = meta["cand_hashes"]
-        record["mods"] = proposal["mods"]
-        record["layouts"] = proposal["layouts"]
-        record["active_layouts"] = sorted(self._active_layouts(record) & set(proposal["layouts"]))
-        record.pop("associated", None)
+        # Prepare the next record without changing the live record or its source metadata.
+        updated = dict(record, commit=meta["latest_commit"], files=meta["cand_hashes"], mods=proposal["mods"],
+                       layouts=proposal["layouts"], active_layouts=sorted(self._active_layouts(record) & set(proposal["layouts"])),
+                       has_update=False)
+        updated.pop("associated", None)
         if record.get("source"):
-            record["source"].update(commit=meta["latest_commit"], mods=proposal["mods"], layouts=proposal["layouts"],
-                                    kind="layout" if proposal["layouts"] else "mod")
-            recipe_path = os.path.join(target_store, "RECIPE.md")
+            updated["source"] = dict(record["source"], commit=updated["commit"], mods=updated["mods"],
+                                     layouts=updated["layouts"], kind="layout" if updated["layouts"] else "mod")
+            recipe_path = os.path.join(cand_dir, "RECIPE.md")
             if os.path.isfile(recipe_path):
                 with open(recipe_path, encoding="utf-8") as f:
-                    record["source"]["recipe"] = f.read()
-        record["has_update"] = False
-        self._save_records()
+                    updated["source"]["recipe"] = f.read()
+
+        target_store = os.path.join(self.packages_dir, slug)
+        with tempfile.TemporaryDirectory(dir=self.stage_dir) as stage, contextlib.ExitStack() as rollback:
+            staged_store = os.path.join(stage, "package")
+            self._copy_files(cand_dir, staged_store, meta["cand_hashes"])
+            backup_dir = tempfile.mkdtemp(prefix=slug + "-", dir=self.backups_dir)
+            old_store = os.path.join(backup_dir, "package")
+            if os.path.lexists(target_store):
+                os.replace(target_store, old_store)
+                rollback.callback(os.replace, old_store, target_store)
+            os.replace(staged_store, target_store)
+            rollback.callback(os.replace, target_store, staged_store)
+
+            for rel, data in writes.items():
+                path = os.path.join(self.root, rel)
+                if data is not None:
+                    missing = []
+                    parent = os.path.dirname(path)
+                    while not os.path.lexists(parent):
+                        missing.append(parent)
+                        parent = os.path.dirname(parent)
+                    for directory in reversed(missing):
+                        os.mkdir(directory)
+                        rollback.callback(os.rmdir, directory)
+                self._backup_update_file(path, os.path.join(backup_dir, "active", rel), rollback)
+                if data is None:
+                    self._unlink_if_present(path)
+                else:
+                    with open(path, "wb") as f:
+                        f.write(data)
+            if record.get("enabled"):
+                keys_path = os.path.join(self.root, "keys.json")
+                self._backup_update_file(keys_path, os.path.join(backup_dir, "keys.json"), rollback)
+                rollback.callback(self._unlink_if_present, keys_path + ".tmp")
+                self._merge_keys(updated, proposal["keys"])
+
+            # The atomic records replacement commits this package only.
+            self.records[pkg_id] = updated
+            rollback.callback(self.records.__setitem__, pkg_id, record)
+            rollback.callback(self._unlink_if_present, self.records_file + ".tmp")
+            self._save_records()
+            rollback.pop_all()
 
         # Clean up update candidate
         rmtree(os.path.join(self.updates_dir, slug))

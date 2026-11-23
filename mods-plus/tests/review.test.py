@@ -67,6 +67,19 @@ class ReviewTest(unittest.TestCase):
     def snapshot(self):
         return {str(p.relative_to(self.home)): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
 
+    def update_state(self):
+        return {path: data for path, data in self.snapshot().items() if not path.startswith("data/mods-plus/backups/")}
+
+    def assert_update_rolled_back(self, before, pkg_id, token):
+        after = self.update_state()
+        self.assertEqual(before.keys() - after.keys(), set(), "Files lost during failed update")
+        self.assertEqual(after.keys() - before.keys(), set(), "Files added during failed update")
+        self.assertEqual([path for path in before if before[path] != after[path]], [], "Files changed during failed update")
+        restarted = helper.PackageManager(self.temp.name)
+        self.assertEqual(self.mgr.records, restarted.records)
+        self.assertEqual(restarted.get_settings()["prepared_update_ids"], [pkg_id])
+        self.assertEqual(self.mgr.review_update(pkg_id)["token"], token)
+
     def test_multi_package_discovery_and_review_have_no_install_side_effects(self):
         before = self.snapshot()
         with patch.object(helper.subprocess, "run", side_effect=AssertionError("Preview executed a program")):
@@ -187,6 +200,101 @@ class ReviewTest(unittest.TestCase):
         candidate.write_text("tampered")
         with self.assertRaisesRegex(ValueError, "Prepared update changed"):
             self.mgr.apply_update(pkg_id, reviewed=proposal["token"])
+
+    def test_failed_store_copy_restores_old_package_and_can_retry(self):
+        pkg_id = self.installed()
+        self.content["one/mods/one/main.js"] = self.code.replace(b"v1", b"v2")
+        self.prepare_update()
+        token = self.mgr.review_update(pkg_id)["token"]
+        before = self.update_state()
+        copy_files = self.mgr._copy_files
+
+        def partial_copy(source, target, files):
+            copy_files(source, target, ["mods/one/main.js"])
+            raise OSError("store copy failed")
+
+        with patch.object(self.mgr, "_copy_files", side_effect=partial_copy):
+            with self.assertRaisesRegex(OSError, "store copy failed"):
+                self.mgr.apply_update(pkg_id, reviewed=token)
+        self.assert_update_rolled_back(before, pkg_id, token)
+        self.assertTrue(self.mgr.apply_update(pkg_id, reviewed=token)["ok"])
+        self.assertFalse((self.home / "mods/one").exists())
+
+    def test_failed_update_restores_absent_store_keys_and_new_mod_path(self):
+        pkg_id = self.repo + "/one"
+        active = self.home / "mods/one"
+        active.mkdir(parents=True)
+        for name in ("main.js", "mod.json", "note.txt"):
+            (active / name).write_bytes(self.content[f"one/mods/one/{name}"])
+        package = self.mgr.discover(pkg_id)["packages"][0]
+        self.assertTrue(helper.gallery.local_state(self.mgr, package)["installed"])
+        self.assertTrue(self.mgr.records[pkg_id]["associated"])
+        store = Path(self.mgr.packages_dir) / "owner-suite-one"
+        self.assertFalse(store.exists())
+        keys_path = self.home / "keys.json"
+        keys_path.unlink()
+        self.content["one/mods/new/main.js"] = self.code
+        self.prepare_update()
+        token = self.mgr.review_update(pkg_id)["token"]
+        before = self.update_state()
+        replace = helper.os.replace
+
+        def fail_keys(src, dst):
+            if str(src) == str(keys_path) + ".tmp" and Path(dst) == keys_path:
+                raise OSError("shortcut commit failed")
+            return replace(src, dst)
+
+        with patch.object(helper.os, "replace", side_effect=fail_keys):
+            with self.assertRaisesRegex(OSError, "shortcut commit failed"):
+                self.mgr.apply_update(pkg_id, reviewed=token)
+        self.assert_update_rolled_back(before, pkg_id, token)
+        self.assertFalse(store.exists())
+        with patch.object(self.mgr, "_save_records", side_effect=OSError("record save failed")):
+            with self.assertRaisesRegex(OSError, "record save failed"):
+                self.mgr.apply_update(pkg_id, reviewed=token)
+        self.assert_update_rolled_back(before, pkg_id, token)
+        self.assertFalse(store.exists())
+        self.assertFalse((self.home / "mods/new").exists())
+        self.assertTrue(self.mgr.apply_update(pkg_id, reviewed=token)["ok"])
+        self.assertEqual((self.home / "mods/new/main.js").read_bytes(), self.code)
+        self.assertEqual(json.loads(keys_path.read_bytes())["global"]["cmd-shift-y"], "mod.open:one")
+
+    def test_failed_record_commit_restores_local_edits_and_shortcut_ownership(self):
+        self.content["one/mods/one/obsolete.txt"] = b"remove upstream"
+        self.update_tree()
+        pkg_id = self.installed(active=True)
+        local = self.home / "mods/one/note.txt"
+        local.write_bytes(local.read_bytes().replace(b"first", b"local-first"))
+        (self.home / "keys.json").write_text('{"global":{"cmd-shift-x":"app.palette","cmd-shift-y":"app.help"}}')
+        self.content["one/mods/one/note.txt"] = self.content["one/mods/one/note.txt"].replace(b"last", b"upstream-last")
+        del self.content["one/mods/one/obsolete.txt"]
+        self.content["one/keys.json"] = b'{"global":{"cmd-shift-y":"mod.open:updated","cmd-shift-z":"mod.open:one"}}'
+        self.prepare_update()
+        token = self.mgr.review_update(pkg_id)["token"]
+        before = self.update_state()
+        replace = helper.os.replace
+
+        def fail_records(src, dst):
+            if dst == self.mgr.records_file:
+                self.assertIn(b"upstream-last", local.read_bytes())
+                self.assertFalse((self.home / "mods/one/obsolete.txt").exists())
+                self.assertIn("cmd-shift-z", json.loads((self.home / "keys.json").read_bytes())["global"])
+                raise OSError("record commit failed")
+            return replace(src, dst)
+
+        with patch.object(helper.os, "replace", side_effect=fail_records):
+            with self.assertRaisesRegex(OSError, "record commit failed"):
+                self.mgr.apply_update(pkg_id, reviewed=token)
+        self.assertEqual(Path(self.mgr.records_file).read_bytes(), before["data/mods-plus/packages.json"])
+        self.assertEqual(local.read_bytes(), before["mods/one/note.txt"], "Old record must still match the pre-update active state")
+        self.assert_update_rolled_back(before, pkg_id, token)
+        self.assertTrue(self.mgr.apply_update(pkg_id, reviewed=token)["ok"])
+        self.assertIn(b"local-first", local.read_bytes())
+        self.assertIn(b"upstream-last", local.read_bytes())
+        self.assertFalse((self.home / "mods/one/obsolete.txt").exists())
+        self.assertEqual(json.loads((self.home / "keys.json").read_bytes())["global"],
+                         {"cmd-shift-x": "app.palette", "cmd-shift-y": "app.help", "cmd-shift-z": "mod.open:one"})
+        self.assertEqual(self.mgr.records[pkg_id]["owned_keys"], {"global": {"cmd-shift-z": "mod.open:one"}})
 
     def test_new_files_only_update_is_detected_without_activating_stored_package(self):
         pkg_id = self.installed()
@@ -389,15 +497,37 @@ class ReviewTest(unittest.TestCase):
 
     def test_update_all_reports_partial_apply_failure(self):
         ids = self.bulk_pair()
-        apply = self.mgr.apply_update
-        def fail_second(pkg_id, reviewed=None):
-            return {"ok": False, "error": "Validation failed"} if pkg_id == ids[1] else apply(pkg_id, reviewed)
-        with patch.object(self.mgr, "apply_update", side_effect=fail_second):
+        self.content["one/keys.json"] = b'{"global":{"cmd-shift-x":"mod.open:one","cmd-shift-y":"mod.open:updated"}}'
+        self.content["two/keys.json"] = b'{"global":{"cmd-shift-z":"layout.switch:two"}}'
+        self.update_tree()
+        layout = self.home / "layouts/two.json"
+        stored = Path(self.mgr.packages_dir) / "owner-suite-two/layouts/two.json"
+        old_layout = layout.read_bytes()
+        replace = helper.os.replace
+
+        def fail_second(src, dst):
+            if dst == self.mgr.records_file and json.loads(Path(src).read_bytes())[ids[1]]["commit"] == self.revision:
+                raise OSError("second record commit failed")
+            return replace(src, dst)
+
+        with patch.object(helper.os, "replace", side_effect=fail_second):
             result = self.mgr.update_all()
         self.assertFalse(result["ok"])
         self.assertEqual(result["updated"], [ids[0]])
-        self.assertEqual(result["errors"], [{"id": ids[1], "error": "Validation failed"}])
+        self.assertEqual(result["errors"], [{"id": ids[1], "error": "second record commit failed"}])
         self.assertEqual(result["settings"]["prepared_update_ids"], [ids[1]])
+        self.assertEqual(layout.read_bytes(), old_layout)
+        self.assertEqual(stored.read_bytes(), old_layout)
+        self.assertEqual((self.home / "mods/one/main.js").read_bytes(), self.content["one/mods/one/main.js"])
+        self.assertEqual((Path(self.mgr.packages_dir) / "owner-suite-one/mods/one/main.js").read_bytes(),
+                         self.content["one/mods/one/main.js"])
+        self.assertEqual(json.loads((self.home / "keys.json").read_bytes())["global"],
+                         {"cmd-shift-x": "app.palette", "cmd-shift-y": "mod.open:updated"})
+        persisted = helper.PackageManager(self.temp.name).records
+        self.assertEqual(self.mgr.records, persisted)
+        self.assertEqual([persisted[pkg_id]["commit"] for pkg_id in ids], [self.revision, "a" * 40])
+        self.assertEqual(self.mgr.update_all()["updated"], [ids[1]])
+        self.assertEqual(layout.read_bytes(), self.content["two/layouts/two.json"])
 
     def test_update_all_new_mod_and_conflicting_shortcut_require_agent(self):
         self.installed(active=True)
