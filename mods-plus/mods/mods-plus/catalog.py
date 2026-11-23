@@ -7,6 +7,7 @@ import re
 import subprocess
 import struct
 import tempfile
+import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -16,14 +17,53 @@ from pathlib import Path
 import review
 
 
-def download(url, timeout=20):
-    result = subprocess.run(
-        ["curl", "--fail", "--silent", "--show-error", "--location", "--max-time", str(timeout), url],
-        capture_output=True, timeout=timeout + 2,
-    )
+CATALOG_TRANSFER_TIMEOUT = 180
+CATALOG_CONNECT_TIMEOUT = 5
+CATALOG_STALL_SECONDS = 8
+
+
+def download(url, timeout=None):
+    options = ["curl", "--fail", "--silent", "--show-error", "--location"]
+    if timeout is None:
+        result = metadata_transfer(url, options + ["--compressed", "--no-buffer",
+                                   "--connect-timeout", str(CATALOG_CONNECT_TIMEOUT),
+                                   "--max-time", str(CATALOG_TRANSFER_TIMEOUT), url])
+    else:
+        result = subprocess.run(options + ["--max-time", str(timeout), url],
+                                capture_output=True, timeout=timeout + 2)
     if result.returncode:
         raise LookupError(f"Could not load {url}: {result.stderr.decode('utf-8', 'replace').strip()}")
     return result.stdout
+
+
+def metadata_transfer(url, args):
+    # Watch actual body growth so a fast start cannot mask a subsequent stall.
+    with tempfile.TemporaryFile() as body, tempfile.TemporaryFile() as errors, \
+            subprocess.Popen(args, stdout=body, stderr=errors) as curl:
+        size = 0
+        last_progress = time.monotonic()
+        deadline = last_progress + CATALOG_TRANSFER_TIMEOUT + 2
+        try:
+            while True:
+                try:
+                    curl.wait(timeout=0.25)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                now = time.monotonic()
+                received = os.fstat(body.fileno()).st_size
+                if received > size:
+                    size, last_progress = received, now
+                if now >= deadline:
+                    raise LookupError(f"Could not load {url}: curl exceeded its {CATALOG_TRANSFER_TIMEOUT}-second transfer limit")
+                if now - last_progress >= CATALOG_STALL_SECONDS:
+                    raise LookupError(f"Could not load {url}: no download progress for {CATALOG_STALL_SECONDS} seconds ({size} bytes received)")
+        finally:
+            if curl.poll() is None:
+                curl.kill()
+        body.seek(0)
+        errors.seek(0)
+        return subprocess.CompletedProcess(args, curl.returncode, body.read(), errors.read())
 
 
 def image_size(path):

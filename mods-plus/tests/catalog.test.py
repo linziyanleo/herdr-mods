@@ -1,6 +1,8 @@
 """Catalog identity, source parity and installed-filter regressions."""
 
 import importlib.util
+import gzip
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import subprocess
@@ -8,6 +10,7 @@ import sys
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +18,59 @@ spec = importlib.util.spec_from_file_location("helper", Path(__file__).parents[1
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 gallery = helper.gallery
+
+
+class CatalogTransportTests(unittest.TestCase):
+    def setUp(self):
+        self.payload = b'{"mods": []}'
+        self.release = threading.Event()
+        payload, release = gzip.compress(self.payload), self.release
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                try:
+                    for offset in range(0, len(payload), 4):
+                        if self.path == "/stall":
+                            self.wfile.write(payload[:-4])
+                            release.wait(7)
+                            return
+                        self.wfile.write(payload[offset:offset + 4])
+                        if release.wait(.25):
+                            return
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.addCleanup(self.release.set)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{server.server_port}"
+        proxy = patch.dict(os.environ, {"no_proxy": "127.0.0.1"})
+        proxy.start()
+        self.addCleanup(proxy.stop)
+
+    def test_progressing_gzip_transfer_survives_the_stall_window(self):
+        with patch.object(gallery, "CATALOG_STALL_SECONDS", 1):
+            self.assertEqual(gallery.download(self.url + "/slow"), self.payload)
+
+    def test_stalled_and_progressing_transfers_have_separate_limits(self):
+        with patch.object(gallery, "CATALOG_STALL_SECONDS", 1), \
+                patch.object(gallery, "CATALOG_TRANSFER_TIMEOUT", 5):
+            start = time.monotonic()
+            with self.assertRaisesRegex(LookupError, "no download progress"):
+                gallery.download(self.url + "/stall")
+            self.assertLess(time.monotonic() - start, 5)
+        with patch.object(gallery, "CATALOG_TRANSFER_TIMEOUT", 1):
+            with self.assertRaisesRegex(LookupError, "timed out"):
+                gallery.download(self.url + "/slow")
 
 
 class CatalogTests(unittest.TestCase):

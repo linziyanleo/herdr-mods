@@ -40,7 +40,7 @@ The [implementation report](../docs/plans/interaction-performance-implementation
 
 - Cached catalog entries appear before network refresh. Four official feeds refresh concurrently; media reads cached metadata without refreshing the feeds again.
 - Long helper operations run as one-shot tasks. Herdr's 30-second `exec` calls only start tasks and read their results; the view polls every 500ms while waiting. Matching in-flight requests share a task, including manual and scheduled update checks.
-- Each task has a five-minute deadline, native validation has a 45-second deadline, and each image request has a six-second deadline. Task timeout stops the helper process group. Failures include the operation name.
+- Official metadata requests accept compressed responses, allow five seconds to connect and stop after eight seconds without body progress. A progressing request can run for up to 180 seconds. Each task has a five-minute deadline, native validation has a 45-second deadline, and each image request has a six-second deadline. Task timeout stops the helper process group. Failures include the operation name.
 - Closing a view stops its polling. An already-started task can finish within its deadline; no daemon schedules new work. Completed task receipts are retained for one day and cleaned on subsequent starts.
 - Candidate metadata is published atomically only after validation. Caught preparation failures remove their partial candidate without changing active files or recording a successful check. A hard-stopped task may leave partial files; they receive no badge and the next check replaces them.
 

@@ -67,7 +67,8 @@ class Handler(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 thread = threading.Thread(target=server.serve_forever, daemon=True)
 thread.start()
-gallery.download = lambda url, timeout=20: download(f"http://127.0.0.1:{server.server_port}/?url={urllib.parse.quote(url, safe='')}", timeout)
+gallery.download = lambda url, **options: download(
+    f"http://127.0.0.1:{server.server_port}/?url={urllib.parse.quote(url, safe='')}", **options)
 
 results = []
 try:
