@@ -72,7 +72,31 @@ herdr-app do pane.split '{"direction":"right","mod":"preview-plus","props":{"fil
 herdr-app do tab.new '{"name":"Document","mod":"preview-plus","props":{"file":"/absolute/path/guide.pdf"}}'
 ```
 
-Pass `on` with the machine name for remote Markdown and text. Images and PDFs are local-only. PDF rendering is macOS-only; the Open control can launch a local PDF in its system application on other platforms.
+Pass `on` with the machine name for remote Markdown and text. Images and PDFs are local-only by default. PDF rendering is macOS-only; the Open control can launch a local PDF in its system application on other platforms.
+
+### Opt-in local copies of remote images and PDFs
+
+For a folder synchronized by another tool, set `localSyncRoots` on the receiving Preview Plus instance. The default is an empty list. For a paired panel, add the setting to Preview Plus's content props.
+
+```json
+{
+  "mod": "preview-plus",
+  "props": {
+    "previewStack": "files",
+    "localSyncRoots": ["/absolute/path/to/synchronized-folder"]
+  }
+}
+```
+
+For a fixed pane or tab, include the same setting with `file` and `on`.
+
+```sh
+herdr-app do tab.new '{"name":"Synced image","mod":"preview-plus","props":{"file":"/absolute/path/to/synchronized-folder/photo.png","on":"other-machine","localSyncRoots":["/absolute/path/to/synchronized-folder"]}}'
+```
+
+The remote target must use the same absolute path as the local copy, under a configured root. Use physical paths throughout. Symbolic links in the root, its parents or within it are refused, including links that point back inside the root. Sync copies support images and PDFs on macOS, and images on Linux with Python 3. Windows continues to preview its ordinary local images.
+
+The preview shows **Local copy** and warns that contents may differ. Sync status is unverified. A missing or unreadable copy shows an error. The remote machine still owns the target and Open stays disabled. Files Plus's external Open, Reveal and double-click behavior, and inline images in remote Markdown, retain their existing behavior.
 
 ### Source locations for callers
 

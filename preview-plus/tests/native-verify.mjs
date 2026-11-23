@@ -9,7 +9,7 @@ const execute = promisify(execFile), info = JSON.parse(await fs.readFile(process
 assert.ok(info.base.startsWith("/tmp/pp."));
 const env = { ...process.env, ...info.env }, control = path.join(info.base, "control"), reports = [];
 const command = async (name, args = {}) => JSON.parse((await execute("herdr-app", ["do", name, JSON.stringify(args)], { env })).stdout);
-const state = async () => JSON.parse(await fs.readFile(path.join(control, "state.json"), "utf8"));
+const state = async (directory = control) => JSON.parse(await fs.readFile(path.join(directory, "state.json"), "utf8"));
 async function until(read, accept, label) {
   for (let n = 0; n < 160; n++) {
     let value;
@@ -19,10 +19,10 @@ async function until(read, accept, label) {
   }
   throw new Error("Timed out: " + label + "\n" + JSON.stringify(await state()));
 }
-async function request(value) {
+async function request(value, directory = control) {
   const id = `${Date.now()}-${Math.random()}`;
-  await fs.writeFile(path.join(control, "request.json"), JSON.stringify({ ...value, id }));
-  const receipt = await until(async () => JSON.parse(await fs.readFile(path.join(control, "receipt.json"), "utf8")), value => value.id === id, "request " + value.action);
+  await fs.writeFile(path.join(directory, "request.json"), JSON.stringify({ ...value, id }));
+  const receipt = await until(async () => JSON.parse(await fs.readFile(path.join(directory, "receipt.json"), "utf8")), value => value.id === id, "request " + value.action);
   assert.equal(receipt.error, undefined);
 }
 async function ready(file, accept = () => true) {
@@ -80,6 +80,34 @@ await fs.writeFile(file("source.txt"), "A read-only text file.\n"); await ready(
 await request({ action: "show", file: "/remote/photo.png", root: "/remote", on: "server" });
 await until(state, value => !value.loading && /only available for local/.test(value.error), "remote media note");
 passed("Native text update, deletion, recovery and explicit remote-media state");
+
+const copyControls = { image: path.join(info.base, "copy-image"), pdf: path.join(info.base, "copy-pdf") };
+await Promise.all(Object.values(copyControls).map(directory => fs.mkdir(directory, { recursive: true })));
+const copyImage = path.join(root, "synced-photo.png"), copyPDF = path.join(root, "synced-guide.pdf");
+await fs.writeFile(copyImage, png(320, 180));
+await fs.writeFile(copyPDF, pdf(2));
+await command("layout.set", { layout: { id: "root", type: "row", children: [
+  { id: "copy-image", type: "block", content: { mod: "preview-plus-driver", props: {
+    base: copyControls.image, file: copyImage, on: "demo-remote", localSyncRoots: [root]
+  } } },
+  { id: "copy-pdf", type: "block", content: { mod: "preview-plus-driver", props: {
+    base: copyControls.pdf, file: copyPDF, on: "demo-remote", localSyncRoots: [root]
+  } } }
+] } });
+const copyState = (name, accept) => until(() => state(copyControls[name]), value => !value.loading && accept(value), "local copy " + name);
+const imageCopy = await copyState("image", value => value.media?.width === 320);
+assert.equal(imageCopy.selected.on, "demo-remote");
+assert.deepEqual(await fs.readFile(path.join(info.app, imageCopy.media.path)), png(320, 180));
+await copyState("pdf", value => value.total === 2 && value.page === 1);
+await request({ action: "page", delta: 1 }, copyControls.pdf);
+await copyState("pdf", value => value.media?.page === 2);
+await execute("herdr-app", ["shot", path.join(info.base, "local-copy.png")], { env });
+await fs.unlink(copyImage);
+await copyState("image", value => !value.media && /Local copy unavailable/.test(value.error));
+await fs.writeFile(copyImage, png(180, 320));
+await request({ action: "refresh" }, copyControls.image);
+await copyState("image", value => value.media?.width === 180);
+passed("Simulated remote image/PDF render local bytes, with PDF paging, deletion and recovery");
 
 const pairedLayout = { id: "root", type: "row", children: [
   { id: "files", type: "stack", active: "files-plus-tree", children: [

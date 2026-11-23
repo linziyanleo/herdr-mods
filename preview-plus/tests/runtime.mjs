@@ -83,18 +83,26 @@ export async function runtime(t) {
       set_value(text) { this.text = text; }, focus() { state.keyboard = this; }, on(name, handler) { this.handlers[name] = handler; }, release() { this.released = true; } }) }, Editor: { new: code => builder("editor", code) } };
   const context = vm.createContext({ console, localStorage, atob }), cache = new Map();
   async function module(file) {
-    if (cache.has(file)) return cache.get(file);
-    const result = new vm.SourceTextModule(await fs.readFile(file, "utf8"), { context, identifier: file,
-      importModuleDynamically: async (specifier, parent) => { const imported = await module(path.resolve(path.dirname(parent.identifier), specifier)); if (imported.status !== "evaluated") await imported.evaluate(); return imported; }
-    }); cache.set(file, result);
-    await result.link(async (specifier, parent) => {
-      const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : specifier === "fs/promises" ? { mkdir: fs.mkdir } : null;
-      if (!exports) return module(path.resolve(path.dirname(parent.identifier), specifier));
-      return new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
-    });
-    return result;
+    // Cache before asynchronous file I/O so diamond imports share one module.
+    // Let VM link the whole graph rather than recursively linking in the resolver.
+    if (!cache.has(file)) cache.set(file, fs.readFile(file, "utf8").then(source => new vm.SourceTextModule(source, {
+      context, identifier: file,
+      importModuleDynamically: (specifier, parent) => evaluate(path.resolve(path.dirname(parent.identifier), specifier))
+    })));
+    return cache.get(file);
   }
-  state.load = async name => { const loaded = await module(path.join(runtimeDir, name)); if (loaded.status !== "evaluated") await loaded.evaluate(); return loaded.namespace; };
+  async function link(specifier, parent) {
+    const exports = specifier === "herdr" ? host : specifier === "gpui-kit" ? kit : specifier === "gpui-base" ? base : specifier === "fs/promises" ? { mkdir: fs.mkdir } : null;
+    if (!exports) return module(path.resolve(path.dirname(parent.identifier), specifier));
+    return new vm.SyntheticModule(Object.keys(exports), function () { for (const [key, value] of Object.entries(exports)) this.setExport(key, value); }, { context });
+  }
+  async function evaluate(file) {
+    const loaded = await module(file);
+    if (loaded.status === "unlinked") await loaded.link(link);
+    if (loaded.status !== "evaluated") await loaded.evaluate();
+    return loaded;
+  }
+  state.load = async name => (await evaluate(path.join(runtimeDir, name))).namespace;
   state.cx = { focus_handle: () => { const handle = { focus() { state.keyboard = handle; }, is_focused() { return state.keyboard === handle; } }; return handle; }, stop_propagation() {}, notify() { if (state.rendering) throw new Error("notify during render"); }, open_url: url => state.calls.push({ command: "open_url", url }),
     spawn: fn => { const task = Promise.resolve().then(() => fn(state.cx)); state.tasks.push(task); return task; }, timer: { after: (_ms, fn) => Promise.resolve().then(() => fn(state.cx)), every: (ms, fn) => state.timers.push({ ms, fn }) } };
   // Watchers and nextCommand deliberately remain pending. Drain only finite work.

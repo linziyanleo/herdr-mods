@@ -14,6 +14,8 @@ Source adds Go to line and Find in Source below the path. Each opens one native 
 
 An image or PDF adds a wrapping toolbar (minimum 36px high with a 1px bottom separator) holding Fit, −, an editable percentage and + zoom controls. The percentage frame is 76px wide and 28px high, with a 0.5px border and centered 12px Geist Mono text. PDFs additionally display Previous, the current and total page count (`page / total`), and Next. Drag enlarged media with the left mouse button to pan in both directions; the pointer changes from grab to grabbing. Releasing or leaving the canvas stops the drag. Fit resets panning, centers the media and sizes it to the current viewport with 16px padding while preserving the aspect ratio.
 
+An opted-in remote image or PDF shows a muted **Local copy** notice below the path during loading, preview and errors. The notice identifies the remote machine and warns that contents may differ and sync status is unverified.
+
 Markdown documents render formatted text interleaved with native image blocks sized to document width and aspect ratio. An inline warning banner in 12px muted text indicates unresolvable or remote inline images. Source mode and plain text files render in the native syntax-highlighted editor using Herdr's configured code font and size, with zoom applied once. Complete local text is editable; remote and truncated text stays read-only. The standalone Files tree has 28px file rows, 18px indentation per level, folder and file icons, and Git status letters at the right edge.
 
 Follow Git Graph's Herdr integration: read colors directly from `theme()` and UI/code font families from resolved `settings()`. Preserve color alpha, custom color overrides and same-appearance theme changes. Unexposed fields use the actual Herdr 0.1.11 Files/Changes defaults: a 1px theme-colored border, 10px panel corners, a semibold title, 13px interface text, 12px secondary text and 1px separators. Rows use 7px corners, 18px indentation and 6px tree padding. There is no separate Preview Plus palette or type/spacing/radius scale. The generic `cx.theme()` scale is not Herdr's shipped panel styling. Native editor and rich-text internals retain Herdr's theme. UI and code sizes receive zoom exactly once; version upgrades require rechecking unexposed control defaults.
@@ -86,7 +88,15 @@ Stage `.png`, `.jpg`, `.jpeg`, `.webp` and `.svg` under `mods/preview-plus/.cach
 
 ### macOS PDF viewing
 
-On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page count and rasterize only the requested page, never the entire PDF into memory at once. Cache each page separately as PNG, limiting the raster's longest edge to 2,048 pixels and its scale to 2×; zoom enlarges that raster. Previous and Next controls turn pages with bounds checking. Clamp the page if an external edit reduces the page count. Reject locked, empty or unreadable PDFs with a visible error.
+On macOS, use PDFKit through JXA (`osascript -l JavaScript`) to inspect the page count and rasterize the requested page. Cache each page separately as PNG, limiting the raster's longest edge to 2,048 pixels and its scale to 2×; zoom enlarges that raster. Previous and Next controls turn pages with bounds checking. Clamp the page if an external edit reduces the page count. Reject locked, empty or unreadable PDFs with a visible error.
+
+### Opt-in sync roots for local media copies
+
+The receiving instance's `props.localSyncRoots` defaults to `[]` and accepts absolute local directory paths. Configure it on Preview Plus in a paired or standalone layout, or pass it with a fixed pane or tab. Files Plus-created instances without the prop stay opted out. [Configuration examples](README.md#opt-in-local-copies-of-remote-images-and-pdfs)
+
+The normalized target path must be beneath a configured root. Both helpers reject symbolic links in every path component. macOS opens with `O_NOFOLLOW_ANY` and reads through that descriptor. The Python image fallback opens each component relative to an open directory descriptor, then validates and copies through the open file. Both helpers take metadata from the same regular file used for decoding and staging. macOS decodes images and PDFs from bytes read through that file, and Python validates the image format and dimensions before writing the cache.
+
+Cached images contain the local file's bytes. Cached PDF pages are rasters of the local document. Local watches and the existing ten-second recovery timer reload changed or restored copies. Removing the opt-in clears the preview and watches, and discards in-flight results. Windows does not offer sync copies because its Python fallback lacks descriptor-relative no-follow opens.
 
 ### File watching and reload
 
@@ -171,6 +181,8 @@ The cache contains copies of viewed files. It is local, disposable and excluded 
 
 Directory enumeration, bounded browsing and Git-status handling adapt the Files mod bundled with [Herdr 0.1.11](https://github.com/herdrdev/herdr-app); see [Apache-2.0](licenses/Herdr-APACHE-2.0.txt). The changes add the standalone preview tree, request ownership and local-file integration. Earlier releases used a Radix palette; its [MIT notice](licenses/Radix-MIT.txt) is retained. The current mod reads Herdr's theme instead. [Git Graph](https://github.com/rabeeh-ta/herdr-git-graph) is a reference for the integration pattern; no third-party source is imported. Test landscapes, diagrams and PDFs are original generated fixtures. Original project contributions are licensed under [MIT](LICENSE); third-party portions retain their upstream terms, and the bundled elkjs remains EPL-2.0.
 
+The opt-in sync-root design, local-copy notice and initial regression fixtures were contributed by [dppalomar](https://github.com/dppalomar). The adapted implementation follows the maintainer's review of file validation and staging. [Issue #6](https://github.com/linziyanleo/herdr-mods/issues/6) · [PR #7](https://github.com/linziyanleo/herdr-mods/pull/7) · [Review comment](https://github.com/linziyanleo/herdr-mods/pull/7#issuecomment-6949293661)
+
 The Mermaid build/SVG adapter adapts [jjongkwann/herdr-files-plus](https://github.com/jjongkwann/herdr-files-plus) under MIT. beautiful-mermaid 1.1.3 (MIT), elkjs 0.11.1 (EPL-2.0) and entities 7.0.1 (BSD-2-Clause) are bundled. JSON Pointer escaping and the pure parser approach reference/adapt [gsydler/cria-file-preview](https://github.com/gsydler/cria-file-preview) under Apache-2.0. Full notices, exact source references, local modifications, the JavaScript rebuild procedure and the unresolved upstream ELK source revision are documented in [THIRD_PARTY.md](mods/preview-plus/THIRD_PARTY.md) and the runtime's `licenses/` directory. esbuild 0.28.2 is build-only.
 
 ## Watch out
@@ -179,9 +191,11 @@ Herdr runs native GPUI JavaScript without a DOM, Node APIs or `setTimeout`. Use 
 
 A native 0.1.11 probe rendered the same cached PNG through `image()` while both Markdown and HTML TextViews omitted it, including with data URIs. Therefore text remains in `TextView` and local images use native image blocks in the same scroll region. Do not replace this with a path-only rewrite without verifying the real window again. Upstream [TextView image documentation](https://gpui-kit.com/component/text-view/#images) describes URI loading, but the bundled runtime's observed behavior is the acceptance boundary.
 
-Media is local-only, and PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Remote images, missing inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large images remain subject to the native decoder's resource limits.
+Media uses local bytes, including explicitly enabled sync copies. PDF rendering is macOS-only. Remote text uses `readTextFile(..., { on })`. Unconfigured remote images, missing sync copies or inline images, unsupported PDFs and failed conversions have visible states. Source reads are also subject to Herdr's 1 MiB UTF-8 limit. File trees stop at 500 entries per folder, 5,000 total and depth 40. Very large media files remain subject to native memory and decoder limits.
 
 ## Done when
+
+The sync-copy regression ran on macOS 27.2 with Herdr 0.1.16. The serial Preview Plus, Files Plus and license suites passed 204 tests, including the focused checks in `tests/local-copy.test.mjs`. `herdr-app check` passed. The background disposable session exercised the existing Preview flows, simulated remote image and PDF copies, page turning, deletion and refresh recovery. The inspected native capture showed both **Local copy** notices. The Python fallback ran on macOS. Live cross-machine sync, physical input and native Linux/Windows remain unverified.
 
 Current 0.1.16 lifecycle, temporary/pinned workflow and independent reproduction are recorded in the [interaction/performance implementation report](../docs/plans/interaction-performance-implementation.md). The paragraphs below retain their original 0.1.13 verification boundary; they do not assert that every physical check has since passed.
 
