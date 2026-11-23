@@ -20,6 +20,9 @@ import review
 CATALOG_TRANSFER_TIMEOUT = 180
 CATALOG_CONNECT_TIMEOUT = 5
 CATALOG_STALL_SECONDS = 8
+EXAMPLES_URL = "https://herdr.dev/gallery/"
+EXAMPLES_REPO = "herdrdev/herdr-layout-examples"
+KINDS = ("mod", "layout")
 
 
 def download(url, timeout=None):
@@ -89,26 +92,24 @@ def image_size(path):
 
 
 class Examples(HTMLParser):
-    def __init__(self, kind):
+    def __init__(self):
         super().__init__()
-        self.kind = kind
-        self.items = []
+        self.items = {kind + "s": [] for kind in KINDS}
 
     def handle_starttag(self, tag, attrs):
         d = dict(attrs)
-        if d.get("data-kind") != "example" or not d.get("data-gh"):
-            return
-        if d.get("data-type") and d["data-type"] != self.kind + "s":
+        plural = d.get("data-type")
+        if d.get("data-kind") != "example" or plural not in self.items or not d.get("data-gh"):
             return
         source = urllib.parse.urlparse(d["data-gh"]).path.strip("/").split("/")
         if len(source) < 5 or source[2] != "tree":
             return
-        self.items.append(normalize({
+        self.items[plural].append(normalize({
             "fullName": "/".join(source[:2]), "path": "/".join(source[4:]),
             "defaultBranch": source[3], "name": d["data-name"],
             "owner": d["data-owner"], "blurb": d.get("data-blurb", ""),
             "previewUrl": urllib.parse.urljoin("https://herdr.dev", d.get("data-pic", "")),
-        }, self.kind, "example"))
+        }, plural[:-1], "example"))
 
 
 def normalize(item, kind, collection="community"):
@@ -132,48 +133,80 @@ def normalize(item, kind, collection="community"):
 
 
 def official_packages(manager):
-    packages = []
     manager.catalog_errors = []
-    def fetch_group(source):
-        kind, plural, collection = source
-        def community():
-            index = json.loads(download(f"https://assets.herdr.dev/{plural}/index.json"))
-            if not isinstance(index.get(plural), list):
-                raise ValueError("Unexpected official catalog response")
-            return [normalize(i, kind) for i in index[plural]]
 
-        def examples():
-            parser = Examples(kind)
-            parser.feed(download(f"https://herdr.dev/{plural}/").decode("utf-8"))
-            if not parser.items:
-                return []
-            return parser.items
-
+    def cached(name, fetch):
         try:
-            cache_version = "-v2" if collection == "examples" else ""
-            return manager._cached(f"official-{plural}-{collection}{cache_version}.json", 3600,
-                                   community if collection == "index" else examples)
+            return manager._cached(f"official-{name}.json", 3600, fetch)
         except Exception as exc:
+            manager.stale = True
             manager.catalog_errors.append(str(exc))
             return []
 
-    sources = [(kind, plural, collection) for kind, plural in (("mod", "mods"), ("layout", "layouts"))
-               for collection in ("index", "examples")]
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        fetched = dict(zip(sources, pool.map(fetch_group, sources)))
-    for kind, plural in (("mod", "mods"), ("layout", "layouts")):
-        groups = {collection: fetched[(kind, plural, collection)] for collection in ("index", "examples")}
-        indexed = {p["id"]: p for p in groups.get("index", [])}
-        packages.extend(p for p in indexed.values() if p["repo"] != "herdrdev/herdr-layout-examples")
-        for example in groups.get("examples", []):
+    def fetch_index(kind):
+        plural = kind + "s"
+        url = f"https://assets.herdr.dev/{plural}/index.json"
+
+        def load():
+            body = download(url)
+            try:
+                index = json.loads(body)
+                items = index[plural]
+                if not isinstance(items, list) or index.get(kind + "Count", len(items)) != len(items):
+                    raise ValueError("Unexpected package list or count")
+                return [normalize(item, kind) for item in items]
+            except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                raise ValueError(f"Invalid official index at {url}: {exc}") from exc
+
+        return cached(f"{plural}-index", load)
+
+    def fetch_examples():
+        # Both existing per-kind caches can share one fetch, including a failed attempt.
+        @lru_cache(maxsize=1)
+        def load():
+            try:
+                parser = Examples()
+                parser.feed(download(EXAMPLES_URL).decode("utf-8"))
+                parser.close()
+                return parser.items, None
+            except Exception as exc:
+                return {}, exc
+
+        def for_kind(kind):
+            plural = kind + "s"
+
+            def entries():
+                items, error = load()
+                if error is not None:
+                    raise error
+                if not items[plural]:
+                    raise ValueError(f"No {plural} examples found at {EXAMPLES_URL}")
+                return items[plural]
+
+            return cached(f"{plural}-examples-v2", entries)
+
+        return {kind: for_kind(kind) for kind in KINDS}
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        indexes = {kind: pool.submit(fetch_index, kind) for kind in KINDS}
+        examples = pool.submit(fetch_examples).result()
+    manager.catalog_errors = list(dict.fromkeys(manager.catalog_errors))
+    packages = []
+    for kind in KINDS:
+        indexed = {p["id"]: p for p in indexes[kind].result()}
+        packages.extend(p for p in indexed.values() if p["repo"] != EXAMPLES_REPO)
+        # The indexes also carry the current example repository. Keep it
+        # browsable on a cold start even if the gallery page cannot load.
+        examples_for_kind = examples[kind] or [
+            dict(p, collection="example") for p in indexed.values() if p["repo"] == EXAMPLES_REPO
+        ]
+        for example in examples_for_kind:
             identity = indexed.get(example["id"], {})
             example = dict(example)
             for key in ("mods", "layouts", "commit"):
                 if key in identity:
                     example[key] = identity[key]
             packages.append(example)
-    if not packages and not manager.cache_only:
-        raise LookupError("; ".join(manager.catalog_errors))
     return packages
 
 

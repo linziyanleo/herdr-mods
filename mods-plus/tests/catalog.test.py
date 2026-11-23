@@ -12,12 +12,20 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 spec = importlib.util.spec_from_file_location("helper", Path(__file__).parents[1] / "mods/mods-plus/helper.py")
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
 gallery = helper.gallery
+
+
+def example_html(*plurals):
+    return "".join(
+        f'<div data-kind="example" data-type="{plural}" data-name="Example" data-owner="herdrdev" '
+        'data-gh="https://github.com/herdrdev/herdr-layout-examples/tree/main/example" '
+        'data-pic="/live/example.jpg"></div>' for plural in plurals
+    ).encode()
 
 
 class CatalogTransportTests(unittest.TestCase):
@@ -151,13 +159,14 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(self.manager.build_catalog()[0]["installed"])
 
     def test_official_examples_and_preview_policy(self):
-        parser = gallery.Examples("layout")
-        parser.feed('<div data-kind="example" data-name="Desk" data-owner="herdrdev" '
+        parser = gallery.Examples()
+        parser.feed('<div data-kind="example" data-type="layouts" data-name="Desk" data-owner="herdrdev" '
                     'data-gh="https://github.com/herdrdev/herdr-layout-examples/tree/main/desk" '
                     'data-pic="/live/layouts/desk.jpg"></div>')
-        self.assertEqual(parser.items[0]["collection"], "example")
-        self.assertEqual(parser.items[0]["subdir"], "desk")
-        self.assertEqual(parser.items[0]["preview_url"], "https://herdr.dev/live/layouts/desk.jpg")
+        example, = parser.items["layouts"]
+        self.assertEqual(example["collection"], "example")
+        self.assertEqual(example["subdir"], "desk")
+        self.assertEqual(example["preview_url"], "https://herdr.dev/live/layouts/desk.jpg")
         unmoderated = gallery.normalize({"fullName": "a/b", "owner": "a", "name": "B",
                                         "previewUrl": "https://elsewhere/image.png"}, "mod")
         self.assertEqual(unmoderated["preview_url"], "")
@@ -177,9 +186,7 @@ class CatalogTests(unittest.TestCase):
         item = {"fullName": "herdrdev/herdr-layout-examples", "owner": "herdrdev",
                 "name": "Example", "path": "example", "modNames": ["example"],
                 "headCommit": "example-revision"}
-        html = ('<div data-kind="example" data-name="Example" data-owner="herdrdev" '
-                'data-gh="https://github.com/herdrdev/herdr-layout-examples/tree/main/example" '
-                'data-pic="/live/example.jpg"></div>').encode()
+        html = example_html("mods", "layouts")
         def fetch(url):
             if url.endswith("index.json"):
                 key = "layouts" if "/layouts/" in url else "mods"
@@ -191,6 +198,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(all(p["collection"] == "example" for p in packages))
         self.assertEqual(packages[0]["mods"], ["example"])
         self.assertEqual(packages[0]["commit"], "example-revision")
+        self.assertEqual(packages[0]["preview_url"], "https://herdr.dev/live/example.jpg")
 
     def test_preview_dimensions(self):
         path = Path(self.temp.name) / "preview.png"
@@ -198,30 +206,89 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(gallery.image_size(path), (1600, 1000))
 
     def test_mixed_examples_follow_card_type(self):
-        html = ''.join(
-            f'<div data-kind="example" data-type="{kind}s" data-name="{kind}" '
-            f'data-owner="herdrdev" data-gh="https://github.com/herdrdev/examples/tree/main/{kind}"></div>'
-            for kind in ("mod", "layout"))
+        parser = gallery.Examples()
+        parser.feed(example_html("mods", "layouts").decode())
         for kind in ("mod", "layout"):
-            parser = gallery.Examples(kind)
-            parser.feed(html)
-            self.assertEqual([(p["name"], p["kind"]) for p in parser.items], [(kind, kind)])
+            self.assertEqual([p["kind"] for p in parser.items[kind + "s"]], [kind])
 
     def test_repository_preview_is_png(self):
         preview = Path(__file__).parents[1] / "preview.png"
         self.assertTrue(preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
 
-    def test_four_catalog_sources_refresh_in_parallel(self):
+    def test_three_catalog_sources_refresh_in_parallel_and_share_the_gallery(self):
         self.catalog.stop()
-        barrier = threading.Barrier(4, timeout=3)
+        barrier = threading.Barrier(3, timeout=3)
+
         def fetch(url):
             barrier.wait()
             if url.endswith("index.json"):
                 plural = "layouts" if "/layouts/" in url else "mods"
                 return json.dumps({plural: [{"fullName": "alice/suite", "owner": "alice", "name": "Suite"}]}).encode()
-            return b"<html></html>"
-        with patch.object(gallery, "download", side_effect=fetch):
-            self.assertEqual(len(gallery.official_packages(self.manager)), 2)
+            return example_html("mods", "layouts")
+
+        with patch.object(gallery, "download", side_effect=fetch) as request:
+            self.assertEqual(len(gallery.official_packages(self.manager)), 4)
+            self.assertEqual(request.call_count, 3)
+            self.assertEqual(request.call_args_list.count(call(gallery.EXAMPLES_URL)), 1)
+        self.assertEqual(self.manager.catalog_errors, [])
+
+    def test_cold_offline_warns_once_per_request_without_claiming_cache_use(self):
+        self.catalog.stop()
+        with patch.object(gallery, "download", side_effect=self.offline) as fetch:
+            self.assertEqual(self.manager.build_catalog(), [])
+        self.assertEqual(fetch.call_count, 3)
+        self.assertTrue(self.manager.stale)
+        self.assertEqual(len(self.manager.catalog_errors), 3)
+        self.assertTrue(all(warning.startswith("Offline: https://") for warning in self.manager.catalog_errors))
+        self.assertEqual(list(Path(self.manager.cache_dir).glob("official-*.json")), [])
+
+    def test_invalid_index_refresh_preserves_bytes_and_timestamp(self):
+        self.catalog.stop()
+        path = Path(self.manager.cache_dir) / "official-mods-index.json"
+        path.write_text(json.dumps([self.pkg]))
+        os.utime(path, (1, 1))
+        initial = path.read_bytes(), path.stat().st_mtime_ns
+        for body in (b'{"mods": [', b'{"modCount": 1, "mods": []}'):
+            with self.subTest(body=body):
+                def fetch(url):
+                    if url.endswith("/mods/index.json"):
+                        return body
+                    return b'{"layouts": []}' if url.endswith("index.json") else example_html("mods", "layouts")
+                with patch.object(gallery, "download", side_effect=fetch):
+                    packages = self.manager.build_catalog()
+                self.assertIn(self.pkg["id"], [pkg["id"] for pkg in packages])
+                self.assertTrue(self.manager.stale)
+                self.assertEqual(len(self.manager.catalog_errors), 1)
+                self.assertIn("Using cached catalog: Invalid official index", self.manager.catalog_errors[0])
+                self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), initial)
+
+    def test_examples_fall_back_to_index_and_preserve_existing_per_kind_caches(self):
+        self.catalog.stop()
+        path = Path(self.manager.cache_dir) / "official-mods-examples-v2.json"
+        cached = dict(self.pkg, collection="example", preview_url="https://herdr.dev/example.jpg")
+        path.write_text(json.dumps([cached]))
+        os.utime(path, (1, 1))
+        item = {"fullName": gallery.EXAMPLES_REPO, "owner": "herdrdev", "name": "Example",
+                "path": "example", "layoutFiles": ["layouts/example.json"], "headCommit": "layout-revision"}
+
+        def fetch(url):
+            if url == gallery.EXAMPLES_URL:
+                return b"<html></html>"
+            return b'{"mods": []}' if url.endswith("/mods/index.json") else json.dumps({"layouts": [item]}).encode()
+
+        with patch.object(gallery, "download", side_effect=fetch) as request:
+            mod, layout = gallery.official_packages(self.manager)
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual(mod, cached)
+        self.assertEqual((layout["collection"], layout["layouts"], layout["commit"]),
+                         ("example", ["example"], "layout-revision"))
+        self.assertIn("Using cached catalog: No mods examples", "\n".join(self.manager.catalog_errors))
+        self.assertIn("No layouts examples", "\n".join(self.manager.catalog_errors))
+        self.assertEqual(json.loads(path.read_text()), [cached])
+
+    @staticmethod
+    def offline(url):
+        raise LookupError(f"Offline: {url}")
 
     def test_browsing_during_mutation_does_not_overwrite_records(self):
         self.write("mods/panel/main.js", "original")

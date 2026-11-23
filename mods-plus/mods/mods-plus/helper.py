@@ -291,15 +291,16 @@ class PackageManager:
                 json.dump(data, f)
             os.replace(f.name, path)
             return data
-        except Exception as e:
-            if filename.startswith("official-"):
-                self.stale = True
-                self.catalog_errors.append(f"Using cached catalog: {e}")
-            if os.path.isfile(path):
-                self.stale = True
+        except Exception as error:
+            try:
                 with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            raise e
+                    data = json.load(f)
+            except (OSError, ValueError):
+                raise error from None
+            self.stale = True
+            if filename.startswith("official-"):
+                self.catalog_errors.append(f"Using cached catalog: {error}")
+            return data
 
     def branch_tree(self, repo: str, branch: str = "HEAD", refresh=False):
         def fetch():

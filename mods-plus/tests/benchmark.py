@@ -1,6 +1,6 @@
 """Transport/helper measurements, using real curl against a controlled loopback server.
 
-No package is installed. --live records the four official feeds once, then replays
+No package is installed. --live records the official feeds once, then replays
 their metadata with 32 KiB media and a 20 ms server delay. Results are body bytes,
 not TLS/header bytes, and exclude the native bridge and GPU. All data stays in /tmp.
 """
@@ -30,25 +30,34 @@ gallery = helper.gallery
 download = gallery.download
 feeds = {}
 live = []
-for plural in ("mods", "layouts"):
-    for url in (f"https://assets.herdr.dev/{plural}/index.json", f"https://herdr.dev/{plural}/"):
-        snapshot = args.feeds / (plural + (".json" if url.endswith("index.json") else ".html")) if args.feeds else None
-        if snapshot and snapshot.exists() and not args.live:
-            feeds[url] = snapshot.read_bytes()
-            continue
-        if args.live:
-            started = time.perf_counter()
-            feeds[url] = download(url)
-            live.append({"url": url, "bytes": len(feeds[url]), "ms": (time.perf_counter() - started) * 1000})
-            if snapshot:
-                snapshot.parent.mkdir(parents=True, exist_ok=True)
-                snapshot.write_bytes(feeds[url])
-        elif url.endswith("index.json"):
-            feeds[url] = json.dumps({plural: [dict(fullName=f"fixture/catalog-{n}", owner=f"author-{n // 4}",
-                path="panel", name=f"Panel {n:04}", stars=1000-n, modNames=[f"fixture-{n}"],
-                previewUrl=f"https://assets.herdr.dev/previews/{plural}-{n}.png") for n in range(96 if plural == "mods" else 24)]}).encode()
-        else:
-            feeds[url] = b"<html></html>"
+snapshots = {f"https://assets.herdr.dev/{plural}/index.json": f"{plural}.json" for plural in ("mods", "layouts")}
+if hasattr(gallery, "EXAMPLES_URL"):
+    snapshots[gallery.EXAMPLES_URL] = "gallery.html"
+else:  # Allow --runtime to point to the previous implementation for comparison.
+    snapshots.update({f"https://herdr.dev/{plural}/": f"{plural}.html" for plural in ("mods", "layouts")})
+for url, filename in snapshots.items():
+    snapshot = args.feeds / filename if args.feeds else None
+    if snapshot and snapshot.exists() and not args.live:
+        feeds[url] = snapshot.read_bytes()
+        continue
+    if args.live:
+        started = time.perf_counter()
+        feeds[url] = download(url)
+        live.append({"url": url, "bytes": len(feeds[url]), "ms": (time.perf_counter() - started) * 1000})
+        if snapshot:
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
+            snapshot.write_bytes(feeds[url])
+    elif filename.endswith(".json"):
+        plural = Path(filename).stem
+        feeds[url] = json.dumps({plural: [dict(fullName=f"fixture/{plural}-{n}", owner=f"author-{n // 4}",
+            path="panel", name=f"Panel {n:04}", stars=1000-n, modNames=[f"fixture-{n}"],
+            previewUrl=f"https://assets.herdr.dev/previews/{plural}-{n}.png") for n in range(96 if plural == "mods" else 24)]}).encode()
+    else:
+        feeds[url] = "".join(
+            f'<div data-kind="example" data-type="{plural}" data-name="Example" data-owner="herdrdev" '
+            f'data-gh="https://github.com/herdrdev/examples/tree/main/{plural}"></div>'
+            for plural in ("mods", "layouts")
+        ).encode()
 
 requests = []
 media = b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", 640, 400) + b"\0" * (32768 - 24)
@@ -80,9 +89,8 @@ try:
                 started = time.perf_counter()
                 manager.cache_only = True
                 cached = manager.build_catalog()
-                stale = manager.stale
-                if stale:
-                    manager.cache_only = False
+                if manager.stale:
+                    manager = helper.PackageManager(root)
                     packages = manager.build_catalog()
                 else:
                     packages = cached
@@ -106,7 +114,7 @@ try:
                             else:
                                 images += 1
                 results.append(dict(sample=sample, phase=phase, packages=len(packages), shown=len(visible),
-                    cached_packages=len(cached), stale=stale, catalog_ms=round(catalog_ms, 3),
+                    cached_packages=len(cached), stale=manager.stale, catalog_ms=round(catalog_ms, 3),
                     media_ms=round((time.perf_counter()-started)*1000, 3), requests=len(requests),
                     media_requests=len(requests)-before_media, unique_urls=len({r["url"] for r in requests}),
                     bytes=sum(r["bytes"] for r in requests), images=images, errors=errors))
