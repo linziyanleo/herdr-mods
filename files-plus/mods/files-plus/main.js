@@ -5,7 +5,7 @@ import { FilesPanel } from "./workspace.js";
 import { prune, basename, relativePath } from "./roots.js";
 import { workspaceSnapshot, changeRoots } from "./config.js";
 import { appearance } from "./appearance.js";
-import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
+import { CLIPBOARD, menuItems, menuLayout, ensureTarget, insertReference, insertWorkspaceContext, paste, createEntry, renameEntry, trashEntry, reveal, changed } from "./actions.js";
 import { TITLES, metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { renderDrag } from "./drag.js";
 import { OPEN_LOCATION, OPEN_OPTIONS, openLocation } from "./preferences.js";
@@ -62,6 +62,7 @@ export default class FilesPlus extends FilesPanel {
       try {
         ensureTarget(target);
         if (item.id === "agent") await insertReference(target, cx);
+        else if (item.id === "workspace-context") await insertWorkspaceContext(target, cx, () => !this.closed);
         else if (item.id === "copy") setShared(CLIPBOARD, { path: target.path, kind: target.kind, on: target.on });
         else if (item.id === "paste") await paste(target);
         else if (item.id === "path") cx.write_to_clipboard(target.path);
@@ -71,6 +72,7 @@ export default class FilesPlus extends FilesPanel {
         // Keep this owner alive until its asynchronous operation has finished.
         closeOverlay(props().overlay);
       } catch (error) {
+        if (this.closed) return;
         this.error = error.message || String(error); this.busy = false; cx.notify();
         this.resizeMenu(cx);
       }
@@ -184,5 +186,5 @@ export default class FilesPlus extends FilesPanel {
     prune();
     return this.renderPanel(cx);
   }
-  close() { this.input?.release(); super.close(); }
+  close() { this.closed = true; this.input?.release(); super.close(); }
 }

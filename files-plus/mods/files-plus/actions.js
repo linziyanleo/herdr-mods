@@ -1,5 +1,6 @@
-import { exec, focused, panes, spaces, window, home, appHome, readTextFile, shared, setShared, run } from "herdr";
+import { agents, exec, focused, panes, spaces, terminals, window, home, appHome, readTextFile, shared, setShared, run } from "herdr";
 import { basename, dirname, joinPath, contains, relativePath, workspaceOf } from "./roots.js";
+import { browsingFolder } from "./browsing.js";
 import { textWidth } from "./metrics.js";
 
 export function menuLayout(items, statusText, metrics, viewport, pointer, zoom = 1) {
@@ -51,7 +52,50 @@ export function reference(target) {
   const path = cwd && contains(target.root, cwd) && contains(cwd, target.path) ? relativePath(cwd, target.path) : target.path;
   return `@${/[\s'"\\]/.test(path) ? JSON.stringify(path) : path} `;
 }
-export async function insertReference(target, cx) {
+function workspaceContext(target) {
+  const entry = workspaceOf(target.space);
+  if (!entry || entry.error || browsingFolder(target.space, target.on)) return null;
+  const paths = [...new Set(entry.folders.map(folder => folder.path))];
+  if (paths.length < 2 || paths.some(path => /[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(path))) return null;
+  const space = spaces().find(s => s.active && s.id === target.space && s.machine === target.on);
+  const tab = space?.tabs.find(t => t.active)?.id, address = target.active?.terminal;
+  if (!tab || !address || address.includes("/")) return null; // Declared workspaces are local.
+  const focus = focused();
+  if (focus && (focus.space !== space.id || focus.tab !== tab || focus.terminal && (focus.shown || focus.terminal) !== address)) return null;
+  const agent = agents().find(a => a.address === address && a.space === space.id && a.tab === tab);
+  if (agent?.status !== "idle" && agent?.status !== "done") return null;
+  const terminal = terminals().find(t => t.address === address && t.state === "live");
+  if (!terminal) return null;
+  return { tab, file: entry.file ?? null, paths, app: agent.app ?? null, created: terminal.created_ms ?? null };
+}
+
+export function captureWorkspaceContext(target) {
+  if (target.kind !== "root") return null;
+  const context = workspaceContext(target);
+  if (!context?.paths.includes(target.path)) return null;
+  if (!focused()?.terminal && agents().filter(a => a.space === target.space && a.tab === context.tab).length !== 1) return null;
+  return context;
+}
+
+export async function insertWorkspaceContext(target, cx, current) {
+  const context = target.workspaceContext;
+  const validate = () => {
+    const live = current() && workspaceContext(target);
+    if (!live || live.tab !== context.tab || live.file !== context.file || live.app !== context.app || live.created !== context.created ||
+      JSON.stringify(live.paths) !== JSON.stringify(context.paths)) {
+      throw new Error("The workspace roots or agent terminal changed. Reopen the root menu to try again.");
+    }
+  };
+  // A single line also avoids passing a line break to agents using an unbracketed paste mode.
+  await pasteCaptured(target, cx, () => {
+    const roots = context.paths.map(path => JSON.stringify(path)).join(", ");
+    return `This session is in a multi-root workspace with these root directories: ${roots}. Check each listed root for applicable harness or instruction files.`;
+  }, validate);
+}
+
+export async function insertReference(target, cx) { await pasteCaptured(target, cx, () => reference(target)); }
+
+async function pasteCaptured(target, cx, getText, validate) {
   ensureTarget(target);
   const active = target.active;
   if (!active?.terminal) throw new Error("There is no active terminal in this space");
@@ -61,10 +105,11 @@ export async function insertReference(target, cx) {
     ensureTarget(target);
     const space = spaces().find(s => s.id === target.space), tabs = new Set(space.tabs.map(t => t.id));
     if (active.pane && !panes().some(p => p.pane === active.pane && tabs.has(p.tab) && (p.shown || p.terminal) === active.terminal)) throw new Error("The target terminal is no longer available");
+    validate?.();
   };
   validateDestination();
   const previous = cx.read_from_clipboard();
-  const text = reference(target);
+  const text = getText();
   // run() queues a command. Yield before reading focus or restoring clipboard text.
   run("pane.focus", { terminal: active.terminal });
   await cx.sleep(0);
@@ -176,6 +221,7 @@ export function menuItems(target) {
   const clip = shared(CLIPBOARD), root = target.kind === "root" || target.path === target.root;
   return [
     { id: "agent", label: "Add to agent (@)", enabled: Boolean(target.active?.terminal) },
+    ...(target.workspaceContext ? [{ id: "workspace-context", label: "Paste workspace roots to agent", enabled: true }] : []),
     { id: "copy", label: "Copy", enabled: true },
     { id: "paste", label: "Paste", enabled: Boolean(clip && clip.on === target.on) },
     { id: "path", label: "Copy path", enabled: true },

@@ -5,7 +5,7 @@ import { props, nextCommand, readTextFile, writeTextFile, spaces, shared, setSha
 import { setBrowsingFolder } from "./browsing.js";
 import { location } from "./workspace.js";
 import { parseConfig, setWorkspace } from "./roots.js";
-import { menuItems, menuLayout } from "./actions.js";
+import { captureWorkspaceContext, menuItems, menuLayout } from "./actions.js";
 import { metrics, viewport, zoom, dialogLayout } from "./metrics.js";
 import { fps_monitor } from "gpui-fps";
 import { workspaceSnapshot, changeRoots } from "./config.js";
@@ -59,6 +59,8 @@ export default class NativeDriver extends FilesPlus {
             this.refresh(cx);
           } else if (request.type === "menu" || request.type === "dialog") {
             const target = request.target || this.target(request.path, request.kind || "file", request.root);
+            const context = request.type === "menu" && !request.target && captureWorkspaceContext(target);
+            if (context) target.workspaceContext = context;
             const pointer = request.pointer || { x: 520, y: 110 }, geometry = request.type === "menu" ? menuLayout(menuItems(target), request.error, metrics(), viewport(), pointer, zoom()) : dialogLayout(request.action, target);
             this.requestOverlay = openOverlay({ mod: this.nativeMod, kind: request.type === "menu" ? "popup" : "dialog", modal: true, ...geometry,
               props: { role: request.type, target, geometry, pointer, error: request.error, choose: request.choose, action: request.action, submit: request.submit, name: request.name, base: spec.base, driverMod: this.nativeMod, owner: this.nativeOwnerEnabled } });

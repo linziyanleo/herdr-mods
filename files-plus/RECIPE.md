@@ -101,6 +101,16 @@ Add folder works for local POSIX spaces, including ordinary single-folder spaces
 
 Existing workspace files use a captured expected-text write: preserve path spelling, string entries, unknown fields and two-space formatting; new folders use relative paths. A conflicting disk edit reloads instead of overwriting the file. A closed or replaced target cannot be recreated by a late completion.
 
+### Paste workspace roots to an agent
+
+In a local workspace with two or more distinct declared roots, right-click a root and choose **Paste workspace roots to agent**. The action appears for a live agent in the active tab that reports idle or done. Focus the intended agent first when the tab has multiple agents. The action uses the agent captured when the menu opens and the declared paths in workspace order. A browse override, a single root, a plain shell, a working or blocked agent, or a path with control characters prevents the action from appearing.
+
+The paste uses the same focus and clipboard flow as **Add to agent (@)**. It inserts one editable line with quoted absolute paths and a request to check each root for applicable instructions. The user decides when to submit it. If the space, tab, terminal or root list changes, reopen the menu to capture the current context. Closing the menu cancels a paste that has yet to reach the terminal.
+
+**New terminal here** opens a shell. Herdr's agent launch commands accept `task` as the first message. Use the root menu to paste the draft once the new agent is ready.
+
+The multi-root agent context proposal comes from [@teomurgi's PR #9](https://github.com/linziyanleo/herdr-mods/pull/9).
+
 ### Adaptive panel fitting
 
 Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
@@ -289,3 +299,9 @@ Installation follow-up: the three changed runtime files were installed in the ma
 `node --experimental-vm-modules --test files-plus/tests/location.test.mjs` exercises third-party pane focus, repeated terminal changes, independent spaces, local/remote identity (including terminal blocks), manual Browse, paired preview/pins, cold copies and removed spaces through the production location resolver. Eight of the eleven groups reproduce failures on the preceding `b0c43c1` runtime. These are host-model behavioral tests, not physical pointer/keyboard acceptance. No normal app-home installation or live UI changes are part of this verification.
 
 Final-code validation: all 216 Node tests passed with `node --experimental-vm-modules --test --test-concurrency=1 files-plus/tests/*.test.mjs preview-plus/tests/*.test.mjs mods-plus/tests/*.test.cjs tests/*.test.mjs`; the affected location/browsing/panel subset passed 31 tests, and `herdr-app check files-plus/mods/files-plus` passed on macOS / Herdr 0.1.16. The initial concurrent aggregate hit an unchanged Preview Plus PDF readiness timeout; the serial final-code run passed without changing that test. Physical UI acceptance and a new screenshot were deliberately not run, to leave the daily app undisturbed.
+
+### Workspace context paste verification
+
+`node --experimental-vm-modules --test files-plus/tests/workspace-context.test.mjs` exercises menu capture, distinct roots, eligible agents, stale destinations, cancellation and the exact pasted text. The serial repository suite passed 242 tests, and `herdr-app check files-plus/mods/files-plus` passed on macOS with Herdr 0.1.16.
+
+`native-session.mjs --background` ran the native menu in a disposable app home. Raw terminal recorders used [Herdr's OSC 7501 status protocol](https://herdr.dev/core/#status-from-the-source) to report idle or working. The idle recorder received both root paths on one line without Enter. Opening and closing a menu produced no input. A switched tab or space and a closed terminal rejected the captured target. `herdr-app shot` showed the action with two roots and an idle recorder, and its absence with one root or a working recorder. Physical pointer input, real coding agents and remote hosts were outside this run.

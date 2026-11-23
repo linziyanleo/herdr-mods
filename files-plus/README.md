@@ -20,6 +20,10 @@ Search includes hidden and Git-ignored files, skips `.git` and does not follow d
 
 Up/down selects a result. A click uses the chosen opening location. Enter uses the temporary Preview slot when paired; otherwise it uses the chosen location. Clear or Escape restores the tree with its expanded folders intact.
 
+## Paste workspace roots to an agent
+
+Focus an idle agent in a workspace with at least two distinct declared roots. Right-click a workspace root in Files Plus and choose **Paste workspace roots to agent**. The list goes into that agent's input as one editable line. Review it and submit it when ready.
+
 ## Keyboard workflow
 
 Use the [Files / Preview / terminal example](../preview-plus/examples/files-preview-agent.json) with both packages. It contains no personal paths or shortcuts; copying or selecting it is an explicit setup action. The entry command `files-plus.search` focuses search. Bind it only to a free key in your own cloned layout/setup if desired.

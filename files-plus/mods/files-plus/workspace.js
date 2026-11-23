@@ -3,7 +3,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { spaces, panes, terminals, focused, exec, readTextFile, watchFolder, checking, nextCommand, window as appWindow, props, shared, setShared, run, openOverlay, layout, notify, pickFolder } from "herdr";
 import { workspaceOf, describeRoots, reloadWorkspace, dirname, basename, joinPath, label, shortPath, rootOf, relativePath, contains, READ } from "./roots.js";
-import { captureTarget, insertReference, installed, REVISION, menuLayout, menuItems } from "./actions.js";
+import { captureTarget, captureWorkspaceContext, insertReference, installed, REVISION, menuLayout, menuItems } from "./actions.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { visibleRows, retainClosingRows, TreeView, RowChunk, CHUNK_SIZE, FOLDER_MOTION } from "./tree.js";
 import { metrics, calibrationProbe, viewport, zoom, dialogLayout } from "./metrics.js";
@@ -491,7 +491,10 @@ export class FilesPanel extends View {
   target(path, kind, root) { return captureTarget(this.spaceId, path, kind, root, this.on, this.rootInfo?.find(folder => folder.path === root)?.physical || root); }
   menu(path, kind, root, event, cx) {
     cx.stop_propagation();
-    const target = this.target(path, kind, root), geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
+    const target = this.target(path, kind, root);
+    const context = captureWorkspaceContext(target);
+    if (context) target.workspaceContext = context;
+    const geometry = menuLayout(menuItems(target), "", metrics(), viewport(), event.position, zoom());
     openOverlay({ mod: "files-plus", kind: "popup", ...geometry, props: { role: "menu", target, geometry, pointer: event.position } });
   }
   syncTree(cx, loc = this.location()) {

@@ -24,7 +24,7 @@ export async function runtime(t) {
   state.focus = { space: "s1", tab: "tab1", pane: "p1", terminal: "t1", cwd: dir };
   const host = {
     home: () => path.join(dir, "home"), appHome: () => path.join(dir, "app"),
-    spaces: () => state.spaces, panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), focused: () => state.focus,
+    spaces: () => state.spaces, panes: () => state.panes, terminals: () => state.terminals || state.panes.map(p => ({ address: p.terminal, state: "live" })), agents: () => state.agents || [], focused: () => state.focus,
     machines: () => [{ name: null, layout: "ready" }], window: () => ({ platform: state.platform }), settings: () => state.settings, theme: () => state.theme, layout: () => state.layout,
     props: () => state.props, shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; },
     readTextFile: async file => {
