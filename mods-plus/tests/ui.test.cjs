@@ -390,6 +390,68 @@ test('manual check updates cards and footer without catalog reload and reports p
   assert.match(textOf(find([view.renderEntry({})], 'plugins')), /Plugins\s+2/);
 });
 
+test('installed entry and details preserve catalog state and reuse update review', async () => {
+  const { view, values, click, context, drain } = setup();
+  const cx = context(true), calls = [];
+  const active = { id: 'owner/repo/one', name: 'One', kind: 'mod', activation: 'active', recorded: true,
+    provenance: 'recorded', source: { repo: 'owner/repo', branch: 'main', commit: 'a'.repeat(40) },
+    candidate: { commit: 'b'.repeat(40), conflicts: ['mods/one/main.js'] },
+    drift: [{ path: 'mods/one/main.js', status: 'change' }], check: { state: 'failed', error: 'offline', at: 1000 } };
+  const stored = { id: 'owner/repo/two', name: 'Two', kind: 'layout', activation: 'stored', recorded: true,
+    provenance: 'recorded', check: { state: 'unchanged', at: 1000 } };
+  const loose = { id: 'local:mod:clone', name: 'clone', kind: 'mod', activation: 'active', provenance: 'ambiguous',
+    matches: [{ repo: 'owner/repo', branch: 'main', commit: 'a'.repeat(40) }, { repo: 'other/repo', branch: 'dev' }] };
+  view.view = 'catalog';
+  view.query = 'existing query'; view.tab = 'layout'; view.filter = 'installed'; view.limit = 48;
+  view.packages = [{ ...importedPackage, name: 'Existing query', kind: 'layout', collection: 'community', installed: true }];
+  view.acceptSettings({ ...view.settings, prepared_updates_count: 1, prepared_update_ids: [active.id] });
+  view.catalogScroll.scroll_to_item = () => assert.fail('Catalog scroll was reset');
+  view.loadMedia = () => {};
+  view.helper = async args => {
+    calls.push(Array.from(args));
+    if (args[0] === 'installed') return { cache: 'incomplete', count: 2, packages: [active, stored, loose] };
+    if (args[0] === 'details') return { ...importedPackage, inventory: active, recipe: 'Stored recipe' };
+    return proposal('update');
+  };
+  click(find([view.render(cx)], 'installed-packages'));
+  await drain();
+  const rows = view.renderInstalled({});
+  assert.match(rows.map(textOf).join(' '), /Source cache unavailable or incomplete/);
+  assert.match(textOf(find(rows, `installed-${stored.id}`)), /No update at last check.*Layout · Stored only/);
+  assert.match(textOf(find(rows, `installed-${active.id}`)), /Update Available · Local changes · Conflicts at preparation · Last check failed.*Mod · Active/);
+  click(find(rows, `installed-${loose.id}`));
+  assert.deepEqual(calls, [['installed']]);
+  await drain();
+  const looseDetails = view.renderDetails({});
+  assert.match(looseDetails.map(textOf).join(' '), /Source ambiguous.*Cached byte match · owner\/repo.*Cached byte match · other\/repo/);
+  for (const id of ['review-install', 'review-update', 'remove']) assert.equal(find(looseDetails, id), undefined);
+  click(find(looseDetails, 'back')); await drain();
+  click(find(view.renderInstalled({}), `installed-${active.id}`)); await drain();
+  click(find(view.renderDetails({}), 'review-update')); await drain();
+  assert.deepEqual(calls.slice(-2), [['details', active.id, '--installed'], ['review', active.id, '--update']]);
+  click(find(view.renderDetails({}), 'back')); await drain();
+  click(find(view.renderInstalled({}), 'back-installed'));
+  assert.equal(view.view, 'catalog');
+  assert.deepEqual([view.query, view.tab, view.filter, view.limit], ['existing query', 'layout', 'installed', 48]);
+  assert.equal(values.get('mods-plus.updates').count, 1);
+});
+
+test('installed load failures and dismissed replies cannot look current', async () => {
+  const { view, context } = setup(), cx = context(true);
+  view.loadMedia = () => {};
+  view.helper = async () => { throw new Error('Read failed'); };
+  await view.showInstalled(cx);
+  assert.match(view.renderInstalled({}).map(textOf).join(' '), /Could not load installed packages · Read failed/);
+  let resolve;
+  view.helper = () => new Promise(done => { resolve = done; });
+  const pending = view.showInstalled(cx);
+  view.back(cx);
+  resolve({ cache: 'cached', count: 0, packages: [] });
+  await pending;
+  assert.equal(view.view, 'catalog');
+  assert.equal(view.installed, null);
+});
+
 test('failed save resets controls and presents an error without changing the selection', async () => {
   const { view, click, drain } = setup();
   view.helper = async () => { throw new Error('disk unavailable'); };

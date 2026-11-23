@@ -170,11 +170,14 @@ class CatalogTests(unittest.TestCase):
     def test_browsing_during_mutation_does_not_overwrite_records(self):
         self.write("mods/panel/main.js", "original")
         with helper.file_lock(self.manager.lock_file):
-            self.assertTrue(self.manager.build_catalog()[0]["installed"])
+            pkg = self.manager.build_catalog()[0]
+            self.assertIsNone(pkg["installed"])
+            self.assertIn("Ownership has not been recorded", pkg["collision"])
             self.assertFalse(Path(self.manager.records_file).exists())
-        self.manager.records = self.manager._load_records()
-        self.assertTrue(self.manager.build_catalog()[0]["installed"])
-        saved = json.loads(Path(self.manager.records_file).read_text())
+        fresh = helper.PackageManager(self.temp.name)
+        fresh.branch_tree = self.manager.branch_tree
+        self.assertTrue(fresh.build_catalog()[0]["installed"])
+        saved = json.loads(Path(fresh.records_file).read_text())
         self.assertTrue(saved[self.pkg["id"]]["associated"])
 
     def test_catalog_cli_reads_while_package_lock_is_held(self):
@@ -194,6 +197,49 @@ class CatalogTests(unittest.TestCase):
         self.write("mods/panel/main.js", "original")
         self.manager.build_catalog()
         self.assertEqual(json.loads(Path(self.manager.records_file).read_text())[self.pkg["id"]], changed)
+
+    def test_ambiguous_sources_cannot_be_associated_by_search_or_details(self):
+        second = dict(self.pkg, id="bob/suite/tools/panel", repo="bob/suite", name="Other")
+        with patch.object(gallery, "official_packages", side_effect=lambda _: [dict(self.pkg), dict(second)]):
+            self.write("mods/panel/main.js", "original")
+            result = self.manager.build_catalog(query="Other")
+            self.assertIsNone(result[0]["installed"])
+            self.assertIn("multiple catalog sources", result[0]["collision"])
+            with patch.object(self.manager, "raw_content", return_value=b"Recipe"), patch.object(gallery, "media", return_value=[]):
+                details = self.manager.get_details(self.pkg["id"])
+            self.assertIsNone(details["installed"])
+            self.assertEqual(self.manager.records, {})
+            self.assertFalse(Path(self.manager.records_file).exists())
+
+    def test_incomplete_catalog_cannot_promote_a_cached_match(self):
+        self.write("mods/panel/main.js", "original")
+        self.manager.catalog_errors = ["offline"]
+        self.assertIsNone(self.manager.build_catalog()[0]["installed"])
+        self.assertEqual(self.manager.records, {})
+
+    def test_installed_snapshot_distinguishes_builtin_unknown_and_cached_matches(self):
+        self.catalog.stop()
+        other = dict(self.pkg, id="bob/suite/tools/panel", repo="bob/suite", name="Other")
+        for plural in ("mods", "layouts"):
+            for collection in ("index", "examples-v2"):
+                cache = Path(self.manager.cache_dir) / f"official-{plural}-{collection}.json"
+                cache.write_text(json.dumps([self.pkg, other] if (plural, collection) == ("mods", "index") else []))
+                os.utime(cache, (1, 1))
+        self.manager.shipped = {"built-in"}
+        for name in ("built-in", "loose-clone", "panel"):
+            self.write(f"mods/{name}/main.js", "original")
+        self.manager.cache_only = True
+        with patch.object(gallery, "download", side_effect=AssertionError("Unexpected network access")) as fetch:
+            result = gallery.installed_packages(self.manager)
+        rows = {row["name"]: row for row in result["packages"]}
+        self.assertEqual(result["cache"], "stale")
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(rows["built-in"]["provenance"], "built-in")
+        self.assertEqual(rows["loose-clone"]["provenance"], "unknown")
+        self.assertEqual(rows["panel"]["provenance"], "ambiguous")
+        self.assertEqual({source["repo"] for source in rows["panel"]["matches"]}, {"alice/suite", "bob/suite"})
+        self.assertEqual(self.manager.records, {})
+        fetch.assert_not_called()
 
     def test_cached_catalog_and_media_do_not_refresh_network_metadata(self):
         self.catalog.stop()

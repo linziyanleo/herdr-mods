@@ -6,10 +6,10 @@ import helper
 
 
 class FixtureManager(helper.PackageManager):
-    def __init__(self, root):
+    def __init__(self, root, **kwargs):
         if not (Path(root) / "mods-plus-fixture.json").is_file():
             raise ValueError("Use the disposable home prepared by native-fixture.mjs")
-        super().__init__(root)
+        super().__init__(root, **kwargs)
         self.fixture = json.loads((Path(root) / "mods-plus-fixture.json").read_text())
         self.blobs = {helper.blob_sha(value.encode()): value.encode() for value in self.fixture["files"].values()}
 

@@ -91,7 +91,7 @@ def file_lock(lock_path: str, timeout: float = 10.0):
 class PackageManager:
     ignored_file = staticmethod(ignored)
 
-    def __init__(self, root: str = HERDR_APP):
+    def __init__(self, root: str = HERDR_APP, *, read_only=False):
         self.root = os.path.abspath(root)
         self.data_dir = os.path.join(self.root, "data", "mods-plus")
         self.cache_dir = os.path.join(self.data_dir, "cache")
@@ -105,8 +105,9 @@ class PackageManager:
         self.records_file = os.path.join(self.data_dir, "packages.json")
         self.settings_file = os.path.join(self.data_dir, "settings.json")
 
-        for d in (self.data_dir, self.cache_dir, self.stage_dir, self.packages_dir, self.updates_dir, self.backups_dir):
-            os.makedirs(d, exist_ok=True)
+        if not read_only:
+            for d in (self.data_dir, self.cache_dir, self.stage_dir, self.packages_dir, self.updates_dir, self.backups_dir):
+                os.makedirs(d, exist_ok=True)
 
         self.shipped = self._load_shipped()
         self.records = self._load_records()
@@ -336,18 +337,27 @@ class PackageManager:
     def build_catalog(self, query="", kind_filter=None, status_filter="all"):
         return gallery.build_catalog(self, query, kind_filter, status_filter)
 
-    def associate(self, pkg_id, record, previous):
-        # Browsing must not wait for a long update. Persist newly proven ownership
-        # only if no package operation has changed that record since inspection.
+    def associate(self, proposals):
+        # Recheck ownership under the existing lock, including overlapping records.
+        confirmed = set()
         try:
             with file_lock(self.lock_file, timeout=0.1):
                 current = self._load_records()
-                if current.get(pkg_id, {}) == previous:
+                for pkg_id, record in proposals.items():
+                    if current.get(pkg_id) != self.records.get(pkg_id):
+                        continue
+                    if any(other != pkg_id and (other.replace("/", "-") == pkg_id.replace("/", "-") or
+                           (rec.get("installed") and gallery.units_of(rec) & gallery.units_of(record)))
+                           for other, rec in current.items()):
+                        continue
                     current[pkg_id] = record
+                    confirmed.add(pkg_id)
+                if confirmed:
                     self.records = current
                     self._save_records()
         except TimeoutError:
             self.stale = True
+        return confirmed
 
     def raw_content(self, repo: str, branch: str, path: str) -> bytes:
         """Fetches raw file content directly, cached on disk."""
@@ -925,17 +935,29 @@ Full candidate RECIPE.md:
             for pkg_id, candidate, error in results:
                 if candidate:
                     candidates.append(candidate)
-                if error:
+                if error is not None:
                     errors.append({"id": pkg_id, "error": error})
 
         self.settings = self._load_settings()
+        completed_at = time.time()
+        failed = {item["id"]: item["error"] for item in errors}
+        prepared = {item["id"] for item in candidates}
+        self.settings["last_check_results"] = {"at": completed_at, "packages": {
+            pkg_id: {"baseline": self.check_baseline(record),
+                     "state": "failed" if pkg_id in failed else "prepared" if pkg_id in prepared else "unchanged",
+                     "error": failed.get(pkg_id)} for pkg_id, record in installed
+        }}
         if not errors:
-            self.settings["last_check"] = time.time()
+            self.settings["last_check"] = completed_at
         self._save_settings()
         self._save_records()
         settings = self.get_settings()
         return {"ok": not errors, "candidates": candidates, "settings": settings,
                 "count": settings["prepared_updates_count"], "errors": errors}
+
+    @staticmethod
+    def check_baseline(record):
+        return review.token([record.get(key) for key in ("repo", "subdir", "ref", "commit", "files")])
 
     def _check_update(self, pkg_id, record, trees, downloads):
         cand_dir = None
@@ -1035,7 +1057,7 @@ Full candidate RECIPE.md:
             if cand_dir is not None:
                 record["has_update"] = False
                 rmtree(os.path.join(self.updates_dir, pkg_id.replace("/", "-")))
-            return pkg_id, None, str(error)
+            return pkg_id, None, str(error) or type(error).__name__
 
     def _three_way_merge(self, local_path: str, base_sha: str, cand_sha: str, repo: str, content=False):
         """Attempts diff3 merge, preserving local modifications without conflicts."""
@@ -1286,6 +1308,7 @@ def main():
     parser.add_argument("--progress-file", help=argparse.SUPPRESS)
 
     sub = parser.add_subparsers(dest="command")
+    sub.add_parser("installed")
 
     # catalog
     p_catalog = sub.add_parser("catalog")
@@ -1300,6 +1323,7 @@ def main():
     # details
     p_details = sub.add_parser("details")
     p_details.add_argument("id")
+    p_details.add_argument("--installed", action="store_true")
 
     p_discover = sub.add_parser("discover")
     p_discover.add_argument("source")
@@ -1362,17 +1386,20 @@ def main():
             parser.error("--interval-value and --interval-unit must be supplied together")
         if args.interval is not None and args.interval_value is not None:
             parser.error("Use either --interval or --interval-value with --interval-unit")
-    mgr = PackageManager(args.app_home)
-    mgr.cache_only = args.command == "catalog" and args.cached
+    installed_read = args.command == "installed" or (args.command == "details" and args.installed)
+    mgr = PackageManager(args.app_home, read_only=True) if installed_read else PackageManager(args.app_home)
+    mgr.cache_only = installed_read or (args.command == "catalog" and args.cached)
 
-    readonly = args.command in ("catalog", "details", "media", "prompt", "copy-prompt") or (args.command == "settings" and
+    readonly = args.command in ("installed", "catalog", "details", "media", "prompt", "copy-prompt") or (args.command == "settings" and
                args.auto_update is None and args.interval is None and args.interval_value is None and args.agent is None)
     with contextlib.nullcontext() if readonly else file_lock(mgr.lock_file):
         # Another helper may have committed records while this process waited.
         mgr.records = mgr._load_records()
         mgr.settings = mgr._load_settings()
         result = None
-        if args.command == "catalog":
+        if args.command == "installed":
+            result = gallery.installed_packages(mgr)
+        elif args.command == "catalog":
             pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter)
             result = {"packages": pkgs, "count": len(pkgs), "warnings": getattr(mgr, "catalog_errors", []), "stale": mgr.stale}
         elif args.command == "media":
@@ -1382,7 +1409,7 @@ def main():
                 os.replace(out.name, args.progress_file)
             result = {"media": gallery.media(mgr, json.loads(args.ids), progress if args.progress_file else None)}
         elif args.command == "details":
-            result = mgr.get_details(args.id)
+            result = gallery.installed_details(mgr, args.id) if args.installed else mgr.get_details(args.id)
         elif args.command == "discover":
             result = mgr.discover(args.source)
         elif args.command == "review":

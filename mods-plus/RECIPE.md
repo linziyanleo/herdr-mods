@@ -10,6 +10,7 @@ Browse Herdr catalogs or import a public GitHub package. Review the files, revis
 - The dialog uses the native theme, 0.5px borders and four text sizes, 12, 13, 16 and 28px. Mods / Layouts and All / Installed / Not installed occupy the first row.
 - Community and Examples appear below with the official category counts. On the right, a settings icon sits immediately before search, followed by the Popular / Newest dropdown.
 - Update all sits at the right of the home page title. It is disabled during loading/checking/updating and reports completion, agent handoff or failures below the catalog.
+- Installed packages opens from the Plugins title row. Entries needing attention appear first. Each row shows the package kind, activation state, known source and revisions, and the reason it needs attention.
 - Responsive one-to-three-column cards show a 16:10 preview, the author's avatar, title, author and stars. Installed and update markers sit at the right. Each page reveals 24 cards; images arrive four cards at a time. Unavailable images do not block later cards.
 - Details show a large, uncropped preview above the title, author, stars and description. The adjacent Tell your agent box copies exactly its displayed installation prompt. GitHub links open the package's source folder. Package actions and the rendered recipe remain available below.
 - Review update and Remove sit beside the detail title using the Herdr theme accent and matching foreground colors. Review install appears for an uninstalled package. The action group wraps below the title on narrow panels. Remove keeps its existing second-click confirmation and uses the theme warning color while confirming.
@@ -57,9 +58,17 @@ The [implementation report](../docs/plans/interaction-performance-implementation
 
 ### Recognize existing installations
 
-The helper scans `mods/` and `layouts/`. It associates a package only when every upstream runtime file matches its Git blob hash. Extra caches and attribution files do not invalidate the match and remain outside the ownership baseline. Verified ownership survives later local edits. A record without staged or active entry files does not count as installed.
+The helper scans `mods/` and `layouts/`. The catalog associates a package only after a complete lookup finds one source for its local runtime files and every upstream runtime blob matches. Extra caches and attribution files remain outside the ownership baseline. Verified ownership survives later local edits. A record without staged or active entry files does not count as installed.
 
-Same-name collisions leave existing files untouched. If offline verification cannot establish installation, the package appears in neither Installed nor Not installed. Details explain the unknown state.
+Same-name collisions leave existing files untouched. If verification cannot establish installation, the package appears in neither Installed nor Not installed. This includes ambiguous matches and lookups blocked by an incomplete cache or source failure.
+
+### Inspect installed packages
+
+The Installed packages job reads active paths, stored package records, validated candidate files, bundled names and cached source evidence on demand. Opening the list or its details leaves installations, layouts, keys and records unchanged. A cached byte match is shown as evidence. Previous associations retain their records and show how they were established.
+
+Details show full installed and candidate revisions, local changes, conflicts found when the candidate was prepared, and recorded managed layouts and shortcuts. The comparison link uses the recorded GitHub repository and two full revisions. Review update rechecks the candidate and local state through the existing workflow.
+
+The most recent check records per-package outcomes in `settings.json`, including failures from a partial check. An outcome belongs to the source and file baseline it checked. Older records or newly applied revisions may have no matching outcome. Cached source freshness, update-check outcomes and candidate availability are shown independently. An unavailable or changed candidate cache is surfaced in the list.
 
 ### Remove packages
 
@@ -125,10 +134,13 @@ Original Mods Plus code and assets are licensed under [MIT](LICENSE). Herdr/GPUI
 12. `python3 mods-plus/tests/review.test.py` passes for multi-package discovery, preview without installation writes, invalid source rejection, revision/local drift, shortcut preservation, persisted sources, actual merges and stored-only updates.
 13. In an isolated native home, enter a source, select both package kinds, cancel and refresh reviews, confirm install, enable separately, review/apply an update and remove it. Inspect narrow/wide and light/dark states plus a `herdr-app shot` screenshot. `tests/native-fixture.mjs` prepares the home without launching it; `tests/native-verify.mjs` drives its production handlers after the coordinating agent launches it. Pointer/keyboard acceptance is separate from handler automation.
 14. `python3 mods-plus/tests/jobs.test.py` passes, including a real 31-second task after its launcher exits, duplicate requests, failed-task retry, and timeout cleanup of descendants.
+15. The isolated `native-attention.mjs` driver opens Plugins, checks a mixed set, verifies an active mod with drift and a stored layout with a candidate, shows ambiguous and unknown sources and built-ins, and confirms inventory navigation leaves the checked files unchanged. It reviews and applies the stored update through the existing actions and verifies the layout remains inactive. Catalog screenshots cover the return path. Physical input is verified separately.
 
 ## Verification record
 
-The [0.1.16 interaction/performance record](../docs/plans/interaction-performance-implementation.md) contains current network/render measurements, regression results, inspected native behavior and remaining physical checks. The records below describe earlier 0.1.13 work.
+Installed packages passed all 61 Python and 23 UI event cases, the progressive media fixture, and the source native check. On macOS with Herdr 0.1.16, the isolated overlay driver exercised the mixed check, stale and missing cache states, and read-only inventory and details. The catalog returned to the same scroll position and search, with the prepared-candidate badge preserved. A reviewed stored layout update stayed inactive. Light and dark frames were inspected. Physical mouse and keyboard input and narrower window sizes remain unverified. [Installed packages preview](installed-packages-preview.png).
+
+The [0.1.16 interaction/performance record](../docs/plans/interaction-performance-implementation.md) contains network and render measurements, prior regression results and remaining physical checks.
 
 The Update all follow-up passed 53 Python cases across helper, catalog, updates, review and acceptance suites, 15 UI event cases, and the source native check on macOS with Herdr 0.1.13. Twelve isolated native flows include a two-package mod/layout update, keeping a stored layout inactive, and copying a full batch prompt without applying it. The macOS clipboard matched the saved prompt exactly. [The native screenshot](update-all-preview.png) shows the home action, pending marker and agent handoff result. Physical pointer/keyboard and additional narrow/dark states were not exercised in this follow-up. See the [bulk-update record](../docs/plans/mods-plus.md#bulk-updates-2026-11-06) for scope and evidence.
 

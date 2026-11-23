@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 const base = await fs.mkdtemp("/tmp/mp."), app = path.join(base, "app"), control = path.join(app, "data", "native-control");
+const attention = process.argv.includes("--attention");
 const runtime = fileURLToPath(new URL("../mods/mods-plus/", import.meta.url));
 const driver = path.join(app, "mods/mods-plus-driver");
 await fs.mkdir(driver, { recursive: true });
@@ -17,16 +18,23 @@ for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py
 await fs.copyFile(fileURLToPath(new URL("native-driver.js", import.meta.url)), path.join(driver, "main.js"));
 await fs.copyFile(fileURLToPath(new URL("fixture-helper.py", import.meta.url)), path.join(driver, "fixture-helper.py"));
 await fs.writeFile(path.join(driver, "mod.json"), '{"place":"none"}');
-const render = path.join(app, "mods/mods-plus-render");
-await fs.mkdir(render, { recursive: true });
-await fs.copyFile(path.join(runtime, "main.js"), path.join(render, "panel.js"));
-await fs.copyFile(fileURLToPath(new URL("native-render.js", import.meta.url)), path.join(render, "main.js"));
-await fs.writeFile(path.join(render, "mod.json"), '{"place":"none"}');
+if (!attention) {
+  const render = path.join(app, "mods/mods-plus-render");
+  await fs.mkdir(render, { recursive: true });
+  await fs.copyFile(path.join(runtime, "main.js"), path.join(render, "panel.js"));
+  await fs.copyFile(fileURLToPath(new URL("native-render.js", import.meta.url)), path.join(render, "main.js"));
+  await fs.writeFile(path.join(render, "mod.json"), '{"place":"none"}');
+}
 await fs.mkdir(path.join(app, "mods/mods-plus"), { recursive: true });
 for (const name of ["main.js", "mod.json", "helper.py", "catalog.py", "review.py", "jobs.py", "star.svg"]) {
   await fs.copyFile(path.join(runtime, name), path.join(app, "mods/mods-plus", name));
 }
-for (const [name, source] of [["mods-plus-catalog", runtime], ...(process.env.MODS_PLUS_BASELINE ? [["mods-plus-baseline", process.env.MODS_PLUS_BASELINE]] : [])]) {
+if (attention) {
+  const overlay = path.join(app, "mods/mods-plus");
+  await fs.rename(path.join(overlay, "main.js"), path.join(overlay, "panel.js"));
+  await fs.copyFile(path.join(driver, "main.js"), path.join(overlay, "main.js"));
+}
+for (const [name, source] of attention ? [] : [["mods-plus-catalog", runtime], ...(process.env.MODS_PLUS_BASELINE ? [["mods-plus-baseline", process.env.MODS_PLUS_BASELINE]] : [])]) {
   const folder = path.join(app, "mods", name);
   await fs.mkdir(folder, { recursive: true });
   await fs.copyFile(path.join(source, "main.js"), path.join(folder, "panel.js"));
@@ -42,6 +50,31 @@ const files = {
   "two/layouts/review-fixture.json": '{"id":"root","type":"block","content":{"mod":"review-fixture"}}',
 };
 const blob = value => createHash("sha1").update(`blob ${Buffer.byteLength(value)}\0`).update(value).digest("hex");
+if (attention) {
+  const cache = path.join(app, "data/mods-plus/cache");
+  await fs.mkdir(cache, { recursive: true });
+  const source = (repo, subdir, name, mods = []) => ({ id: `${repo}/${subdir}`, repo, subdir, branch: "main",
+    commit: "c".repeat(40), name, author: "Fixture", description: "Local catalog fixture", stars: 0, pushed: "",
+    kind: "mod", collection: "community", mods, layouts: [], preview_url: "", avatar_url: "" });
+  const copies = [source("fixture/copy-first", "clone", "Copy A", ["duplicate-source"]),
+    source("fixture/copy-second", "clone", "Copy B", ["duplicate-source"])];
+  const clone = 'import {View,div} from "gpui-kit"; export default class Fixture extends View { render(){ return div().child("Clone"); } }';
+  for (const pkg of copies) {
+    const ref = createHash("sha256").update(pkg.commit).digest("hex").slice(0, 12);
+    await fs.writeFile(path.join(cache, `tree-${pkg.repo.replace("/", "-")}-${ref}.json`),
+      JSON.stringify({ HEAD: pkg.commit, "clone/mods/duplicate-source/main.js": blob(clone) }));
+  }
+  const packages = [...copies, ...Array.from({length: 36}, (_, index) =>
+    source("fixture/catalog", `entry-${index}`, `Fixture ${String(index).padStart(2, "0")}`))];
+  for (const feed of ["mods-index", "layouts-index", "mods-examples-v2", "layouts-examples-v2"]) {
+    await fs.writeFile(path.join(cache, `official-${feed}.json`), JSON.stringify(feed === "mods-index" ? packages : []));
+  }
+  for (const name of ["duplicate-source", "loose-clone"]) {
+    await fs.mkdir(path.join(app, "mods", name));
+    await fs.writeFile(path.join(app, "mods", name, "main.js"), clone);
+    await fs.writeFile(path.join(app, "mods", name, "mod.json"), '{"place":"none"}');
+  }
+}
 await fs.writeFile(path.join(app, "mods-plus-fixture.json"), JSON.stringify({ commit: "a".repeat(40), files,
   baseline: Object.fromEntries(Object.values(files).map(value => [blob(value), value])) }, null, 2));
 await fs.writeFile(path.join(app, "keys.json"), '{"global":{"cmd-shift-x":"app.palette"}}');
@@ -49,9 +82,9 @@ await fs.writeFile(path.join(app, "settings.json"), JSON.stringify({ telemetry: 
 await fs.writeFile(path.join(app, "shared.json"), JSON.stringify({ "frame.welcomed": "skipped" }));
 const version = execFileSync("herdr-app", ["--version"], { encoding: "utf8" }).trim().split(/\s+/).at(-1);
 await fs.writeFile(path.join(app, "update-notes.json"), JSON.stringify({ last_run: version, presented: [version] }));
-await fs.writeFile(path.join(app, "layouts/mods-plus-test.json"), JSON.stringify({ id: "root", type: "block",
+if (!attention) await fs.writeFile(path.join(app, "layouts/mods-plus-test.json"), JSON.stringify({ id: "root", type: "block",
   content: { mod: "mods-plus-driver", props: { control } } }, null, 2));
 const info = { base, app, control, layout: "mods-plus-test", env: { HERDR_APP_HOME: app, XDG_STATE_HOME: path.join(base, "s"),
-  XDG_CONFIG_HOME: path.join(base, "c"), HC_SESSION: "mp", HERDR_TELEMETRY: "0" } };
+  XDG_CONFIG_HOME: path.join(base, "c"), HC_SESSION: path.basename(base), HERDR_TELEMETRY: "0" } };
 await fs.writeFile(path.join(base, "session.json"), JSON.stringify(info, null, 2));
 console.log(JSON.stringify(info, null, 2));

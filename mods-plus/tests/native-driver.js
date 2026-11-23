@@ -1,10 +1,11 @@
 // Test-only subclass of the real view, using the real helper with local source fixtures.
 import ModsPlus from "./panel.js";
-import { appHome, exec, props, readTextFile, writeTextFile, watchFolder, theme } from "herdr";
+import { appHome, exec, props, readTextFile, shared, writeTextFile, watchFolder, theme } from "herdr";
 
 export default class NativeDriver extends ModsPlus {
   init(p, cx) {
-    this.control = props()?.control;
+    this.attention = Boolean(props()?.overlay);
+    this.control = this.attention ? `${appHome()}/data/native-control` : props()?.control;
     super.init(p, cx);
     if (!this.control) return;
     cx.spawn(async cx => {
@@ -22,6 +23,20 @@ export default class NativeDriver extends ModsPlus {
               await this.discoverSource(cx);
             } else if (request.action === "details") {
               await this.showDetails(this.packages.find(pkg => pkg.id === request.package), cx);
+            } else if (request.action === "installed") await this.showInstalled(cx);
+            else if (request.action === "installed-details") {
+              const row = this.installed.packages.find(pkg => pkg.id === request.package);
+              await this.showDetails(this.installedSelection(row), cx);
+            } else if (request.action === "return") this.back(cx);
+            else if (request.action === "catalog-position") {
+              this.collection = "community";
+              this.tab = "mod";
+              this.importOpen = false;
+              this.message = null;
+              this.search.set_value(request.query);
+              this.query = request.query;
+              this.syncCards(cx);
+              this.catalogScroll.scroll_to_item(request.item);
             } else if (request.action === "review") await this.reviewPackage(this.selected, cx);
             else if (request.action === "install") await this.installPackage(this.selected, cx);
             else if (request.action === "enable") await this.enablePackage(this.selected, cx);
@@ -42,7 +57,9 @@ export default class NativeDriver extends ModsPlus {
     });
   }
 
-  async helper(args) {
+  async helper(args, cx, onProgress, mediaSource) {
+    if (this.attention && (args[0] === "installed" || args[0] === "catalog" || args[0] === "media" ||
+        (args[0] === "details" && args[2] === "--installed"))) return super.helper(args, cx, onProgress, mediaSource);
     const result = await exec("python3", ["-B", `${appHome()}/mods/mods-plus-driver/fixture-helper.py`,
       "--app-home", appHome(), "--json", ...args]);
     if (result.code) throw new Error((result.stderr || result.stdout).trim().split("\n").pop());
@@ -52,7 +69,9 @@ export default class NativeDriver extends ModsPlus {
   render(cx) {
     const element = super.render(cx);
     const text = JSON.stringify({ view: this.view, busy: this.busy, message: this.message,
-      selected: this.selected, review: this.review, packages: this.packages, colors: theme() });
+      selected: this.selected, review: this.review, packages: this.packages, colors: theme(),
+      installed: this.installed, installedError: this.installedError, query: this.query,
+      limit: this.limit, badge: shared("mods-plus.updates")?.count });
     if (this.control && text !== this.recorded && !this.recording) {
       this.recording = true;
       cx.spawn(async () => {

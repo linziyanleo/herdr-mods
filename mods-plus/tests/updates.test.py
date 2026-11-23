@@ -33,8 +33,8 @@ class UpdatesTest(unittest.TestCase):
         return pkg_id
 
     def test_parallel_sources_and_candidates_with_partial_failure(self):
-        ids = [self.package(name) for name in ("one", "two", "offline")]
-        fetch_barrier = threading.Barrier(3, timeout=5)
+        ids = [self.package(name) for name in ("one", "two", "offline", "steady")]
+        fetch_barrier = threading.Barrier(4, timeout=5)
         download_barrier = threading.Barrier(2, timeout=5)
 
         def tree(repo, branch, refresh=False):
@@ -43,7 +43,7 @@ class UpdatesTest(unittest.TestCase):
             name = repo.split("/")[-1]
             if name == "offline":
                 raise OSError("network unavailable")
-            return {"HEAD": "new-revision", f"{name}/mods/{name}/main.js": self.sha2}
+            return {"HEAD": "new-revision", f"{name}/mods/{name}/main.js": self.sha1 if name == "steady" else self.sha2}
 
         def blob(repo, sha):
             download_barrier.wait()
@@ -58,6 +58,23 @@ class UpdatesTest(unittest.TestCase):
         for name in ("one", "two", "offline"):
             self.assertEqual((Path(self.temp.name) / "mods" / name / "main.js").read_bytes(), self.v1)
         self.assertEqual(helper.PackageManager(self.temp.name).get_settings()["prepared_updates_count"], 2)
+        reopened = helper.PackageManager(self.temp.name)
+        reopened.cache_only = True
+        inventory = helper.gallery.installed_packages(reopened)
+        rows = {row["id"]: row for row in inventory["packages"]}
+        self.assertEqual(inventory["cache"], "incomplete")
+        self.assertEqual(rows[ids[0]]["check"]["state"], "prepared")
+        self.assertEqual(rows[ids[0]]["candidate"]["commit"], "new-revision")
+        self.assertEqual(rows[ids[2]]["check"]["state"], "failed")
+        self.assertEqual(rows[ids[2]]["check"]["error"], "network unavailable")
+        self.assertEqual(rows[ids[3]]["check"]["state"], "unchanged")
+        broken = Path(reopened.updates_dir) / ids[0].replace("/", "-") / "candidate/mods/one/main.js"
+        broken.write_text("changed after validation")
+        reopened.records[ids[2]]["commit"] = "different-baseline"
+        rows = {row["id"]: row for row in helper.gallery.installed_packages(reopened)["packages"]}
+        self.assertIsNone(rows[ids[0]]["candidate"])
+        self.assertIn("Prepared update cache unavailable or changed", rows[ids[0]]["issues"])
+        self.assertEqual(rows[ids[2]]["check"]["state"], "unknown")
 
     def test_shared_repo_fetched_once_and_stale_candidates_cleared(self):
         ids = [self.package(name, "owner/suite") for name in ("one", "two")]

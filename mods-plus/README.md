@@ -16,6 +16,14 @@ Add from GitHub accepts `owner/repo[/folder]` or an HTTPS GitHub repository or d
 
 Import supports public repositories on their default branch. The selected branch remains the source for later update checks. Other hosts, non-default refs, ambiguous URLs, encoded paths, symlinks and submodules are unsupported. Use shorthand when the default branch name contains `/`. Each package needs `RECIPE.md` and runtime mods or layouts. Direct imports show source links and recipe text without downloading unmoderated preview images.
 
+## Installed packages
+
+Open Installed packages in Plugins to see prepared updates, local changes, conflicts and failed checks. Rows show active or stored status and any recorded source, branch and revisions. Select a row for details, including managed layouts and shortcuts, any cached source matches, and the existing update review when a candidate is available.
+
+Opening the view reads local evidence without checking upstream. It marks stale or incomplete source caches and reports each package's last recorded check for its installed revision. Built-in entries are identified, and ambiguous matches remain unassigned.
+
+[Installed packages preview](installed-packages-preview.png), captured in the disposable native fixture.
+
 ## Update and remove
 
 Checks download and validate update candidates without changing active files. Review update shows the prepared changes before Apply update. A three-way merge preserves compatible local edits; conflicts or changes since review block application. Mods Plus backs up managed files before changing them.
@@ -53,7 +61,7 @@ To install manually:
 
 Catalog loading remains cache-first with concurrent metadata feeds, 24-card pages and four-card image batches. Cached content remains visible during refresh or failure, with freshness/error text. Shared image URLs within a batch download once; newly revealed pages get first image priority. Derived filtering/sorting and card views are retained across unrelated renders. Pagination bounds work; the gallery is not a virtualized grid.
 
-Short native opacity transitions use the macOS reduced-motion preference. Unknown/unsupported hosts stay static; `props.motion: false` explicitly keeps a disposable/layout instance static. No JavaScript frame timer is used. Search/filter state and native catalog scroll survive opening details and returning.
+Short native opacity transitions use the macOS reduced-motion preference. Unknown/unsupported hosts stay static; `props.motion: false` explicitly keeps a disposable/layout instance static. No JavaScript frame timer is used. Search, filters and catalog scroll survive returning from details or Installed packages.
 
 ```sh
 python3 mods-plus/tests/helper.test.py
@@ -73,6 +81,8 @@ The jobs suite includes a real 31-second operation. UI event tests require Node.
 Images publish cumulative progress through the existing batch job's atomic receipt. Fast preview/avatar files appear while a slow peer is still downloading; four-card batches and at most four download workers remain. Status polling stays at 500ms with no per-image jobs. Run `python3 mods-plus/tests/progressive-media.py --expect-progress` for a real curl cold/warm test with one 1s asset and three 20ms assets, including job/poll counts and valid PNG verification.
 
 For native checks, `node mods-plus/tests/native-fixture.mjs` prepares a disposable home and prints its session file. It does not start Herdr or herdr-core. Launch that home with the printed environment, then run `node mods-plus/tests/native-verify.mjs <session.json>`. The driver uses the production view and helper with a local fixture repository. It records results and screenshots. Keep it out of the normal app home.
+
+For Installed packages, prepare the fixture with `node mods-plus/tests/native-fixture.mjs --attention`, launch that home in the background, create a disposable space, and run `node mods-plus/tests/native-attention.mjs <session.json>`. This opens the Plugins overlay with `mod.open` and captures the catalog, installed view and details with `herdr-app shot`.
 
 See the [recipe](RECIPE.md) for implementation contracts and acceptance criteria. The [verification record](../docs/plans/mods-plus.md#review-and-direct-import-2026-11-06) covers the combined review, import and background-task implementation. Physical input and additional sizing/theme combinations remain unverified for this release.
 

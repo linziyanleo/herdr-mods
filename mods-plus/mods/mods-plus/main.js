@@ -42,7 +42,7 @@ export default class ModsPlus extends View {
     }
 
     // Overlay dialog
-    this.view = "catalog"; // "catalog" | "details" | "settings"
+    this.view = "catalog";
     this.tab = "mod"; // "mod" | "layout"
     this.filter = "all"; // "all" | "installed" | "not_installed"
     this.query = "";
@@ -173,6 +173,33 @@ export default class ModsPlus extends View {
     if (current()) this.loadMedia(cx);
   }
 
+  async showInstalled(cx) {
+    this.view = "installed";
+    this.installed = null;
+    this.installedError = null;
+    const request = this.installedRequest = {};
+    const current = () => !this.closed && this.view === "installed" && this.installedRequest === request;
+    cx.notify();
+    try {
+      const result = await this.helper(["installed"], cx);
+      if (current()) this.installed = result;
+    } catch (error) {
+      if (current()) this.installedError = error.message;
+    }
+    if (current()) cx.notify();
+  }
+
+  back(cx) {
+    if (this.view === "details" && this.detailsBack === "installed") {
+      cx.spawn(cx => this.showInstalled(cx));
+    } else {
+      this.view = "catalog";
+      this.loadMedia(cx);
+    }
+    this.detailsRequest = null;
+    cx.notify();
+  }
+
   acceptCatalog(result) {
     const previous = new Map(this.packages.map(pkg => [pkg.id, pkg]));
     for (const pkg of result.packages) {
@@ -284,7 +311,7 @@ export default class ModsPlus extends View {
     if (value.prepared_update_ids) {
       const ids = new Set(value.prepared_update_ids);
       this.packages = (this.packages || []).map(pkg => ({ ...pkg, has_update: ids.has(pkg.id) }));
-      if (this.selected) this.selected.has_update = ids.has(this.selected.id);
+      if (this.selected && !this.selected.inventory) this.selected.has_update = ids.has(this.selected.id);
     }
     if (this.intervalInput && !this.intervalDirty) {
       this.intervalUnit = value.interval_unit;
@@ -356,20 +383,33 @@ export default class ModsPlus extends View {
 
   async showDetails(pkg, cx) {
     if (this.busy && this.view !== "details") return;
+    if (this.view !== "details") this.detailsBack = this.view;
     this.view = "details";
     this.review = null;
     this.selected = { ...pkg, ...this.media[pkg.id] };
     this.confirmRemove = null;
     const request = this.detailsRequest = {};
     cx.notify();
+    if (pkg.inventory && !pkg.inventory.recorded) return;
     await this.work(cx, `Loading details for ${pkg.name}…`, async () => {
       try {
-        const details = await this.helper(["details", pkg.id], cx);
-        if (!this.closed && this.view === "details" && this.detailsRequest === request) this.selected = details;
+        const details = await this.helper(["details", pkg.id, ...(pkg.inventory ? ["--installed"] : [])], cx);
+        if (!this.closed && this.view === "details" && this.detailsRequest === request) {
+          this.selected = pkg.inventory ? { ...details, ...this.installedSelection(details.inventory) } : details;
+        }
       } catch (error) {
-        if (!this.closed && this.view === "details" && this.detailsRequest === request) throw error;
+        if (!this.closed && this.view === "details" && this.detailsRequest === request) {
+          if (pkg.inventory) this.selected = { ...this.selected, installed: false, has_update: false };
+          throw error;
+        }
       }
     });
+  }
+
+  installedSelection(row) {
+    const installed = Boolean(row.recorded && row.activation !== "missing");
+    return { id: row.id, name: row.name, kind: row.kind, inventory: row,
+      installed, enabled: row.enabled ?? row.activation === "active", has_update: installed && Boolean(row.candidate) };
   }
 
   // -------------------------------- Actions --------------------------------
@@ -531,8 +571,9 @@ export default class ModsPlus extends View {
           agentCli = "codex";
         }
       }
-      const details = this.selected || await this.helper(["details", pkg.id], cx);
-      const promptText = details.prompt;
+      const promptText = pkg.inventory
+        ? (await this.helper(["prompt", pkg.id], cx)).text
+        : (this.selected || await this.helper(["details", pkg.id], cx)).prompt;
 
       run("tab.new", {
         name: `Activate ${pkg.name}`,
@@ -812,12 +853,81 @@ export default class ModsPlus extends View {
             .text_color(pkg.has_update ? t.accent : t.muted).child(pkg.has_update ? "Update Available" : "Installed")))));
   }
 
+  installedStatuses(row) {
+    const labels = { "built-in": "Built-in", "ambiguous": "Source ambiguous", "match": "Source unconfirmed",
+      "match-record": "Recorded by byte match", "unknown": "Source unknown" };
+    return [labels[row.provenance], row.candidate && "Update Available", row.drift?.length && "Local changes",
+      row.candidate?.conflicts.length && "Conflicts at preparation", row.activation_conflicts?.length && "Activation conflict",
+      ...(row.issues || []), row.check?.state === "failed" && "Last check failed",
+      row.check?.state === "unknown" && "No check result for this revision",
+      row.check?.state === "unchanged" && "No update at last check"].filter(Boolean);
+  }
+
+  installedSource(source, full = false) {
+    return [source.repo && [source.repo, source.subdir].filter(Boolean).join("/"), source.branch,
+      source.commit && `Installed ${full ? source.commit : short(source.commit)}`].filter(Boolean).join(" · ");
+  }
+
+  renderInstalled(t) {
+    const result = this.installed;
+    const cache = { cached: "Source evidence from cache", stale: "Source cache is stale", incomplete: "Source cache unavailable or incomplete" };
+    return [
+      h_flex().gap(8).items_center()
+        .child(this.iconButton(t, "back-installed", "chevron-left", "Back to catalog", cx => this.back(cx)))
+        .child(div().text_size(16).font_semibold().child("Installed packages"))
+        .when(Boolean(result), el => el.child(div().text_color(t.muted).child(`${result.count} ${result.count === 1 ? "needs" : "need"} attention`))),
+      div().text_color(result?.cache === "incomplete" || this.installedError ? t.blocked : t.muted)
+        .child(this.installedError ? `Could not load installed packages · ${this.installedError}`
+          : result ? cache[result.cache] : "Reading installed packages…"),
+      v_flex().id("installed-scroll").flex_1().min_h(0).overflow_y_scrollbar()
+        .children((result?.packages || []).map(row => {
+          const source = row.source ? this.installedSource(row.source) : "";
+          const evidence = [row.kind === "mod" ? "Mod" : "Layout",
+            { active: "Active", stored: "Stored only", missing: "Files missing" }[row.activation], source,
+            row.candidate && `Candidate ${short(row.candidate.commit)}`].filter(Boolean).join(" · ");
+          const status = this.installedStatuses(row).join(" · ");
+          const warning = row.check?.state === "failed" || row.activation_conflicts?.length || row.candidate?.conflicts.length;
+          return v_flex().id(`installed-${row.id}`).role("button").accessibility_label(row.name)
+            .px(10).py(7).gap(3).flex_none().min_w(0).border_b(0.5).border_color(t.border)
+            .hover(s => s.bg(t.hover)).cursor_pointer()
+            .on_click((_e, cx) => cx.spawn(cx => this.showDetails(this.installedSelection(row), cx)))
+            .child(h_flex().gap(10).items_center()
+              .child(div().flex_1().min_w(0).text_size(13).font_medium().truncate().child(row.name))
+              .when(Boolean(status), el => el.child(div().min_w(0).max_w(this.width * 0.6)
+                .text_color(warning ? t.blocked : row.attention ? t.accent : t.muted)
+                .truncate().tooltip(status).child(status))))
+            .child(div().text_color(t.muted).truncate().tooltip(evidence).child(evidence));
+        }))
+        .when(Boolean(result && !result.packages.length), el => el.child(div().p(10).text_color(t.muted).child("No installed packages found."))),
+    ];
+  }
+
+  renderInstalledEvidence(t, row) {
+    const check = row.check;
+    const evidence = [
+      this.installedStatuses(row).join(" · "), row.source && this.installedSource(row.source, true),
+      row.candidate && `Candidate ${row.candidate.commit}`,
+      check?.at && `Last update check · ${new Date(check.at * 1000).toLocaleString()}`, check?.error,
+      ...row.matches?.map(match => `Cached byte match · ${[match.repo, match.subdir].filter(Boolean).join("/")} · ${match.branch} · ${short(match.commit)}`) || [],
+      ...row.drift?.map(item => `${{add: "Added", remove: "Missing", change: "Changed"}[item.status]} · ${item.path}`) || [],
+      ...row.candidate?.conflicts.map(path => `Conflict at preparation · ${path}`) || [],
+      ...row.activation_conflicts || [],
+      row.managed_layouts?.length && `Managed layouts · ${row.managed_layouts.join(", ")}`,
+      row.managed_keys?.length && `Managed shortcuts · ${row.managed_keys.join(", ")}`,
+    ].filter(Boolean);
+    return v_flex().gap(5).p(12).border(0.5).border_color(t.border).rounded(8).flex_none()
+      .child(div().font_medium().child(`${row.kind === "mod" ? "Mod" : "Layout"} · ${
+        { active: "Active", stored: "Stored only", missing: "Files missing" }[row.activation]}`))
+      .children(evidence.map(line => div().text_color(t.muted).child(line)))
+      .when(Boolean(row.compare), el => el.child(h_flex().child(this.button(t, "compare-installed", "Compare revisions", () => this.openUrl(row.compare)))));
+  }
+
   renderDetails(t) {
     const pkg = this.selected;
     if (!pkg) return [div().child("Loading details…")];
     const preview = pkg.preview_path || this.media[pkg.id]?.preview_path;
     const actions = h_flex().gap(8).flex_wrap()
-      .when(pkg.installed === false && !pkg.collision, el => el.child(this.button(t, "review-install", "Review install",
+      .when(!pkg.inventory && pkg.installed === false && !pkg.collision, el => el.child(this.button(t, "review-install", "Review install",
         cx => cx.spawn(cx => this.reviewPackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
       .when(pkg.installed && pkg.kind === "mod" && !pkg.enabled, el => el.child(this.button(t, "enable", "Enable",
         cx => cx.spawn(cx => this.enablePackage(pkg, cx)), {primary: true, disabled: Boolean(this.busy)})))
@@ -835,22 +945,24 @@ export default class ModsPlus extends View {
       .child(h_flex().gap(12).items_center().flex_wrap()
         .child(div().min_w(0).text_size(28).font_medium().child(pkg.name))
         .when(pkg.has_update || pkg.installed, el => el.child(titleActions)))
-      .child(h_flex().gap(16).items_center().child(this.author(t, pkg)).child(this.stars(t, pkg)))
-      .child(div().text_size(16).text_color(t.muted).child(pkg.description))
-      .when((pkg.installed === false && !pkg.collision)
+      .when(Boolean(pkg.author), el => el.child(h_flex().gap(16).items_center().child(this.author(t, pkg)).child(this.stars(t, pkg))))
+      .when(Boolean(pkg.description), el => el.child(div().text_size(16).text_color(t.muted).child(pkg.description)))
+      .when((!pkg.inventory && pkg.installed === false && !pkg.collision)
         || (pkg.installed && (pkg.kind === "layout" || (pkg.kind === "mod" && !pkg.enabled))), el => el.child(actions));
-    const prompt = v_flex().flex_1().min_w(0).gap(12)
+    const prompt = () => v_flex().flex_1().min_w(0).gap(12)
       .child(v_flex().p(18).gap(16).rounded(12).border(0.5).border_color(t.border)
         .child(h_flex().items_center().justify_between().child(div().text_color(t.muted).child("Tell your agent"))
           .child(this.button(t, "copy", "Copy", cx => cx.spawn(cx => this.copyActivationPrompt(pkg, cx)), {disabled: Boolean(this.busy)})))
         .child(div().text_size(12).child(pkg.install_prompt)))
       .child(h_flex().gap(8).flex_wrap()
-        .child(this.button(t, "github", "View on GitHub", () => this.openUrl(pkg.source_url)))
+        .when(Boolean(pkg.source_url), el => el.child(this.button(t, "github", "View on GitHub", () => this.openUrl(pkg.source_url))))
         .child(this.button(t, "agent", "Open Agent tab", cx => cx.spawn(cx => this.openAgentTab(pkg, cx)), {disabled: Boolean(this.busy)})));
     const body = v_flex().id("details-scroll").flex_1().min_h(0).gap(24).overflow_y_scrollbar()
       .when(Boolean(preview) && !this.review, el => el.child(this.preview(t, pkg, this.width - 32,
         Math.min(440, (this.width - 32) * 0.46), true).rounded(12)))
-      .child((this.width > 760 ? h_flex() : v_flex()).gap(24).flex_none().child(summary).child(prompt))
+      .child((this.width > 760 ? h_flex() : v_flex()).gap(24).flex_none().child(summary)
+        .when(Boolean(pkg.install_prompt), el => el.child(prompt())))
+      .when(Boolean(pkg.inventory), el => el.child(this.renderInstalledEvidence(t, pkg.inventory)))
       .when(Boolean(pkg.collision), el => el.child(div().text_color(t.muted).child(pkg.collision)))
       .when(this.review?.id === pkg.id, el => el.child(this.renderReview(t, pkg)))
       .when(Boolean(pkg.recipe), el => el.child(v_flex().gap(12).flex_none()
@@ -858,8 +970,8 @@ export default class ModsPlus extends View {
         .child(TextView.markdown("recipe-" + pkg.id, pkg.recipe).text_size(12))));
     return [
       h_flex().gap(8).items_center()
-        .child(this.iconButton(t, "back", "chevron-left", "Back to catalog", cx => { this.view = "catalog"; this.detailsRequest = null; this.loadMedia(cx); cx.notify(); }))
-        .child(div().text_color(t.muted).child(`${pkg.kind === "layout" ? "layouts" : "mods"} / ${pkg.author}`)),
+        .child(this.iconButton(t, "back", "chevron-left", this.detailsBack === "installed" ? "Back to installed packages" : "Back to catalog", cx => this.back(cx)))
+        .child(div().text_color(t.muted).child(pkg.inventory ? "Installed packages" : `${pkg.kind === "layout" ? "layouts" : "mods"} / ${pkg.author}`)),
       body,
     ];
   }
@@ -1051,6 +1163,8 @@ export default class ModsPlus extends View {
         ? this.renderDetails(t)
         : this.view === "settings"
         ? this.renderSettings(t)
+        : this.view === "installed"
+        ? this.renderInstalled(t)
         : this.renderCatalog(t);
 
     return v_flex()
@@ -1068,8 +1182,8 @@ export default class ModsPlus extends View {
       .text_color(t.foreground)
       .on_key_down((e, cx) => {
         if (e.key === "escape") {
-          if (this.view === "details" || this.view === "settings") {
-            this.view = "catalog";
+          if (this.view !== "catalog") {
+            this.back(cx);
           } else if (props()?.overlay) {
             closeOverlay(props().overlay);
           }
@@ -1084,6 +1198,8 @@ export default class ModsPlus extends View {
           .items_center()
           .child(div().text_size(16).font_semibold().pr(8).child("Plugins"))
           .child(div().flex_1())
+          .when(this.view === "catalog", el => el.child(this.button(t, "installed-packages", "Installed packages",
+            cx => cx.spawn(cx => this.showInstalled(cx)), { disabled: Boolean(this.busy) })))
           .when(this.view === "catalog", el => el.child(this.button(t, "update-all", "Update all",
             cx => cx.spawn(cx => this.updateAll(cx)), { primary: true, disabled: Boolean(this.busy) || this.checking })))
           .child(
@@ -1094,7 +1210,7 @@ export default class ModsPlus extends View {
           )
       )
       .children(content)
-      .when(this.catalogState === "refreshing" || this.catalogState === "stale", el => el.child(div().text_size(12).text_color(t.muted)
+      .when(this.view === "catalog" && (this.catalogState === "refreshing" || this.catalogState === "stale"), el => el.child(div().text_size(12).text_color(t.muted)
         .child(this.catalogState === "refreshing" ? "Cached catalog · refreshing…" : "Cached catalog · refresh incomplete")))
       // Busy & Status message banner
       .when(Boolean(this.busy), (el) =>
@@ -1102,7 +1218,7 @@ export default class ModsPlus extends View {
           h_flex().gap(8).items_center().text_size(12).text_color(t.accent).child(this.spinner()).child(this.busy)
         )
       )
-      .when(Boolean(this.message) && !this.busy, (el) =>
+      .when(this.view !== "installed" && Boolean(this.message) && !this.busy, (el) =>
         el.child(
           div().text_size(12).text_color(t.muted).child(this.message)
         )
