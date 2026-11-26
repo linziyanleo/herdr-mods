@@ -14,7 +14,9 @@ export function workspaceMessage(folders) {
 const KEY = "files-plus.agent-context", WORKSPACES = "multi-root.spaces";
 const LEASE = 30000, RENEW = 10000;
 const token = () => `${Date.now()}-${Math.random()}`;
-const eligible = agent => agent.status !== "blocked";
+// Automatic delivery must never steer an active turn. The core repeats this
+// guard immediately before typing, closing the status-change race.
+const eligible = agent => agent.status === "idle";
 const signature = folders => JSON.stringify(folders.map(folder => folder.path));
 const sessionOf = (agent, terminal) => JSON.stringify([
   agent.address, agent.space, agent.app ?? null, terminal?.created_ms ?? null, terminal?.pid ?? null
@@ -108,9 +110,6 @@ export class AgentWorkspaceContext {
     if (!eligible(agent)) return;
     const id = token(), lease = { owner: this.owner, id, expires: now + LEASE, dispatched: false };
     record = sameSession ? { ...record, claim: lease } : { session: update.session, space: update.space, claim: lease };
-    // Once a different composition is dispatched, an earlier success no
-    // longer proves which composition the agent has most recently received.
-    if (record.delivered !== update.roots) delete record.delivered;
     save(address, record);
     cx.spawn(async cx => {
       const owned = () => {
@@ -123,6 +122,10 @@ export class AgentWorkspaceContext {
         return;
       }
       value = { ...value, claim: { ...value.claim, dispatched: true } };
+      // A receipt remains useful until this different composition is actually
+      // dispatched. Otherwise A → B → A while B is queued would discard A's
+      // receipt and unnecessarily resend it.
+      if (value.delivered !== update.roots) delete value.delivered;
       save(address, value);
       const renew = cx => {
         const value = owned();
@@ -133,7 +136,7 @@ export class AgentWorkspaceContext {
       cx.timer.after(RENEW, renew);
       const attemptedStatus = live.status ?? null;
       try {
-        const result = await hc(["send", address, update.message]);
+        const result = await hc(["send", "--if", "idle", address, update.message]);
         if (result.code !== 0) throw new Error(result.stderr?.trim() || result.stdout?.trim() || `hc send failed (exit ${result.code})`);
         value = owned();
         if (value && this.current(address, update, this.closed)) {

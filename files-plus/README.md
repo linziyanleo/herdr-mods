@@ -28,7 +28,9 @@ Focus an idle agent in a workspace with at least two distinct declared roots. Ri
 
 While Files Plus is loaded, it sends existing and newly observed workspace agents the current root list and broadcasts later root additions or removals. Messages ask agents to inspect every root for applicable harness or instruction files rather than treating the terminal directory as the sole project root.
 
-Delivery uses `hc send`: it submits a normal agent message, not a system-prompt injection or a permission change. Blocked agents are not forced through dialogs. Unsent context remains pending; failed delivery reports the reason and can recover when the agent becomes eligible again. Multiple panel copies coordinate delivery rather than submitting duplicate messages. An agent already working may receive the context after work has started.
+Delivery uses `hc send --if idle`: it submits a normal agent message, not a system-prompt injection or a permission change. Automatic delivery waits for an idle agent; working, blocked and done agents are left pending. The core repeats the idle guard immediately before typing, so a status change cannot steer an active turn. Unsent context remains pending; failed delivery reports the reason and can recover when the agent becomes eligible again. Multiple panel copies coordinate delivery rather than submitting duplicate messages.
+
+Receipts are per observed terminal session, not per Codex or Claude conversation. Multi-root delivery supports local non-Windows workspaces only; Windows and remote workspaces are excluded.
 
 ## Keyboard workflow
 

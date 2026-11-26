@@ -6,6 +6,8 @@ import { runtime } from "./runtime.mjs";
 
 const ok = { code: 0, stdout: "", stderr: "" };
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+const sentTo = call => call[3];
+const sentMessage = call => call[4];
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -38,28 +40,48 @@ async function fixture(t) {
 test("existing and new agents receive additions and removals for their own workspace", async t => {
   const { r, roots, addAgent, mapping } = await fixture(t);
   const { AgentWorkspaceContext, workspaceMessage } = await r.load("agent-context.js");
-  addAgent("agent-1"); addAgent("agent-2", "s1", "working"); addAgent("other", "s2");
+  addAgent("agent-1"); addAgent("agent-2"); addAgent("other", "s2");
   const context = new AgentWorkspaceContext(); t.after(() => context.close());
   let workspaces = mapping({ s1: [roots.web, roots.api], s2: [roots.other] });
   context.sync(workspaces, r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.map(call => call.slice(0, 2)), [["send", "agent-1"], ["send", "agent-2"], ["send", "other"]]);
-  assert.equal(r.hcCalls[0][2], workspaceMessage(workspaces.s1.folders));
-  assert.match(r.hcCalls[0][2], /look in every listed root for applicable harness or instruction files/);
-  assert.equal(r.hcCalls[2][2], workspaceMessage(workspaces.s2.folders));
+  assert.deepEqual(r.hcCalls.map(sentTo), ["agent-1", "agent-2", "other"]);
+  for (const call of r.hcCalls) assert.deepEqual(call.slice(0, 3), ["send", "--if", "idle"]);
+  assert.equal(sentMessage(r.hcCalls[0]), workspaceMessage(workspaces.s1.folders));
+  assert.match(sentMessage(r.hcCalls[0]), /look in every listed root for applicable harness or instruction files/);
+  assert.equal(sentMessage(r.hcCalls[2]), workspaceMessage(workspaces.s2.folders));
 
   addAgent("agent-3");
   context.sync(workspaces, r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.slice(3).map(call => call[1]), ["agent-3"]);
+  assert.deepEqual(r.hcCalls.slice(3).map(sentTo), ["agent-3"]);
   workspaces = mapping({ s1: [roots.web, roots.api, roots.docs], s2: [roots.other] });
   context.sync(workspaces, r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.slice(4).map(call => call[1]), ["agent-1", "agent-2", "agent-3"]);
-  for (const call of r.hcCalls.slice(4)) assert.equal(call[2], workspaceMessage(workspaces.s1.folders));
+  assert.deepEqual(r.hcCalls.slice(4).map(sentTo), ["agent-1", "agent-2", "agent-3"]);
+  for (const call of r.hcCalls.slice(4)) assert.equal(sentMessage(call), workspaceMessage(workspaces.s1.folders));
   workspaces = mapping({ s1: [roots.web, roots.docs], s2: [roots.other] });
   context.sync(workspaces, r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.slice(7).map(call => call[1]), ["agent-1", "agent-2", "agent-3"]);
-  for (const call of r.hcCalls.slice(7)) assert.equal(call[2], workspaceMessage(workspaces.s1.folders));
+  assert.deepEqual(r.hcCalls.slice(7).map(sentTo), ["agent-1", "agent-2", "agent-3"]);
+  for (const call of r.hcCalls.slice(7)) assert.equal(sentMessage(call), workspaceMessage(workspaces.s1.folders));
   context.sync(workspaces, r.cx); await r.drain();
   assert.equal(r.hcCalls.length, 10);
+});
+
+test("automatic delivery waits for an idle agent and asks the core to enforce that status", async t => {
+  const { r, roots, addAgent, mapping } = await fixture(t);
+  const { AgentWorkspaceContext } = await r.load("agent-context.js");
+  const working = addAgent("working", "s1", "working");
+  const blocked = addAgent("blocked", "s1", "blocked");
+  const done = addAgent("done", "s1", "done");
+  const workspaces = mapping({ s1: [roots.web, roots.api] });
+  const context = new AgentWorkspaceContext(); t.after(() => context.close());
+  context.sync(workspaces, r.cx); await r.drain();
+  assert.equal(r.hcCalls.length, 0);
+  for (const agent of [working, blocked, done]) {
+    agent.status = "idle";
+    r.terminals.find(terminal => terminal.address === agent.address).status = "idle";
+    context.sync(workspaces, r.cx); await r.drain();
+  }
+  assert.deepEqual(r.hcCalls.map(sentTo), ["working", "blocked", "done"]);
+  for (const call of r.hcCalls) assert.deepEqual(call.slice(0, 3), ["send", "--if", "idle"]);
 });
 
 test("failed sends expose the reason and retry once after blocked becomes idle", async t => {
@@ -81,7 +103,7 @@ test("failed sends expose the reason and retry once after blocked becomes idle",
   r.terminals.find(terminal => terminal.address === agent.address).status = "idle";
   context.sync(workspaces, r.cx); await r.drain();
   assert.equal(r.hcCalls.length, 2);
-  assert.equal(r.hcCalls[1][2], r.hcCalls[0][2]);
+  assert.equal(sentMessage(r.hcCalls[1]), sentMessage(r.hcCalls[0]));
   context.sync(workspaces, r.cx); await r.drain();
   assert.equal(r.hcCalls.length, 2);
 });
@@ -99,12 +121,12 @@ test("separate panel module copies share delivery ownership across close and rel
   t.after(() => { if (!closed) { first.close(); second.close(); } });
   await r.drain();
   first.render(r.cx); second.render(r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.map(call => call[1]), ["agent-1", "agent-2"]);
-  for (const call of r.hcCalls) assert.equal(call[2], workspaceMessage(workspaces.s1.folders));
+  assert.deepEqual(r.hcCalls.map(sentTo), ["agent-1", "agent-2"]);
+  for (const call of r.hcCalls) assert.equal(sentMessage(call), workspaceMessage(workspaces.s1.folders));
   workspaces = mapping({ s1: [roots.web, roots.docs] });
   second.render(r.cx); first.render(r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.slice(2).map(call => call[1]), ["agent-1", "agent-2"]);
-  for (const call of r.hcCalls.slice(2)) assert.equal(call[2], workspaceMessage(workspaces.s1.folders));
+  assert.deepEqual(r.hcCalls.slice(2).map(sentTo), ["agent-1", "agent-2"]);
+  for (const call of r.hcCalls.slice(2)) assert.equal(sentMessage(call), workspaceMessage(workspaces.s1.folders));
   first.close(); second.close(); closed = true;
   const { default: Reloaded } = await r.registry()("main.js");
   const reloaded = new Reloaded(); reloaded.init({}, r.cx); t.after(() => reloaded.close());
@@ -150,6 +172,46 @@ test("closing an owner with an in-flight send cancels its queued replacement", a
   assert.equal(r.hcCalls.length, 1);
 });
 
+test("a receipt survives A to B to A before B dispatches", async t => {
+  const { r, roots, addAgent, mapping } = await fixture(t);
+  const { AgentWorkspaceContext } = await r.load("agent-context.js");
+  addAgent("agent-1");
+  const context = new AgentWorkspaceContext(); t.after(() => context.close());
+  let workspaces = mapping({ s1: [roots.web, roots.api] });
+  context.sync(workspaces, r.cx); await r.drain();
+  assert.equal(r.hcCalls.length, 1);
+  workspaces = mapping({ s1: [roots.web, roots.docs] });
+  context.sync(workspaces, r.cx);
+  workspaces = mapping({ s1: [roots.web, roots.api] });
+  context.sync(workspaces, r.cx); await r.drain();
+  assert.equal(r.hcCalls.length, 1);
+  assert.equal(r.shared["files-plus.agent-context"]["agent-1"].delivered, JSON.stringify([roots.web, roots.api]));
+});
+
+test("dispatched leases renew and an expired foreign lease can be taken over", async t => {
+  const { r, roots, addAgent, mapping } = await fixture(t);
+  const { AgentWorkspaceContext } = await r.load("agent-context.js");
+  addAgent("agent-1");
+  const reply = deferred();
+  r.hooks.hc = () => reply.promise;
+  const context = new AgentWorkspaceContext(); t.after(() => context.close());
+  const workspaces = mapping({ s1: [roots.web, roots.api] });
+  context.sync(workspaces, r.cx); await nextTurn();
+  const record = r.shared["files-plus.agent-context"]["agent-1"];
+  const shortExpiry = Date.now() + 1;
+  record.claim.expires = shortExpiry;
+  r.timers.find(timer => timer.ms === 10000 && !timer.repeat).fn(r.cx);
+  assert.ok(r.shared["files-plus.agent-context"]["agent-1"].claim.expires > shortExpiry + 20000);
+  context.close(); reply.resolve(ok); await r.drain();
+
+  r.shared["files-plus.agent-context"] = { "agent-1": { claim: { owner: "lost", id: "claim", expires: Date.now() - 1, dispatched: true } } };
+  const replacement = new AgentWorkspaceContext(); t.after(() => replacement.close());
+  r.hooks.hc = null;
+  replacement.sync(workspaces, r.cx); await r.drain();
+  assert.equal(r.hcCalls.length, 2);
+  assert.equal(sentTo(r.hcCalls[1]), "agent-1");
+});
+
 test("deferred sends serialize rapid changes and acknowledge only the composition actually sent", async t => {
   const { r, roots, addAgent, mapping } = await fixture(t);
   const { AgentWorkspaceContext, workspaceMessage } = await r.load("agent-context.js");
@@ -164,7 +226,7 @@ test("deferred sends serialize rapid changes and acknowledge only the compositio
   const firstMessage = workspaceMessage(workspaces.s1.folders);
   context.sync(workspaces, r.cx); other.sync(workspaces, r.cx); await nextTurn();
   assert.equal(r.hcCalls.length, 1);
-  assert.equal(r.hcCalls[0][2], firstMessage);
+  assert.equal(sentMessage(r.hcCalls[0]), firstMessage);
   workspaces = mapping({ s1: [roots.web, roots.docs] });
   context.sync(workspaces, r.cx); other.sync(workspaces, r.cx);
   workspaces = mapping({ s1: [roots.api, roots.docs] });
@@ -172,7 +234,7 @@ test("deferred sends serialize rapid changes and acknowledge only the compositio
   assert.equal(r.hcCalls.length, 1);
   firstReply.resolve(ok); await nextTurn();
   assert.equal(r.hcCalls.length, 2);
-  assert.equal(r.hcCalls[1][2], workspaceMessage(workspaces.s1.folders));
+  assert.equal(sentMessage(r.hcCalls[1]), workspaceMessage(workspaces.s1.folders));
   context.sync(workspaces, r.cx); await nextTurn();
   assert.equal(r.hcCalls.length, 2);
   latestReply.resolve(ok); await r.drain();
@@ -187,7 +249,7 @@ test("panel focus and browsing changes do not broadcast workspace updates", asyn
   const { default: Files } = await r.load("main.js");
   const panel = new Files(); panel.init({}, r.cx); t.after(() => panel.close());
   await r.drain(); panel.render(r.cx); await r.drain();
-  assert.deepEqual(r.hcCalls.map(call => call[1]), ["agent-1", "other"]);
+  assert.deepEqual(r.hcCalls.map(sentTo), ["agent-1", "other"]);
   r.focus.cwd = roots.api; r.panes[0].cwd = roots.api;
   panel.render(r.cx); await r.drain();
   r.picked = roots.docs;
