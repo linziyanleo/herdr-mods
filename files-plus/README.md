@@ -24,6 +24,14 @@ Up/down selects a result. A click uses the chosen opening location. Enter uses t
 
 Focus an idle agent in a workspace with at least two distinct declared roots. Right-click a workspace root in Files Plus and choose **Paste workspace roots to agent**. The list goes into that agent's input as one editable line. Review it and submit it when ready.
 
+## Multi-root agent context
+
+While Files Plus is loaded, it sends existing and newly observed workspace agents the current root list and broadcasts later root additions or removals. Messages ask agents to inspect every root for applicable harness or instruction files rather than treating the terminal directory as the sole project root.
+
+Delivery uses `hc send --if idle`: it submits a normal agent message, not a system-prompt injection or a permission change. Automatic delivery waits for an idle agent; working, blocked and done agents are left pending. The core repeats the idle guard immediately before typing, so a status change cannot steer an active turn. Unsent context remains pending; failed delivery reports the reason and can recover when the agent becomes eligible again. Multiple panel copies coordinate delivery rather than submitting duplicate messages.
+
+Receipts are per observed terminal session, not per Codex or Claude conversation. Multi-root delivery supports local non-Windows workspaces only; Windows and remote workspaces are excluded.
+
 ## Keyboard workflow
 
 Use the [Files / Preview / terminal example](../preview-plus/examples/files-preview-agent.json) with both packages. It contains no personal paths or shortcuts; copying or selecting it is an explicit setup action. The entry command `files-plus.search` focuses search. Bind it only to a free key in your own cloned layout/setup if desired.

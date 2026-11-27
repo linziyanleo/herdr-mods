@@ -12,6 +12,7 @@ import { dragMove } from "./drag.js";
 import { OPEN_LOCATION, openLocation } from "./preferences.js";
 import { findOpenFile, focusOpenFile } from "./open-files.js";
 import { FileSearch } from "./search.js";
+import { AgentWorkspaceContext } from "./agent-context.js";
 
 import { browsingFolder, setBrowsingFolder } from "./browsing.js";
 
@@ -117,6 +118,7 @@ export class FilesPanel extends View {
     this.lookKey = JSON.stringify(this.look);
     this.treeView = cx.new(TreeView, { chunks: [], panel: this, look: this.look });
     this.search = new FileSearch(this, directory, cx);
+    this.agentContexts = new AgentWorkspaceContext();
     this.handle = cx.focus_handle();
     this.commands(cx);
     this.revision = shared(REVISION);
@@ -575,6 +577,7 @@ export class FilesPanel extends View {
     });
   }
   renderPanel(cx) {
+    if (!checking()) this.agentContexts.sync(shared("multi-root.spaces"), cx);
     const loc = this.location();
     this.scheduleFit(cx);
     const activeRoot = rootOf(loc.cwd, this.rootInfo || this.workspace?.folders || [])?.path;
@@ -635,6 +638,7 @@ export class FilesPanel extends View {
   }
   close() {
     this.folderPicker = null; this.context = null; this.generation = {}; this.pending = new Map(); this.previewRequest = null; this.openRequest = null; this.fitTimer = null; this.exitTimer = null;
+    this.agentContexts?.close();
     if (this.watches) this.stopWatches();
     this.configWatch?.pending?.cancel(); this.configWatch = null; this.code?.release(); this.treeView?.release(); for (const chunk of this.chunks || []) chunk.entity.release();
     this.search?.close();

@@ -111,6 +111,12 @@ The paste uses the same focus and clipboard flow as **Add to agent (@)**. It ins
 
 The multi-root agent context proposal comes from [@teomurgi's PR #9](https://github.com/linziyanleo/herdr-mods/pull/9).
 
+While the Files Plus panel is loaded, it sends existing and newly observed agents in a declared workspace the current root list. Root additions, removals and workspace-file reloads that change the list broadcast the revised composition to that workspace's agents. The message identifies the workspace as multi-root and asks agents to check every root for applicable harness or instruction files. It uses `hc send --if idle`, which submits a normal message rather than modifying an agent's system prompt or filesystem permissions. Automatic delivery waits for an idle agent; working, blocked and done agents remain pending. The core repeats the idle guard immediately before typing, so a status change cannot steer an active turn or force a blocked dialog.
+
+Delivery receipts and expiring ownership claims are shared between panel copies and survive mod reloads. Unchanged successful compositions are not resubmitted for the same observed terminal session, identified by address, space, reported app and terminal creation time/PID when available; this is not an agent-conversation identifier. Failed sends include the transport error in a notification and remain pending until the agent's status changes or its roots change; unchanged failures do not retry on every redraw. Queued sends revalidate the live agent, session, workspace composition and owner before dispatch. A receipt is invalidated only at dispatch of a different root composition, so a queued A → B → A change preserves the A receipt. Root changes during a send are serialized, with the latest observed composition sent afterward. Multi-root delivery supports local non-Windows workspaces only; Windows and remote workspaces are excluded.
+
+Closing a panel cancels its queued deliveries but cannot revoke an already-dispatched `hc send`. An in-flight claim stays reserved until completion or its 30-second lease expires; active senders renew every 10 seconds. After a crash or a lost completion, a takeover may resend an update whose receipt is unknown. This is not an exactly-once transport guarantee. Receipts identify sessions by address, space, reported app, and terminal creation time/PID when available; Herdr does not provide a universal agent conversation ID.
+
 ### Adaptive panel fitting
 
 Set the panel block's props to `{ "fit": { "node": "panel", "min": 280, "max": 0.38 } }` to fit a known, named layout node. Without `fit.node`, Files Plus never resizes the layout. `max` is a window-width ratio for `0 < max <= 1`, or a logical pixel cap above 1; the default ratio is 0.38, with a 560px fallback when viewport dimensions are unavailable. Respect the node's own min/max and reserve 360px for the main workspace after the sidebar.
@@ -129,7 +135,7 @@ files-plus/
   licenses/
   mods/files-plus/
     LICENSE, THIRD_PARTY.md, licenses/
-    main.js, workspace.js, tree.js, metrics.js, fit.js, drag.js
+    main.js, workspace.js, agent-context.js, tree.js, metrics.js, fit.js, drag.js
     roots.js, config.js, actions.js, appearance.js, preferences.js, open-files.js, search.js
     mod.json, file.svg, folder.svg, chevron-down.svg, chevron-right.svg, arrow-left.svg, plus.svg, settings.svg
   tests/
@@ -137,7 +143,7 @@ files-plus/
 
 Create `mods/files-plus/main.js` with a default-exported class that extends GPUI `View`. Route `props().role`: absent for the panel, `menu` for a pointer popup, `dialog` for a modal name, confirmation or root action, `settings` for the open-location dialog, `preview` for a fixed file viewer, and `drag` for the transparent full-window drag surface. Pass a captured target and an action into overlays. The overlay id comes from `props().overlay`.
 
-Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and direct Herdr appearance reads in `appearance.js`. Do not call `set_theme` or change the shared theme from this mod. There are no cross-mod code imports. The package manifest is:
+Keep tree state, incremental local watchers, Git marks and read-only previews in `workspace.js`. `agent-context.js` sends workspace root context to every agent in a declared workspace when an agent appears or its root list changes. `tree.js` flattens visible rows and retains groups of 100 rows in child views inside a native scrolling container. Unrelated live updates do not rebuild rows. Local safety polls run every 60 seconds while visible; remote folders poll every 10 seconds. Debounce filesystem bursts by 200ms, list at most four folders concurrently, and throttle Git status to once per repository every two seconds. Cache physical roots and repository discovery until context/config changes or missing-root recovery. Put path and workspace helpers in `roots.js`, guarded config saves in `config.js`, filesystem and terminal actions in `actions.js`, and direct Herdr appearance reads in `appearance.js`. Do not call `set_theme` or change the shared theme from this mod. There are no cross-mod code imports. The package manifest is:
 
 ```json
 {
@@ -150,7 +156,7 @@ Keep tree state, incremental local watchers, Git marks and read-only previews in
 
 No `keys.json` snippet is needed. Bind menu arrows, Enter and Escape to its focus handle; keep ordinary terminal shortcuts unchanged. `search.js` owns the independent scan, retained search input and virtual result list with a native scroll handle. It passes its remaining entry budget to the existing listing in `workspace.js` and leaves tree state to the tree view.
 
-The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
+The current implementation requires Herdr 0.1.16; see the [current verification record](../docs/plans/interaction-performance-implementation.md). Use `cx.spawn`, `cx.timer`, `cx.sleep`, focus handles and clipboard APIs from GPUI; `EditorState`, `Editor`, `InputState`, `Input`, flex builders and SVGs from gpui-base/gpui-kit. Herdr provides live spaces/panes/terminals/agents/focus/settings, `shared`, `setShared`, `checking`, `nextCommand`, `exec`, `hc`, `readTextFile`, `writeTextFile`, cancellable `watchFolder`, `pickFolder`, overlays and `run`. Opening/focus commands include `pane.focus`, `terminal.paste`, `tab.new`, `pane.split` and `layout.select`.
 
 ### Optional panel fitting
 
@@ -191,6 +197,13 @@ Use these persisted shared contracts. Compare values before writing, because a s
 "files-plus.revision": number
 "files-plus.open-location": "tab" | "pane" | "internal" // missing/invalid defaults to tab
 "preview-plus.target": Record<SpaceId, { file: string; root: string; on: string | null }>
+"files-plus.agent-context": Record<AgentAddress, {
+  session: string;
+  space: SpaceId;
+  delivered?: string; // JSON root-path signature
+  failed?: { roots: string; status: string | null };
+  claim?: { owner: string; id: string; expires: number; dispatched: boolean };
+}>
 ```
 
 `path` is resolved and absolute; `source` retains the declared spelling. `file: null` denotes an unsaved workspace. Retain the ten most recent saved config paths. Prune closed workspace mappings only when `machines()` reports the local layout as ready.
@@ -305,3 +318,9 @@ Final-code validation: all 216 Node tests passed with `node --experimental-vm-mo
 `node --experimental-vm-modules --test files-plus/tests/workspace-context.test.mjs` exercises menu capture, distinct roots, eligible agents, stale destinations, cancellation and the exact pasted text. The serial repository suite passed 242 tests, and `herdr-app check files-plus/mods/files-plus` passed on macOS with Herdr 0.1.16.
 
 `native-session.mjs --background` ran the native menu in a disposable app home. Raw terminal recorders used [Herdr's OSC 7501 status protocol](https://herdr.dev/core/#status-from-the-source) to report idle or working. The idle recorder received both root paths on one line without Enter. Opening and closing a menu produced no input. A switched tab or space and a closed terminal rejected the captured target. `herdr-app shot` showed the action with two roots and an idle recorder, and its absence with one root or a working recorder. Physical pointer input, real coding agents and remote hosts were outside this run.
+
+### Agent workspace delivery verification (2026-11-19)
+
+`node --experimental-vm-modules --test files-plus/tests/agent-context.test.mjs files-plus/tests/panel.test.mjs files-plus/tests/workspace.test.mjs files-plus/tests/browsing.test.mjs files-plus/tests/location.test.mjs` passed all 47 tests. Seven agent-context groups cover initial/new agents, additions/removals, failure reasons and status-transition recovery, independent panel module copies sharing delivery ownership, reload deduplication, queued cancellation, in-flight root changes, and focus/browsing isolation. The restored `home` and `appHome` host exports are exercised through production FilesPanel imports and behavior.
+
+These checks use a simulated Herdr host and mocked `hc`; no messages were sent to real agents. After updating the local Linux app from Herdr 0.1.7 to the official 0.1.16 release, `herdr-app check files-plus/mods/files-plus` passed. The existing core remained at 0.1.13. No Files Plus runtime installation, live-window interaction acceptance, screenshot or exactly-once transport verification is claimed.
