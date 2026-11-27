@@ -132,12 +132,12 @@ def normalize(item, kind, collection="community"):
     }
 
 
-def official_packages(manager):
+def official_packages(manager, *, refresh=False):
     manager.catalog_errors = []
 
     def cached(name, fetch):
         try:
-            return manager._cached(f"official-{name}.json", 3600, fetch)
+            return manager._cached(f"official-{name}.json", 3600, fetch, refresh=refresh)
         except Exception as exc:
             manager.stale = True
             manager.catalog_errors.append(str(exc))
@@ -285,9 +285,9 @@ def local_state(manager, pkg, local_files=None):
     return state
 
 
-def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
+def build_catalog(manager, query="", kind_filter=None, status_filter="all", *, refresh=False):
     local_files = lru_cache(maxsize=None)(manager.local_files)
-    packages = available_packages(manager)
+    packages = available_packages(manager, refresh=refresh)
     cache_only = manager.cache_only
     # Incomplete feeds cannot establish new ownership. Avoid serial GitHub
     # lookups after a gallery failure and use whatever file evidence is cached.
@@ -338,9 +338,9 @@ def build_catalog(manager, query="", kind_filter=None, status_filter="all"):
     return sorted(packages, key=lambda p: (p["installed"] is not True, -p["stars"], p["name"]))
 
 
-def available_packages(manager):
+def available_packages(manager, *, refresh=False):
     try:
-        packages = official_packages(manager)
+        packages = official_packages(manager, refresh=refresh)
     except Exception as exc:
         manager.catalog_errors = [str(exc)]
         packages = []

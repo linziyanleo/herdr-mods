@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-27
+
+### Mods Plus
+
+- Sort Newest by the catalog's push timestamps, including packages without a preview. Use Refresh catalog to fetch current listings while keeping cached results available if a feed fails.
+
 ## 2026-11-23
 
 ### Files Plus

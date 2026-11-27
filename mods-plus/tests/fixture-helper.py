@@ -33,6 +33,6 @@ class FixtureManager(helper.PackageManager):
 
 
 helper.PackageManager = FixtureManager
-helper.gallery.official_packages = lambda manager: []
+helper.gallery.official_packages = lambda manager, **kwargs: []
 if __name__ == "__main__":
     helper.main()

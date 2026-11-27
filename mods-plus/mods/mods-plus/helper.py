@@ -256,9 +256,9 @@ class PackageManager:
         except Exception as e:
             raise LookupError(f"GitHub API error for {path}: {e}")
 
-    def _cached(self, filename: str, max_age: float, fetcher):
+    def _cached(self, filename: str, max_age: float, fetcher, *, refresh=False):
         path = os.path.join(self.cache_dir, filename)
-        if os.path.isfile(path) and time.time() - os.path.getmtime(path) < max_age:
+        if not refresh and os.path.isfile(path) and time.time() - os.path.getmtime(path) < max_age:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
@@ -281,7 +281,8 @@ class PackageManager:
                     data = json.load(f)
                     with open(path, "w", encoding="utf-8") as out:
                         json.dump(data, out)
-                    return data
+                    if not refresh:
+                        return data
             except (OSError, ValueError):
                 pass
 
@@ -335,8 +336,8 @@ class PackageManager:
 
     # -------------------------------- Catalog & Association --------------------------------
 
-    def build_catalog(self, query="", kind_filter=None, status_filter="all"):
-        return gallery.build_catalog(self, query, kind_filter, status_filter)
+    def build_catalog(self, query="", kind_filter=None, status_filter="all", *, refresh=False):
+        return gallery.build_catalog(self, query, kind_filter, status_filter, refresh=refresh)
 
     def associate(self, proposals):
         # Recheck ownership under the existing lock, including overlapping records.
@@ -1340,7 +1341,9 @@ def main():
     p_catalog.add_argument("--query", "-q", default="")
     p_catalog.add_argument("--kind", choices=["mod", "layout"])
     p_catalog.add_argument("--filter", choices=["all", "installed", "not_installed"], default="all")
-    p_catalog.add_argument("--cached", action="store_true", help="Return cached catalog without network access")
+    cache_mode = p_catalog.add_mutually_exclusive_group()
+    cache_mode.add_argument("--cached", action="store_true", help="Return cached catalog without network access")
+    cache_mode.add_argument("--refresh", action="store_true", help="Fetch official feeds even if the cache is fresh")
 
     p_media = sub.add_parser("media")
     p_media.add_argument("ids", help="JSON array of package IDs")
@@ -1426,7 +1429,7 @@ def main():
         if args.command == "installed":
             result = gallery.installed_packages(mgr)
         elif args.command == "catalog":
-            pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter)
+            pkgs = mgr.build_catalog(query=args.query, kind_filter=args.kind, status_filter=args.filter, refresh=args.refresh)
             result = {"packages": pkgs, "count": len(pkgs), "warnings": getattr(mgr, "catalog_errors", []), "stale": mgr.stale}
         elif args.command == "media":
             def progress(items):

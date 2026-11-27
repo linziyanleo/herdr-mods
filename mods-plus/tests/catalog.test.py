@@ -99,7 +99,7 @@ class CatalogTests(unittest.TestCase):
             "name": "Panel", "modNames": ["panel"], "headCommit": "revision",
             "previewUrl": "https://assets.herdr.dev/previews/image.png", "stars": 8,
         }, "mod")
-        self.catalog = patch.object(gallery, "official_packages", side_effect=lambda _: [dict(self.pkg)])
+        self.catalog = patch.object(gallery, "official_packages", side_effect=lambda _, **kwargs: [dict(self.pkg)])
         self.catalog.start()
         self.addCleanup(self.catalog.stop)
         self.tree = {"tools/panel/mods/panel/main.js": helper.blob_sha(b"original")}
@@ -240,6 +240,36 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(request.call_args_list.count(call(gallery.EXAMPLES_URL)), 1)
         self.assertEqual(self.manager.catalog_errors, [])
 
+    def test_manual_refresh_replaces_fresh_catalog_and_retains_it_when_offline(self):
+        self.catalog.stop()
+        mods = [{"fullName": "alice/old", "owner": "alice", "name": "Old"}]
+
+        def fetch(url):
+            if url == gallery.EXAMPLES_URL:
+                return example_html("mods", "layouts")
+            if url.endswith("/mods/index.json"):
+                return json.dumps({"mods": mods}).encode()
+            return b'{"layouts": []}'
+
+        def community_names(packages):
+            return sorted(p["name"] for p in packages if p["collection"] == "community")
+
+        with patch.object(gallery, "download", side_effect=fetch) as request:
+            self.assertEqual(community_names(self.manager.build_catalog()), ["Old"])
+            mods.append({"fullName": "alice/new", "owner": "alice", "name": "New"})
+            self.assertEqual(community_names(self.manager.build_catalog()), ["Old"])
+            self.assertEqual(request.call_count, 3)
+            self.assertEqual(community_names(self.manager.build_catalog(refresh=True)), ["New", "Old"])
+            self.assertEqual(request.call_count, 6)
+
+        cache = Path(self.manager.cache_dir) / "official-mods-index.json"
+        snapshot = cache.read_bytes(), cache.stat().st_mtime_ns
+        with patch.object(gallery, "download", side_effect=self.offline):
+            self.assertEqual(community_names(self.manager.build_catalog(refresh=True)), ["New", "Old"])
+        self.assertTrue(self.manager.stale)
+        self.assertTrue(any("Using cached catalog" in warning for warning in self.manager.catalog_errors))
+        self.assertEqual((cache.read_bytes(), cache.stat().st_mtime_ns), snapshot)
+
     def test_cold_offline_warns_once_per_request_without_claiming_cache_use(self):
         self.catalog.stop()
         with patch.object(gallery, "download", side_effect=self.offline) as fetch:
@@ -341,7 +371,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_ambiguous_sources_cannot_be_associated_by_search_or_details(self):
         second = dict(self.pkg, id="bob/suite/tools/panel", repo="bob/suite", name="Other")
-        with patch.object(gallery, "official_packages", side_effect=lambda _: [dict(self.pkg), dict(second)]):
+        with patch.object(gallery, "official_packages", side_effect=lambda _, **kwargs: [dict(self.pkg), dict(second)]):
             self.write("mods/panel/main.js", "original")
             result = self.manager.build_catalog(query="Other")
             self.assertIsNone(result[0]["installed"])

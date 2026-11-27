@@ -161,6 +161,43 @@ test('cached catalog is visible before refresh finishes', async () => {
   assert.equal(view.packages[0].id, 'fresh');
 });
 
+test('Refresh catalog fetches new entries even with a fresh cache', async () => {
+  const { view, click, drain, context } = setup();
+  const cached = { ...importedPackage, collection: 'community', name: 'Panel' };
+  const added = { ...cached, id: 'owner/repo/two', name: 'Panel Two', pushed: '2026-11-27T08:00:00Z' };
+  const calls = [];
+  Object.assign(view, { view: 'catalog', packages: [cached], filter: 'not_installed', sort: 'new', query: 'panel' });
+  view.loadMedia = () => {};
+  view.helper = async args => {
+    calls.push(Array.from(args));
+    return { packages: args.includes('--refresh') ? [cached, added] : [cached], stale: false };
+  };
+  const button = find([view.render(context(true))], 'refresh-catalog');
+  assert.ok(button, 'The catalog needs a refresh action');
+  click(button);
+  await drain();
+  assert.deepEqual(calls, [['catalog', '--cached'], ['catalog', '--refresh']]);
+  assert.deepEqual(Array.from(view.visiblePackages(), pkg => pkg.name), ['Panel Two', 'Panel']);
+  assert.equal(view.query, 'panel');
+  assert.equal(view.filter, 'not_installed');
+});
+
+test('Newest puts later entries first regardless of previews or installed state', () => {
+  const { view } = setup();
+  const base = { ...importedPackage, collection: 'community', stars: 100, pushed: '2026-11-25T00:00:00Z' };
+  view.packages = [
+    { ...base, name: 'Older with preview', preview_url: 'image.png' },
+    { ...base, name: 'Older installed', installed: true },
+    { ...base, name: 'Recent', stars: 0, pushed: '2026-11-27T00:00:00Z' },
+  ];
+  view.sort = 'new';
+  assert.deepEqual(Array.from(view.visiblePackages(), pkg => pkg.name),
+    ['Recent', 'Older installed', 'Older with preview']);
+  view.sort = 'popular';
+  assert.deepEqual(Array.from(view.visiblePackages(), pkg => pkg.name),
+    ['Older installed', 'Older with preview', 'Recent']);
+});
+
 test('failed refresh retains cached data and superseded or closed requests cannot replace it', async () => {
   const { view, context } = setup(); view.loadMedia = () => {};
   view.helper = async args => args.includes('--cached') ? { packages: [importedPackage], stale: true } : Promise.reject(new Error('offline'));

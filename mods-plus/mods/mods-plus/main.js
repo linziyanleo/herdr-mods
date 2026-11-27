@@ -150,7 +150,7 @@ export default class ModsPlus extends View {
     }
   }
 
-  async loadCatalog(cx) {
+  async loadCatalog(cx, refresh = false) {
     const request = this.catalogRequest = {};
     const current = () => !this.closed && this.catalogRequest === request;
     await this.work(cx, "Loading catalog…", async () => {
@@ -159,10 +159,11 @@ export default class ModsPlus extends View {
         if (!current()) return;
         this.acceptCatalog(cached);
         this.syncCards(cx);
-        this.catalogState = cached.stale ? "refreshing" : "fresh";
+        const needsRefresh = refresh || cached.stale;
+        this.catalogState = needsRefresh ? "refreshing" : "fresh";
         cx.notify(); this.loadMedia(cx);
-        if (cached.stale) {
-          const res = await this.helper(["catalog"], cx);
+        if (needsRefresh) {
+          const res = await this.helper(refresh ? ["catalog", "--refresh"] : ["catalog"], cx);
           if (!current()) return;
           this.acceptCatalog(res);
           this.syncCards(cx);
@@ -223,11 +224,12 @@ export default class ModsPlus extends View {
       p.kind === this.tab && p.collection === this.collection &&
       (this.filter === "all" || (this.filter === "installed" ? p.installed === true : p.installed === false)) &&
       `${p.name} ${p.author} ${p.description}`.toLowerCase().includes(query)
-    ).sort((a, b) =>
-      Number(b.installed === true) - Number(a.installed === true) ||
-      Number(!a.preview_url) - Number(!b.preview_url) ||
-      (this.sort === "new" ? b.pushed.localeCompare(a.pushed) : b.stars - a.stars) ||
-      a.name.localeCompare(b.name));
+    ).sort((a, b) => {
+      if (this.sort === "new") return b.pushed.localeCompare(a.pushed) || a.name.localeCompare(b.name);
+      return Number(b.installed === true) - Number(a.installed === true) ||
+        Number(!a.preview_url) - Number(!b.preview_url) || b.stars - a.stars ||
+        a.name.localeCompare(b.name);
+    });
     this.visibleCache = { packages: this.packages, key, value };
     return value;
   }
@@ -814,6 +816,8 @@ export default class ModsPlus extends View {
       .when(Boolean(counts("direct")), el => el.child(this.tabPill(t, "imported", "Imported",
         this.collection === "direct", cx => this.changeFilter("collection", "direct", cx))))
       .child(div().flex_1())
+      .child(this.button(t, "refresh-catalog", "Refresh catalog",
+        cx => cx.spawn(cx => this.loadCatalog(cx, true)), { disabled: Boolean(this.busy) }))
       .child(this.button(t, "import-source", "Add from GitHub", cx => { this.importOpen = !this.importOpen; cx.notify(); }))
       .child(this.iconButton(t, "settings", "settings", "Settings", cx => {
         this.view = "settings"; cx.spawn(cx => this.loadSettings(cx)); cx.notify();
